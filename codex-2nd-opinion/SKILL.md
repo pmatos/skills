@@ -36,11 +36,11 @@ Please provide your independent analysis. Be specific and reference the code dir
 
 ### Step 3: Run Codex
 
-Execute the following command. The `timeout` wrapper enforces a 5-minute limit. Codex writes its response to stdout, which the Bash tool captures directly.
+Execute the following command. Codex writes its response to stdout, which the Bash tool captures directly.
 
 ```bash
 CODEX=$(command -v codex || echo "$HOME/node_modules/.bin/codex") && \
-timeout 300 "$CODEX" exec \
+"$CODEX" exec \
   --full-auto --sandbox read-only --ephemeral \
   - < /tmp/codex-2op-input-$$.txt
 ```
@@ -49,7 +49,7 @@ No `-m` or `-c` flags — the user's `~/.codex/config.toml` already configures `
 
 ### Step 4: Handle Errors
 
-If the command fails (non-zero exit code, timeout, or empty stdout):
+If the command fails (non-zero exit code or empty stdout):
 
 - Report the error clearly to the user.
 - Suggest checking:
