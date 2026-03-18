@@ -19,9 +19,13 @@ Collect everything needed for a self-contained prompt to Codex (which has ZERO c
 - The actual code or content under discussion — read the relevant files using the Read tool. Do NOT summarize; include the real content.
 - Any constraints, requirements, or prior decisions from the conversation.
 
+### Step 1.5: Create Temp File
+
+Run `mktemp /tmp/codex-2op-XXXXXX` via Bash. Remember the returned path (e.g. `/tmp/codex-2op-a8Kx3m`) — you will substitute it into later steps.
+
 ### Step 2: Compose Codex Prompt
 
-Write a fully self-contained prompt to `/tmp/codex-2op-input-$$.txt` (using the shell PID for uniqueness). This file must include:
+Write a fully self-contained prompt to the temp file created above. This file must include:
 
 1. The actual code/file contents (not summaries or references).
 2. Claude's current analysis of the situation.
@@ -42,7 +46,7 @@ Execute the following command. Codex writes its response to stdout, which the Ba
 CODEX=$(command -v codex || echo "$HOME/node_modules/.bin/codex") && \
 "$CODEX" exec \
   --full-auto --sandbox read-only --ephemeral \
-  - < /tmp/codex-2op-input-$$.txt
+  - < /tmp/codex-2op-XXXXXX  # substitute the actual mktemp path here
 ```
 
 No `-m` or `-c` flags — the user's `~/.codex/config.toml` already configures `model=gpt-5.4` and `model_reasoning_effort=xhigh`.
@@ -97,5 +101,5 @@ Then ask the user: **"How would you like to proceed? I can follow either analysi
 Remove the temporary input file:
 
 ```bash
-rm -f /tmp/codex-2op-input-$$.txt
+rm -f /tmp/codex-2op-XXXXXX  # substitute the actual mktemp path here
 ```
