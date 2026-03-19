@@ -40,7 +40,7 @@ Please provide your independent analysis. Be specific and reference the code dir
 
 ### Step 3: Run Codex
 
-Execute the following command. Codex writes its response to stdout, which the Bash tool captures directly.
+Execute the following command. Codex writes its response to stdout, which the Bash tool captures directly. **Use a 600000ms (10 minute) timeout on the Bash tool call** — Codex with xhigh reasoning can take several minutes.
 
 ```bash
 CODEX=$(command -v codex || echo "$HOME/node_modules/.bin/codex") && \
