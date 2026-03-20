@@ -50,7 +50,7 @@ For each PR, assess the risk by checking:
 
 2. **CI status** — Check if CI checks have passed:
    ```bash
-   gh pr checks <number> --json name,state,conclusion
+   gh pr checks <number> --json name,state
    ```
    - All checks passed: Good to merge.
    - Any check failed: Skip and flag.
