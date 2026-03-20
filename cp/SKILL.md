@@ -39,7 +39,7 @@ For each requirement found in Step 1, run the corresponding command via Bash. Ex
 - If a formatter modifies files, stage the changes with `git add` on those files.
 - If any check fails, report the failure to the user and stop. Do **not** commit broken code.
 
-If no requirements were found in CLAUDE.md, skip this step entirely.
+If no requirements were found in CLAUDE.md (or AGENTS.md), skip this step entirely.
 
 ### Step 4: Stage and commit
 
