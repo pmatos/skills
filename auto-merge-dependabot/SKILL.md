@@ -65,8 +65,16 @@ For each PR, assess the risk by checking:
    - Only lockfile and manifest changes (e.g., `package-lock.json`, `Cargo.lock`, `go.sum`, `Gemfile.lock`, `poetry.lock`, `requirements.txt`): Low risk.
    - Source code changes or configuration changes beyond dependency files: Flag for review.
 
+5. **Merge conflicts** — Check if the PR has conflicts:
+   ```bash
+   gh pr view <number> --json mergeable -q '.mergeable'
+   ```
+   - If `CONFLICTING`: Flag for rebase (will comment `@dependabot rebase` in Step 5).
+   - If `MERGEABLE` or `UNKNOWN`: Continue with other checks.
+
 Classify each PR into one of:
-- **SAFE TO MERGE**: Patch/minor bump, CI passes, only dependency file changes.
+- **SAFE TO MERGE**: Patch/minor bump, CI passes, only dependency file changes, no conflicts.
+- **NEEDS REBASE**: Has merge conflicts — will request Dependabot rebase.
 - **NEEDS REVIEW**: Major bump, CI failures/pending, or unexpected file changes.
 
 ### Step 4: Present Review Summary
@@ -87,6 +95,12 @@ Present the review results clearly:
 
 ### Step 5: Merge Safe PRs
 
+For each PR classified as **NEEDS REBASE**, comment to request a rebase:
+
+```bash
+gh pr comment <number> --body "@dependabot rebase"
+```
+
 For each PR classified as **SAFE TO MERGE**, merge it:
 
 ```bash
@@ -95,7 +109,15 @@ gh pr merge <number> --squash --auto
 
 Use `--squash` to keep the commit history clean. Use `--auto` so that GitHub waits for required status checks before merging.
 
-If a merge fails, record the error and continue with the remaining PRs.
+If a merge fails due to merge conflicts, do **not** close the PR. Instead, comment on it to request a rebase:
+
+```bash
+gh pr comment <number> --body "@dependabot rebase"
+```
+
+Record it as "Requested rebase" and continue with the remaining PRs.
+
+For other merge failures (non-conflict errors), record the error and continue.
 
 ### Step 6: Final Report
 
@@ -106,6 +128,9 @@ Present a final summary:
 
 ### Merged
 - #<number>: <title> ✓
+
+### Requested Rebase (Conflicts)
+- #<number>: <title> — commented @dependabot rebase
 
 ### Skipped (Needs Review)
 - #<number>: <title> — <reason>
