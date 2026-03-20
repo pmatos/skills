@@ -8,4 +8,4 @@ Slash command `/2op` that sends conversation context to OpenAI Codex CLI (GPT-5.
 
 ## cp
 
-Slash command `/cp` that commits and pushes changes to the current branch, running only the pre-commit checks described in the project's CLAUDE.md — nothing more, nothing less.
+Slash command `/cp` that commits and pushes changes to the current branch, running only the pre-commit checks described in the project's CLAUDE.md (or AGENTS.md) — nothing more, nothing less.
