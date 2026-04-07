@@ -30,9 +30,18 @@ What it does:
 
 Trigger phrases: `commit and push`, `cp`, `ship it`, `push my changes`.
 
-### Codex Second Opinion
+### `/codex-2nd-opinion` — Codex Second Opinion
 
-This skill has been removed. Use the [openai/codex-plugin-cc](https://github.com/openai/codex-plugin-cc) marketplace plugin instead.
+Invokes OpenAI Codex CLI (GPT-5.4 with xhigh reasoning) to get an independent analysis on any discussion, plan, code, or thought. Presents both perspectives fairly with a structured comparison.
+
+What it does:
+- Gathers full context (code, Claude's analysis, constraints) into a self-contained prompt.
+- Sends it to Codex CLI in read-only sandbox mode.
+- Presents Codex's response alongside a structured comparison: points of agreement, disagreement, honest assessment, and recommended path forward.
+
+Trigger phrases: `get a second opinion`, `ask codex`, `what does GPT think`, `compare with codex`, `2nd opinion`.
+
+**Requires**: [OpenAI Codex CLI](https://github.com/openai/codex) installed and `OPENAI_API_KEY` set.
 
 ### `/auto-merge-dependabot` — Auto-Merge Dependabot PRs
 
