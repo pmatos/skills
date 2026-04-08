@@ -48,7 +48,7 @@ git log --oneline -20
 git branch --show-current
 ```
 
-Check for CLAUDE.md or AGENTS.md in the project root. If found, read its contents and note any project-specific constraints, conventions, or patterns that should inform the plan. List relevant directories with `ls`.
+Check for CLAUDE.md or AGENTS.md in the project root. If found, read its contents and note any project-specific constraints, conventions, or patterns that should inform the plan. For Medium/Large tasks, also search for scoped CLAUDE.md files in subdirectories the task will touch — these carry local constraints that override or extend root-level guidance. List relevant directories with `ls`.
 
 Classify the task:
 
