@@ -77,12 +77,12 @@ gh api repos/{owner}/{repo}/commits/$sha/check-runs --paginate \
   --jq '.check_runs[] | {id, name, status, conclusion, app_slug: .app.slug}'
 ```
 
-Filter for check runs where `conclusion` is `failure`. For each failed check, inspect `app_slug` to determine the CI source:
+Filter for check runs with a terminal non-success `conclusion`. The conclusions to detect are: `failure`, `timed_out`, `cancelled`, `startup_failure`, and `action_required`. For each such check, inspect `app_slug` and `conclusion` to determine how to handle it:
 
-- **GitHub Actions** (`app_slug` is `github-actions`): fetch failure logs via `gh run view <id> --log-failed 2>&1 | tail -500`. If the last 500 lines do not contain an obvious error, search the full output for common error markers (`FAIL`, `Error`, `error:`, `FAILED`, `assert`) to locate the root cause.
-- **External CI** (any other `app_slug`): logs are not accessible via `gh`. Record the check name and conclusion, and report these to the user as external CI failures requiring manual inspection.
+- **Fixable failures** (`conclusion` is `failure` AND `app_slug` is `github-actions`): fetch failure logs via `gh run view <id> --log-failed 2>&1 | tail -500`. If the last 500 lines do not contain an obvious error, search the full output for common error markers (`FAIL`, `Error`, `error:`, `FAILED`, `assert`) to locate the root cause.
+- **Non-fixable CI issues** (`conclusion` is `timed_out`, `cancelled`, `startup_failure`, or `action_required`, OR `app_slug` is not `github-actions`): logs are either unavailable or the issue is not code-fixable. Record the check name and conclusion, and report these to the user as CI issues requiring manual inspection. Do not attempt to auto-fix these.
 
-Store each failure with its check name, log output (if available), and check run ID.
+Store each item with its check name, conclusion, log output (if available), check run ID, and whether it is fixable.
 
 **Review comments** — fetch unresolved review threads using GraphQL to access thread resolution state:
 
@@ -94,6 +94,7 @@ gh api graphql -f query='
         reviewThreads(first: 100) {
           nodes {
             id
+            databaseId
             isResolved
             isOutdated
             path
@@ -101,6 +102,7 @@ gh api graphql -f query='
             comments(first: 50) {
               nodes {
                 id
+                databaseId
                 body
                 author { login }
                 createdAt
@@ -123,7 +125,7 @@ gh api repos/{owner}/{repo}/pulls/<number>/reviews --paginate \
   --jq '.[] | select(.body != "" and .body != null) | {id, body, state, user: .user.login, submitted_at}'
 ```
 
-Filter out reviews authored by the current `gh` user. Reviews with `state` of `CHANGES_REQUESTED` or `COMMENTED` that contain actionable text (e.g. "please add tests", "this needs error handling") should be treated as feedback to address.
+Filter out reviews authored by the current `gh` user. Apply supersession logic: group reviews by `user`, sort by `submitted_at`, and for each reviewer discard all reviews that are superseded by a later `APPROVED` or `DISMISSED` review from the same reviewer. Only then treat the remaining reviews with `state` of `CHANGES_REQUESTED` or `COMMENTED` that contain actionable text (e.g. "please add tests", "this needs error handling") as feedback to address.
 
 **PR conversation comments** — fetch general discussion comments:
 
@@ -223,12 +225,12 @@ If the push fails due to a network error, retry up to 4 times with exponential b
 
 **4e. Reply to addressed feedback and record IDs**
 
-For each review thread addressed in this iteration, post a reply on GitHub:
+For each review thread addressed in this iteration, post a reply on GitHub. Use the `databaseId` of the first comment in the thread (from the GraphQL query's `comments.nodes[0].databaseId`) — this is the numeric REST ID required by the reply endpoint:
 
 ```bash
 gh api repos/{owner}/{repo}/pulls/<number>/comments \
   -f body="Fixed in \`$(git rev-parse --short HEAD)\` [$i/$MAX_ITERATIONS]" \
-  -F in_reply_to_id=<comment-id> \
+  -F in_reply_to_id=<comment-databaseId> \
   --method POST
 ```
 
@@ -269,8 +271,10 @@ Filter for threads where `isResolved` is `false`.
 New review summaries:
 ```bash
 gh api repos/{owner}/{repo}/pulls/<number>/reviews --paginate \
-  --jq '.[] | select(.body != "" and .body != null) | {id, body, state, user: .user.login}'
+  --jq '.[] | select(.body != "" and .body != null) | {id, body, state, user: .user.login, submitted_at}'
 ```
+
+Apply the same supersession logic as Step 3: group by reviewer, discard reviews superseded by a later `APPROVED` or `DISMISSED` from the same reviewer.
 
 New PR conversation comments:
 ```bash
@@ -281,7 +285,7 @@ gh api repos/{owner}/{repo}/issues/<number>/comments --paginate \
 Filter out items already in `ADDRESSED_COMMENT_IDS` and self-comments across review summaries and conversation comments.
 
 **Fix point reached** if:
-- All CI checks have `bucket` of `pass`, AND
+- All CI checks have `bucket` of `pass` or `skipping` (no `fail` or `pending` buckets remain). Checks with `bucket` of `cancel` should be reported to the user as informational ("Check <name> was cancelled — this may need manual re-triggering") but do not block convergence, AND
 - No new unresolved feedback exists across any channel (all IDs are in `ADDRESSED_COMMENT_IDS` or are self-comments)
 
 → Break the loop and proceed to Step 5.
