@@ -81,7 +81,7 @@
   // Expose API for explicit use
   window.brainstorm = {
     send: sendEvent,
-    choice: (value, metadata = {}) => sendEvent({ type: 'choice', value, ...metadata })
+    choice: (value, metadata = {}) => sendEvent({ type: 'choice', choice: value, ...metadata })
   };
 
   connect();

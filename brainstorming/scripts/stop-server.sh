@@ -19,6 +19,13 @@ PID_FILE="${STATE_DIR}/server.pid"
 if [[ -f "$PID_FILE" ]]; then
   pid=$(cat "$PID_FILE")
 
+  # Validate PID is a positive integer before signaling
+  if ! [[ "$pid" =~ ^[1-9][0-9]*$ ]]; then
+    echo '{"status": "failed", "error": "corrupt pid file"}'
+    rm -f "$PID_FILE"
+    exit 1
+  fi
+
   # Try to stop gracefully, fallback to force if still alive
   kill "$pid" 2>/dev/null || true
 
@@ -43,10 +50,10 @@ if [[ -f "$PID_FILE" ]]; then
     exit 1
   fi
 
-  rm -f "$PID_FILE" "${STATE_DIR}/server.log"
+  rm -f "$PID_FILE" "${STATE_DIR}/server.log" "${STATE_DIR}/server-info"
 
-  # Only delete ephemeral /tmp directories
-  if [[ "$SESSION_DIR" == /tmp/* ]]; then
+  # Only delete ephemeral /tmp/brainstorm-* directories
+  if [[ "$SESSION_DIR" == /tmp/brainstorm-* ]]; then
     rm -rf "$SESSION_DIR"
   fi
 

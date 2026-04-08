@@ -329,6 +329,9 @@ function startServer() {
     }
   }
 
+  process.on('SIGTERM', () => shutdown('SIGTERM'));
+  process.on('SIGINT', () => shutdown('SIGINT'));
+
   server.listen(PORT, HOST, () => {
     const info = JSON.stringify({
       type: 'server-started', port: Number(PORT), host: HOST,

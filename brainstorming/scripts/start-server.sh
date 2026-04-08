@@ -97,7 +97,7 @@ if [[ -f "$PID_FILE" ]]; then
   rm -f "$PID_FILE"
 fi
 
-cd "$SCRIPT_DIR"
+cd "$SCRIPT_DIR" || { echo '{"error": "Cannot cd to script directory"}'; exit 1; }
 
 # Resolve the harness PID (grandparent of this script).
 # $PPID is the ephemeral shell the harness spawned to run us — it dies
