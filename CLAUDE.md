@@ -25,3 +25,7 @@ Slash command `/wigo` (What Is Going On?) that gives a comprehensive situational
 ## autofix-pr
 
 Slash command `/autofix-pr` that iteratively fixes CI failures and addresses review comments on a GitHub PR from the local CLI. Fetches failures and comments, makes fixes, runs local pre-commit checks, commits, pushes, waits for CI, and loops until convergence or max iterations.
+
+## plan
+
+Slash command `/plan` that performs deep, multi-phase implementation planning with parallel agent exploration, iterative user interviews, and structured plan output to `.ultraplan/plan.md` — all locally, without web sessions.
