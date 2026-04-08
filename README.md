@@ -91,6 +91,22 @@ Trigger phrases: `autofix pr`, `fix pr locally`, `fix ci failures`, `fix review 
 
 **Requires**: [GitHub CLI](https://cli.github.com/) (`gh`) authenticated with a token that has `repo` scope (read and write access to pull requests).
 
+### `/plan` — Deep Implementation Planning
+
+Performs thorough, multi-phase implementation planning with parallel agent exploration before any code is written. Produces a battle-tested, file-path-grounded plan at `.ultraplan/<plan-name>.md` (name generated from the task description).
+
+What it does:
+- Assesses task complexity and scales exploration depth accordingly (Small/Medium/Large).
+- Dispatches parallel Explore agents to systematically map affected code areas.
+- Drafts a structured plan with exact `file:line` references, ordered steps, and verification criteria.
+- Validates all file references exist and runs adversarial review to catch issues.
+- Operates in strict read-only mode — only the plan file is written.
+
+Trigger phrases: `plan this`, `make a plan`, `implementation plan`, `deep plan`, `thorough plan`.
+
+No external dependencies.
+
+
 ## License
 
 MIT
