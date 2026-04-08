@@ -1,5 +1,5 @@
 ---
-name: plan
+name: pm-plan
 description: This skill should be used when the user asks to "plan this", "make a plan", "create an implementation plan", "how should I implement", "design the implementation", "plan the refactor", "plan the migration", "plan the feature", "break this down into steps", "implementation strategy", "deep plan", "thorough plan", or wants a thorough, multi-phase implementation plan with codebase exploration before writing any code.
 version: 1.0.0
 argument-hint: "<task description or feature request>"

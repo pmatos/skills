@@ -73,7 +73,7 @@ Trigger phrases: `what's going on`, `wigo`, `status`, `where was I`, `what were 
 
 **Requires**: [GitHub CLI](https://cli.github.com/) (`gh`) authenticated.
 
-### `/autofix-pr` — Autofix PR
+### `/pm-autofix-pr` — Autofix PR
 
 Iteratively fixes CI failures and addresses review comments on a GitHub PR, working entirely in the local CLI. Monitors check results and reviewer feedback, makes code changes, runs local validation, commits, pushes, and waits for CI — repeating until all issues are resolved or a maximum iteration count is reached.
 
@@ -91,7 +91,7 @@ Trigger phrases: `autofix pr`, `fix pr locally`, `fix ci failures`, `fix review 
 
 **Requires**: [GitHub CLI](https://cli.github.com/) (`gh`) authenticated with a token that has `repo` scope (read and write access to pull requests).
 
-### `/plan` — Deep Implementation Planning
+### `/pm-plan` — Deep Implementation Planning
 
 Performs thorough, multi-phase implementation planning with parallel agent exploration before any code is written. Produces a battle-tested, file-path-grounded plan at `.ultraplan/<plan-name>.md` (name generated from the task description).
 
