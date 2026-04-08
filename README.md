@@ -73,6 +73,24 @@ Trigger phrases: `what's going on`, `wigo`, `status`, `where was I`, `what were 
 
 **Requires**: [GitHub CLI](https://cli.github.com/) (`gh`) authenticated.
 
+### `/autofix-pr` — Autofix PR
+
+Iteratively fixes CI failures and addresses review comments on a GitHub PR, working entirely in the local CLI. Monitors check results and reviewer feedback, makes code changes, runs local validation, commits, pushes, and waits for CI — repeating until all issues are resolved or a maximum iteration count is reached.
+
+What it does:
+- Detects the PR from the current branch (or accepts a PR number).
+- Fetches failed CI checks and unresolved review comments via `gh`.
+- Classifies issues: clear fixes are applied automatically, ambiguous comments prompt for user guidance.
+- Runs local pre-commit checks from `CLAUDE.md` before each push.
+- Commits and pushes fixes, replies to addressed review comments.
+- Waits for CI to complete, then checks for new issues.
+- Loops until fix point (all CI green + no unresolved comments) or max iterations (default 5).
+- Presents a full summary of all changes for human review.
+
+Trigger phrases: `autofix pr`, `fix pr locally`, `fix ci failures`, `fix review comments`, `iterate on pr`.
+
+**Requires**: [GitHub CLI](https://cli.github.com/) (`gh`) authenticated.
+
 ## License
 
 MIT
