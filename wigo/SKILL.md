@@ -41,7 +41,15 @@ Determine the default branch (`main` or `master`):
 
 ```bash
 DEFAULT_BRANCH=$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's|refs/remotes/origin/||')
-[ -z "$DEFAULT_BRANCH" ] && DEFAULT_BRANCH=main
+if [ -z "$DEFAULT_BRANCH" ]; then
+  if git show-ref --verify --quiet refs/heads/main 2>/dev/null; then
+    DEFAULT_BRANCH=main
+  elif git show-ref --verify --quiet refs/heads/master 2>/dev/null; then
+    DEFAULT_BRANCH=master
+  else
+    DEFAULT_BRANCH=$(git branch --list --format='%(refname:short)' | head -1)
+  fi
+fi
 echo "$DEFAULT_BRANCH"
 ```
 
@@ -74,11 +82,17 @@ python3 -c "
 import json, sys, os
 
 log_dir = sys.argv[1]
+if not os.path.isdir(log_dir):
+    print('No Claude session history found for this project.')
+    sys.exit(0)
 files = sorted(
     [f for f in os.listdir(log_dir) if f.endswith('.jsonl')],
     key=lambda f: os.path.getmtime(os.path.join(log_dir, f)),
     reverse=True
 )[:5]
+if not files:
+    print('No Claude session logs found.')
+    sys.exit(0)
 
 for fname in files:
     path = os.path.join(log_dir, fname)
