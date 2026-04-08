@@ -89,32 +89,42 @@ Store each failure with its check name, log output, and run ID.
 **Review comments** — fetch inline code review threads (top-level comments only, not replies):
 
 ```bash
-gh api repos/{owner}/{repo}/pulls/<number>/comments \
+gh api repos/{owner}/{repo}/pulls/<number>/comments --paginate \
   --jq '.[] | select(.in_reply_to_id == null) | {id, path, line, side, body, user: .user.login, created_at}'
 ```
+
+**Review summaries** — fetch review bodies (the top-level text submitted with each review):
+
+```bash
+gh api repos/{owner}/{repo}/pulls/<number>/reviews --paginate \
+  --jq '.[] | select(.body != "" and .body != null) | {id, body, state, user: .user.login, submitted_at}'
+```
+
+Filter out reviews authored by the current `gh` user. Reviews with `state` of `CHANGES_REQUESTED` or `COMMENTED` that contain actionable text (e.g. "please add tests", "this needs error handling") should be treated as feedback to address.
 
 **PR conversation comments** — fetch general discussion comments:
 
 ```bash
-gh api repos/{owner}/{repo}/issues/<number>/comments \
+gh api repos/{owner}/{repo}/issues/<number>/comments --paginate \
   --jq '.[] | {id, body, user: .user.login, created_at}'
 ```
 
 Filter out comments authored by the current `gh` user (from Step 1) — these are self-comments from prior runs.
 
-Also check for own prior replies to review comments to detect already-addressed comments:
+Also check for own prior replies to review comments to detect already-addressed comments. Fetch all replies in the PR (both bot and reviewer):
 
 ```bash
-gh api repos/{owner}/{repo}/pulls/<number>/comments \
-  --jq '[.[] | select(.user.login == "<gh-user>" and .in_reply_to_id != null) | .in_reply_to_id]'
+gh api repos/{owner}/{repo}/pulls/<number>/comments --paginate \
+  --jq '[.[] | select(.in_reply_to_id != null) | {id, in_reply_to_id, user: .user.login, created_at}]'
 ```
 
-Initialize `ADDRESSED_COMMENT_IDS` with the IDs of comments that already have a reply from the current user.
+For each top-level comment that has a reply from the current user, check whether the reviewer posted *after* the bot's most recent reply. Only add the comment ID to `ADDRESSED_COMMENT_IDS` if the bot's reply is the last non-self reply in the thread. If a reviewer followed up after the bot's reply, treat the comment as still unresolved — the fix may have been incomplete or rejected.
 
 Present the initial assessment to the user:
 - Number of failed CI checks, with their names
 - Number of unresolved review comments, with brief summaries
-- Number of already-addressed comments (from prior runs), if any
+- Number of previously addressed comments (from prior runs) where no reviewer follow-up exists
+- Number of previously addressed comments where the reviewer followed up (these will be re-examined)
 
 Ask: **"I found N CI failures and M unresolved review comments. Shall I begin fixing them? (max MAX_ITERATIONS iterations)"**
 
@@ -126,11 +136,11 @@ For each iteration `i` from 1 to `MAX_ITERATIONS`:
 
 **4a. Classify issues**
 
-For each unresolved review comment not in `ADDRESSED_COMMENT_IDS`, classify it:
+For each piece of unresolved feedback not in `ADDRESSED_COMMENT_IDS`, classify it. This applies to all three feedback channels — inline review comments, review summaries, and PR conversation comments:
 
-- **Clear fix**: The comment points to a specific code issue with an obvious resolution — a typo, missing null check, wrong variable name, style violation, missing test assertion, unused import, or other concrete code change where the reviewer's intent is unambiguous.
-- **Ambiguous**: The comment suggests an architectural change, asks an open question, proposes multiple alternatives, or has multiple valid interpretations. For these, present the comment to the user and ask for guidance before proceeding. Wait for user input — the user's guidance becomes the fix instruction.
-- **No action**: The comment is an approval, acknowledgment, praise, or informational note not requesting a code change ("looks good", "nice!", "FYI"). Skip these and add their IDs to `ADDRESSED_COMMENT_IDS`.
+- **Clear fix**: The feedback points to a specific code issue with an obvious resolution — a typo, missing null check, wrong variable name, style violation, missing test assertion, unused import, or other concrete code change where the reviewer's intent is unambiguous.
+- **Ambiguous**: The feedback suggests an architectural change, asks an open question, proposes multiple alternatives, or has multiple valid interpretations. For these, present the comment to the user and ask for guidance before proceeding. Wait for user input — the user's guidance becomes the fix instruction.
+- **No action**: The feedback is an approval, acknowledgment, praise, or informational note not requesting a code change ("looks good", "nice!", "FYI"). Skip these and add their IDs to `ADDRESSED_COMMENT_IDS`.
 
 For CI failures, all are treated as actionable — read the error log and determine the fix.
 
@@ -142,10 +152,15 @@ For CI failures:
 3. Read the relevant source files.
 4. Make the code fix.
 
-For review comments:
+For inline review comments:
 1. Read the file at the path and line referenced by the comment.
 2. Understand the surrounding context.
 3. Apply the requested change.
+
+For review summaries and PR conversation comments:
+1. Parse the feedback to identify specific requested changes (e.g. "add tests for X", "handle error case Y").
+2. Locate the relevant source files based on the request context and PR diff.
+3. Apply the requested changes.
 
 Apply fixes one issue at a time. After each fix, verify the change makes sense in context.
 
@@ -224,17 +239,29 @@ CI check results:
 gh pr checks <number> --json name,state,bucket
 ```
 
-New review comments (comments not in `ADDRESSED_COMMENT_IDS`):
+New inline review comments (not in `ADDRESSED_COMMENT_IDS`):
 ```bash
-gh api repos/{owner}/{repo}/pulls/<number>/comments \
+gh api repos/{owner}/{repo}/pulls/<number>/comments --paginate \
   --jq '.[] | select(.in_reply_to_id == null) | {id, path, line, body, user: .user.login}'
 ```
 
-Filter out comments already in `ADDRESSED_COMMENT_IDS` and self-comments.
+New review summaries:
+```bash
+gh api repos/{owner}/{repo}/pulls/<number>/reviews --paginate \
+  --jq '.[] | select(.body != "" and .body != null) | {id, body, state, user: .user.login}'
+```
+
+New PR conversation comments:
+```bash
+gh api repos/{owner}/{repo}/issues/<number>/comments --paginate \
+  --jq '.[] | {id, body, user: .user.login}'
+```
+
+Filter out items already in `ADDRESSED_COMMENT_IDS` and self-comments across all three channels.
 
 **Fix point reached** if:
 - All CI checks have `bucket` of `pass`, AND
-- No new unresolved review comments exist (all comment IDs are in `ADDRESSED_COMMENT_IDS` or are self-comments)
+- No new unresolved feedback exists across any channel (all IDs are in `ADDRESSED_COMMENT_IDS` or are self-comments)
 
 → Break the loop and proceed to Step 5.
 
