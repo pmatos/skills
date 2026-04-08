@@ -17,3 +17,7 @@ Slash command `/auto-merge-dependabot` that reviews all open Dependabot PRs in t
 ## brainstorming
 
 Skill that guides collaborative design before implementation. Explores user intent through one-at-a-time questions, proposes 2-3 approaches with trade-offs, presents the design incrementally for approval, then writes and commits a spec document. Stops at the approved spec — does not auto-trigger implementation. Forked from [obra/superpowers](https://github.com/obra/superpowers) brainstorming skill with all references to other superpowers skills removed.
+
+## wigo
+
+Slash command `/wigo` (What Is Going On?) that gives a comprehensive situational briefing on the current git tree: branch state, dirty files, recent session history, associated PR status (CI, reviews, mergeability), and suggests actionable next steps.

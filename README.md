@@ -58,6 +58,21 @@ Trigger phrases: `merge dependabot PRs`, `review dependabot`, `auto-merge depend
 
 **Requires**: [GitHub CLI](https://cli.github.com/) (`gh`) authenticated.
 
+### `/wigo` — What Is Going On?
+
+Gives a comprehensive situational briefing on the current git tree. Mines git state, Claude session history, and GitHub to tell you where you are, what you've been doing, and what to do next.
+
+What it does:
+- Reports branch name, dirty state (staged/unstaged/untracked), and stashes.
+- Summarizes recent git commits and how far ahead of the default branch you are.
+- Searches Claude session logs to reconstruct what you were working on in previous sessions.
+- Finds the PR associated with the current branch and reports CI status, reviews, mergeability, and recent comments.
+- Suggests contextual next steps: merge the PR, address review feedback, investigate CI failures, commit and push, create a PR, etc.
+
+Trigger phrases: `what's going on`, `wigo`, `status`, `where was I`, `what were we doing`, `catch me up`, `tree status`.
+
+**Requires**: [GitHub CLI](https://cli.github.com/) (`gh`) authenticated.
+
 ## License
 
 MIT
