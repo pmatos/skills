@@ -40,7 +40,9 @@ git log --oneline -10
 Determine the default branch (`main` or `master`):
 
 ```bash
-git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's|refs/remotes/origin/||' || echo main
+DEFAULT_BRANCH=$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's|refs/remotes/origin/||')
+[ -z "$DEFAULT_BRANCH" ] && DEFAULT_BRANCH=main
+echo "$DEFAULT_BRANCH"
 ```
 
 Then show commits ahead of it:
@@ -58,7 +60,7 @@ From the results, summarize:
 Reconstruct what we've been working on from Claude's session logs.
 
 1. Get the repo root from Step 1 (or run `git rev-parse --show-toplevel` again).
-2. Compute the project session directory. The path encoding replaces `/` with `-` and strips the leading `-`. For example, `/home/user/myproject` becomes `~/.claude/projects/-home-user-myproject/`.
+2. Compute the project session directory. The path encoding replaces `/` with `-`. For example, `/home/user/myproject` becomes `~/.claude/projects/-home-user-myproject/`.
 3. List all `.jsonl` files in that directory, sorted by modification time (most recent first):
 
 ```bash
@@ -120,7 +122,7 @@ for fname in files:
             if '<system-reminder>' in content:
                 continue
             print(f'  [{role}] {content[:200]}')
-" ~/.claude/projects/<encoded-path>/
+" "$HOME/.claude/projects/<encoded-path>/"
 ```
 
 5. Also check for session metadata files to get timestamps:
@@ -158,7 +160,7 @@ If a PR was found in Step 4, gather detailed status:
 **CI checks:**
 
 ```bash
-gh pr checks <number> --json name,state,conclusion
+gh pr checks <number> --json name,state,bucket,description,workflow
 ```
 
 Report each check's name and pass/fail/pending status.
@@ -182,14 +184,10 @@ Report the `mergeable` state (`MERGEABLE`, `CONFLICTING`, or `UNKNOWN`) and whet
 **Recent activity:**
 
 ```bash
-gh pr view <number> --json comments --jq '.comments | length'
+gh pr view <number> --json comments --jq '{ total: (.comments | length), recent: [.comments[-3:] | .[] | "\(.author.login) (\(.createdAt)): \(.body[0:150])"] }'
 ```
 
-Report comment count. If there are recent comments (last 24 hours), show the most recent 3:
-
-```bash
-gh pr view <number> --json comments --jq '.comments[-3:] | .[] | "\(.author.login) (\(.createdAt)): \(.body[0:150])"'
-```
+Report the total comment count. If there are recent comments (last 24 hours), display them.
 
 ### Step 6: Synthesize & Present
 
