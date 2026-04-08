@@ -221,9 +221,9 @@ If the push is rejected (e.g. upstream has new commits), report the conflict to 
 
 If the push fails due to a network error, retry up to 4 times with exponential backoff (2s, 4s, 8s, 16s).
 
-**4e. Reply to addressed comments**
+**4e. Reply to addressed feedback and record IDs**
 
-For each review comment addressed in this iteration, post a reply on GitHub:
+For each review thread addressed in this iteration, post a reply on GitHub:
 
 ```bash
 gh api repos/{owner}/{repo}/pulls/<number>/comments \
@@ -232,9 +232,9 @@ gh api repos/{owner}/{repo}/pulls/<number>/comments \
   --method POST
 ```
 
-Add their IDs to `ADDRESSED_COMMENT_IDS`.
-
 If the API call fails with 403 or 429 (rate limiting), wait 60 seconds and retry once. If it still fails, note the error and continue — the fix was already pushed.
+
+Add the IDs of all addressed feedback to `ADDRESSED_COMMENT_IDS` — this includes review thread IDs, review summary IDs, and conversation comment IDs. All three channels must be tracked to prevent Step 4g from re-surfacing already-fixed items.
 
 **4f. Wait for CI**
 
