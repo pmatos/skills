@@ -21,3 +21,7 @@ Skill that guides collaborative design before implementation. Explores user inte
 ## wigo
 
 Slash command `/wigo` (What Is Going On?) that gives a comprehensive situational briefing on the current git tree: branch state, dirty files, recent session history, associated PR status (CI, reviews, mergeability), and suggests actionable next steps.
+
+## autofix-pr
+
+Slash command `/autofix-pr` that iteratively fixes CI failures and addresses review comments on a GitHub PR from the local CLI. Fetches failures and comments, makes fixes, runs local pre-commit checks, commits, pushes, waits for CI, and loops until convergence or max iterations.
