@@ -1,12 +1,16 @@
 ---
 name: autofix-pr
-description: This skill should be used when the user asks to "autofix pr", "fix pr locally", "fix ci failures", "fix review comments", "iterate on pr", "fix failing checks", "fix pr comments", "autofix-pr", or wants to iteratively fix CI failures and review comments on a GitHub PR from the local CLI. Also triggered by the /autofix-pr command.
+description: This skill should be used when the user asks to "autofix pr", "fix pr locally", "fix ci failures", "fix review comments", "iterate on pr", "fix failing checks", "fix pr comments", "make ci green", "fix the build", "address reviewer feedback", or wants to iteratively fix CI failures and review comments on a GitHub PR from the local CLI. Also triggered by the /autofix-pr command.
 user-invocable: true
 ---
 
 # Autofix PR
 
 Iteratively fix CI failures and address review comments on a GitHub PR, working entirely in the local CLI. Fetch failures and reviewer feedback, make code fixes, run local validation, commit, push, and wait for CI — repeating until all issues are resolved or a maximum iteration count is reached.
+
+## Prerequisites
+
+- `gh` CLI installed and authenticated with a token that has `repo` scope (read and write access to pull requests). The skill posts reply comments on PR review threads, which requires write permission.
 
 ## Workflow
 
@@ -36,7 +40,7 @@ git branch --show-current
 
 If the branches don't match, ask the user whether to check out the PR branch (`git switch <headRefName>`) or abort.
 
-Set `MAX_ITERATIONS` to 5, unless the user specified a different value.
+Set `MAX_ITERATIONS` to 5, unless the user specified a different value as an argument (e.g., `/autofix-pr 10` or "autofix pr with 10 iterations").
 
 Determine the current `gh` user for filtering self-comments later:
 
@@ -66,11 +70,19 @@ Gather all current issues on the PR.
 gh pr checks <number> --json name,state,bucket,link,event
 ```
 
-Filter for checks where `bucket` is `fail`. For each failed check, get the workflow run ID from the link and fetch the failure logs:
+Filter for checks where `bucket` is `fail`. For each failed check, get the workflow run ID from the `link` field and fetch the failure logs. If the `link` field is not available (varies by `gh` version), fall back to listing failed runs by branch:
 
 ```bash
-gh run view <run-id> --log-failed 2>&1 | tail -200
+gh run list --branch <headRefName> --status failure --json databaseId,name --limit 10
 ```
+
+Fetch the failure logs for each run:
+
+```bash
+gh run view <run-id> --log-failed 2>&1 | tail -500
+```
+
+If the last 500 lines do not contain an obvious error, search the full output for common error markers (`FAIL`, `Error`, `error:`, `FAILED`, `assert`) to locate the root cause.
 
 Store each failure with its check name, log output, and run ID.
 
@@ -199,7 +211,7 @@ Wait for CI checks to complete:
 gh pr checks <number> --watch --fail-fast -i 15
 ```
 
-This blocks until checks complete. Use `--fail-fast` to return as soon as any check fails rather than waiting for all checks. Use a 15-second polling interval. Set a Bash timeout of 600000ms (10 minutes).
+This blocks until checks complete. Use `--fail-fast` to return as soon as any check fails rather than waiting for all checks. Use a 15-second polling interval. Set a Bash timeout of 600 seconds (10 minutes).
 
 If the timeout is exceeded, inform the user: "CI has been running for over 10 minutes. Would you like to keep waiting or abort?" Wait for user input.
 
