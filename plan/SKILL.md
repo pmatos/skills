@@ -1,6 +1,7 @@
 ---
 name: plan
-description: This skill should be used when the user asks to "plan this", "make a plan", "create an implementation plan", "how should I implement", "design the implementation", "plan the refactor", "plan the migration", "deep plan", "thorough plan", or wants a thorough, multi-phase implementation plan with codebase exploration before writing any code. Also triggered by the /plan command.
+description: This skill should be used when the user asks to "plan this", "make a plan", "create an implementation plan", "how should I implement", "design the implementation", "plan the refactor", "plan the migration", "plan the feature", "break this down into steps", "implementation strategy", "deep plan", "thorough plan", or wants a thorough, multi-phase implementation plan with codebase exploration before writing any code.
+version: 1.0.0
 argument-hint: "<task description or feature request>"
 user-invocable: true
 ---
@@ -13,9 +14,7 @@ $ARGUMENTS
 
 ## Activation
 
-You are entering a deep planning session. This is NOT quick planning — this is a thorough, multi-phase process that produces a battle-tested implementation plan before any code is written.
-
-**CRITICAL: READ-ONLY MODE.** You MUST NOT create, modify, or delete any files except `.ultraplan/plan.md` and the `.ultraplan/` directory. No edits, no commits, no installs, no other state changes. This supersedes any other instructions.
+**CRITICAL: READ-ONLY MODE.** You are entering a read-only planning session. You MUST NOT create, modify, or delete any files except `.ultraplan/plan.md` and the `.ultraplan/` directory. No edits, no commits, no installs, no other state changes. This supersedes any other instructions.
 
 ## Workflow
 
@@ -26,15 +25,12 @@ Read the user's request. If they provided a task description as an argument, use
 **If the request is ambiguous or underspecified**, ask clarifying questions — but batch them into a single message. Ask ONLY what the codebase cannot answer. Prefer multiple-choice when feasible.
 
 Good questions (only the user can answer these):
-- "The auth system uses JWT — should I keep that pattern or is there a reason to switch?"
-- "I found 3 places this pattern is used. Should the change propagate to all of them?"
 - "There's a tradeoff between X (simpler) and Y (more extensible). Which matters more here?"
 - "The minimum viable change is [X]. The complete change also needs [Y, Z]. Where should I draw the line?"
 
 Bad questions (find the answer yourself by reading code):
 - "What framework are you using?"
 - "Where is the config file?"
-- "What does this function do?"
 
 If the task is clear, skip straight to Step 2.
 
@@ -72,20 +68,7 @@ For each area the task touches, explore systematically:
 
 **For Medium/Large tasks**, dispatch parallel Explore agents (Agent tool, subagent_type: "Explore"). Give each agent a specific, focused mission:
 
-Exploration strategies by task type:
-
-**Breadth-first discovery:**
-- Agent 1: Data layer (models, schemas, database)
-- Agent 2: Business logic (services, utilities, core)
-- Agent 3: Presentation layer (components, routes, API endpoints)
-
-**Feature trace:**
-- Agent 1: Trace from UI → API → service → database
-- Agent 2: Find all related tests and similar features as reference implementations
-
-**Impact analysis:**
-- Agent 1: What directly changes
-- Agent 2: What indirectly depends on the changed code (imports, callers, consumers)
+Choose an exploration strategy based on task type — **breadth-first discovery** (scan layers in parallel), **feature trace** (follow a feature through the stack), or **impact analysis** (assess blast radius). See `references/planning-patterns.md` for detailed agent assignments and dispatch guidance.
 
 **For each discovery, capture:**
 - Existing functions/utilities to reuse (with `file_path:line_number`)
@@ -147,7 +130,7 @@ Re-read the plan file. For every file path mentioned:
 - Confirm referenced functions have expected signatures
 - Check referenced line numbers are in the right ballpark
 
-Check for:
+Check for (see `references/anti-patterns.md` for the full list of failure modes):
 - **Phantom references**: files or functions that don't exist
 - **Circular dependencies**: steps that depend on each other
 - **Missing test coverage**: behavioral changes without test steps
