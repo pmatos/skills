@@ -93,7 +93,7 @@ Trigger phrases: `autofix pr`, `fix pr locally`, `fix ci failures`, `fix review 
 
 ### `/plan` — Deep Implementation Planning
 
-Performs thorough, multi-phase implementation planning with parallel agent exploration before any code is written. Produces a battle-tested, file-path-grounded plan at `.ultraplan/plan.md`.
+Performs thorough, multi-phase implementation planning with parallel agent exploration before any code is written. Produces a battle-tested, file-path-grounded plan at `.ultraplan/<plan-name>.md` (name generated from the task description).
 
 What it does:
 - Assesses task complexity and scales exploration depth accordingly (Small/Medium/Large).

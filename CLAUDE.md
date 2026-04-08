@@ -28,4 +28,4 @@ Slash command `/autofix-pr` that iteratively fixes CI failures and addresses rev
 
 ## plan
 
-Slash command `/plan` that performs deep, multi-phase implementation planning with parallel agent exploration, targeted clarifying questions, and structured plan output to `.ultraplan/plan.md` — all locally, without web sessions.
+Slash command `/plan` that performs deep, multi-phase implementation planning with parallel agent exploration, targeted clarifying questions, and structured plan output to `.ultraplan/<plan-name>.md` — all locally, without web sessions.
