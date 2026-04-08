@@ -14,7 +14,7 @@ $ARGUMENTS
 
 ## Activation
 
-**CRITICAL: READ-ONLY MODE.** You are entering a read-only planning session. You MUST NOT create, modify, or delete any files except `.ultraplan/plan.md` and the `.ultraplan/` directory. No edits, no commits, no installs, no other state changes. This supersedes any other instructions.
+**CRITICAL: READ-ONLY MODE.** You are entering a read-only planning session. You MUST NOT create, modify, or delete any files except inside the `.ultraplan/` directory. No edits, no commits, no installs, no other state changes. This supersedes any other instructions.
 
 ## Workflow
 
@@ -44,7 +44,7 @@ git log --oneline -20
 git branch --show-current
 ```
 
-Check for CLAUDE.md or AGENTS.md in the project root. If found, read its contents and note any project-specific constraints, conventions, or patterns that should inform the plan. For Medium/Large tasks, also search for scoped CLAUDE.md files in subdirectories the task will touch — these carry local constraints that override or extend root-level guidance. List relevant directories with `ls`.
+Check for CLAUDE.md or AGENTS.md in the project root. If found, read its contents and note any project-specific constraints, conventions, or patterns that should inform the plan. Also search for scoped CLAUDE.md and AGENTS.md files in subdirectories the task will touch using Glob (e.g., `**/CLAUDE.md`, `**/AGENTS.md`) — these carry local constraints that override or extend root-level guidance.
 
 Classify the task:
 
@@ -66,7 +66,7 @@ For each area the task touches, explore systematically:
 - **History**: `git log --oneline -10 -- <relevant paths>` to understand recent changes
 - **Config**: Check build files, CI config, package manifests if relevant
 
-**For Medium/Large tasks**, dispatch parallel Explore agents (Agent tool, subagent_type: "Explore"). Give each agent a specific, focused mission:
+**For Medium/Large tasks**, dispatch parallel Explore agents (Agent tool, subagent_type: "Explore", mode: "plan"). Give each agent a specific, focused mission:
 
 Choose an exploration strategy based on task type — **breadth-first discovery** (scan layers in parallel), **feature trace** (follow a feature through the stack), or **impact analysis** (assess blast radius). See `references/planning-patterns.md` for detailed agent assignments and dispatch guidance.
 
@@ -77,15 +77,21 @@ Choose an exploration strategy based on task type — **breadth-first discovery*
 - Test infrastructure available
 - Similar features to use as reference implementations
 
-**Context survival:** Create the plan file early. Write findings to `.ultraplan/plan.md` incrementally as you discover them — don't hold state only in conversation memory. The plan file on disk is your persistent state that survives context compression.
+**Plan naming:** Dispatch a Haiku subagent (Agent tool, model: "haiku") with this prompt:
+
+> "Generate a short kebab-case name (2-3 words) that summarizes this task: [task description]. Reply with ONLY the name, nothing else. Example: auth-token-refresh"
+
+Use the returned name as `<plan-name>` for the rest of this session. The plan file path is `.ultraplan/<plan-name>.md`.
 
 ```bash
 mkdir -p .ultraplan
 ```
 
+**Context survival:** Create the plan file early. Write findings to `.ultraplan/<plan-name>.md` incrementally as you discover them — don't hold state only in conversation memory. The plan file on disk is your persistent state that survives context compression.
+
 ### Step 4: Draft the Plan
 
-Write (or update) `.ultraplan/plan.md` with this structure:
+Write (or update) `.ultraplan/<plan-name>.md` with this structure:
 
 ```markdown
 # Plan: <concise title>
@@ -116,7 +122,7 @@ Write (or update) `.ultraplan/plan.md` with this structure:
 ```
 
 **Plan quality rules:**
-- Every step must reference exact files that exist in the codebase
+- Every step must reference exact file paths. For existing files, verify they exist. For new files the plan will create, mark them explicitly with `[new]`
 - Steps must be ordered by dependency (what must happen first)
 - Each step should be independently implementable where possible
 - Every line must carry actionable implementation information — no prose padding, no background summaries, no motivational text
@@ -126,9 +132,8 @@ Write (or update) `.ultraplan/plan.md` with this structure:
 ### Step 5: Validate the Plan
 
 Re-read the plan file. For every file path mentioned:
-- Verify it exists using Glob or Read
-- Confirm referenced functions have expected signatures
-- Check referenced line numbers are in the right ballpark
+- For existing files: verify they exist using Glob or Read, confirm referenced functions have expected signatures, and verify referenced line numbers are accurate
+- For files marked `[new]`: verify the parent directory exists and no naming conflict with existing files
 
 Check for (see `references/anti-patterns.md` for the full list of failure modes):
 - **Phantom references**: files or functions that don't exist
@@ -140,9 +145,9 @@ Fix any issues found.
 
 ### Step 6: Adversarial Review
 
-Dispatch a subagent (Agent tool, subagent_type: "general-purpose") with this prompt:
+Dispatch a subagent (Agent tool, subagent_type: "general-purpose", mode: "plan") with this prompt:
 
-> "You are a critical plan reviewer. Read the plan at `.ultraplan/plan.md` and the source files it references. Find: (1) file references that don't exist, (2) steps that depend on undeclared changes, (3) missing edge cases, (4) steps that could be simplified or merged, (5) scope creep beyond the stated goal. Report issues only — don't rewrite the plan."
+> "You are a critical plan reviewer. Read the plan at `.ultraplan/<plan-name>.md` and the source files it references. Find: (1) file references that don't exist, (2) steps that depend on undeclared changes, (3) missing edge cases, (4) steps that could be simplified or merged, (5) scope creep beyond the stated goal. Report issues only — don't rewrite the plan."
 
 Incorporate valid criticisms into the plan. If the reviewer finds phantom references or critical issues, fix them and re-validate.
 
@@ -152,15 +157,15 @@ For **Small** tasks, perform this review inline instead of dispatching a subagen
 
 Display the final plan with a summary of exploration findings. Ask directly: **"Ready to execute this plan, or do you want changes?"**
 
-The plan file persists at `.ultraplan/plan.md` for reference during implementation.
+The plan file persists at `.ultraplan/<plan-name>.md` for reference during implementation. Tell the user the exact filename.
 
 ## Constraints
 
-- **Read-only mode**: Do NOT create, modify, or delete any file except `.ultraplan/plan.md` and the `.ultraplan/` directory
+- **Read-only mode**: Do NOT create, modify, or delete any file except inside the `.ultraplan/` directory
 - **No implementation**: Do not write code, modify source files, or run build/test commands
 - **No false completion**: Do not present the plan until validation and adversarial review are complete
 - **No plan bloat**: Every line in the plan must carry actionable implementation information
-- **No phantom references**: Every `file:line` reference must be verified against the actual codebase
+- **No phantom references**: Every `file:line` reference to existing files must be verified against the actual codebase. New files must be marked `[new]`
 - **No scope creep**: If exploration reveals the task is larger than expected, flag it to the user and ask whether to expand scope or decompose
 - **No findable questions**: Never ask the user something you could determine by reading code
 
