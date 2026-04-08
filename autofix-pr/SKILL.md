@@ -183,7 +183,7 @@ For each review comment addressed in this iteration, post a reply on GitHub:
 ```bash
 gh api repos/{owner}/{repo}/pulls/<number>/comments \
   -f body="Fixed in \`$(git rev-parse --short HEAD)\` [$i/$MAX_ITERATIONS]" \
-  -f in_reply_to_id=<comment-id> \
+  -F in_reply_to_id=<comment-id> \
   --method POST
 ```
 
