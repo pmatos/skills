@@ -81,7 +81,7 @@ Choose an exploration strategy based on task type — **breadth-first discovery*
 
 > "Generate a short kebab-case name (2-3 words) that summarizes this task: [task description]. Reply with ONLY the name, nothing else. Example: auth-token-refresh"
 
-Sanitize the returned name: strip everything except lowercase letters, digits, and hyphens (`[^a-z0-9-]`), truncate to 50 characters, and trim leading/trailing hyphens. If the result is empty, fall back to `plan`. Use the sanitized name as `<plan-name>` for the rest of this session. The plan file path is `.ultraplan/<plan-name>.md`.
+Sanitize the returned name: strip everything except lowercase letters, digits, and hyphens (`[^a-z0-9-]`), truncate to 50 characters, and trim leading/trailing hyphens. If the result is empty, fall back to `plan`. Then check if `.ultraplan/<plan-name>.md` already exists — if so, append `-2`, `-3`, etc. until the name is unique. Use the final name as `<plan-name>` for the rest of this session. The plan file path is `.ultraplan/<plan-name>.md`.
 
 ```bash
 mkdir -p .ultraplan
