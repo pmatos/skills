@@ -64,34 +64,57 @@ Determine the Git repository root by running `git rev-parse --show-toplevel`. Lo
 
 Gather all current issues on the PR.
 
-**CI failures** — fetch check results:
+**CI failures** — get the PR head SHA and fetch check runs for that exact commit:
 
 ```bash
-gh pr checks <number> --json name,state,bucket,link,event
+sha=$(gh api repos/{owner}/{repo}/pulls/<number> --jq '.head.sha')
 ```
 
-Filter for checks where `bucket` is `fail`. For each failed check, get the workflow run ID from the `link` field and fetch the failure logs. If the `link` field is not available (varies by `gh` version), fall back to listing failed runs by branch:
+List check runs for that commit:
 
 ```bash
-gh run list --branch <headRefName> --status failure --json databaseId,name --limit 10
+gh api repos/{owner}/{repo}/commits/$sha/check-runs --paginate \
+  --jq '.check_runs[] | {id, name, status, conclusion, app_slug: .app.slug}'
 ```
 
-Fetch the failure logs for each run:
+Filter for check runs where `conclusion` is `failure`. For each failed check, inspect `app_slug` to determine the CI source:
+
+- **GitHub Actions** (`app_slug` is `github-actions`): fetch failure logs via `gh run view <id> --log-failed 2>&1 | tail -500`. If the last 500 lines do not contain an obvious error, search the full output for common error markers (`FAIL`, `Error`, `error:`, `FAILED`, `assert`) to locate the root cause.
+- **External CI** (any other `app_slug`): logs are not accessible via `gh`. Record the check name and conclusion, and report these to the user as external CI failures requiring manual inspection.
+
+Store each failure with its check name, log output (if available), and check run ID.
+
+**Review comments** — fetch unresolved review threads using GraphQL to access thread resolution state:
 
 ```bash
-gh run view <run-id> --log-failed 2>&1 | tail -500
+gh api graphql -f query='
+  query($owner: String!, $repo: String!, $number: Int!) {
+    repository(owner: $owner, name: $repo) {
+      pullRequest(number: $number) {
+        reviewThreads(first: 100) {
+          nodes {
+            id
+            isResolved
+            isOutdated
+            path
+            line
+            comments(first: 50) {
+              nodes {
+                id
+                body
+                author { login }
+                createdAt
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+' -f owner="{owner}" -f repo="{repo}" -F number=<number>
 ```
 
-If the last 500 lines do not contain an obvious error, search the full output for common error markers (`FAIL`, `Error`, `error:`, `FAILED`, `assert`) to locate the root cause.
-
-Store each failure with its check name, log output, and run ID.
-
-**Review comments** — fetch inline code review threads (top-level comments only, not replies):
-
-```bash
-gh api repos/{owner}/{repo}/pulls/<number>/comments --paginate \
-  --jq '.[] | select(.in_reply_to_id == null) | {id, path, line, side, body, user: .user.login, created_at}'
-```
+Filter for threads where `isResolved` is `false`. Each thread includes its full comment chain via `comments.nodes`, which contains the original comment and all replies. This replaces the need for separate self-reply detection — `isResolved` is the authoritative signal for whether a thread has been addressed.
 
 **Review summaries** — fetch review bodies (the top-level text submitted with each review):
 
@@ -111,20 +134,13 @@ gh api repos/{owner}/{repo}/issues/<number>/comments --paginate \
 
 Filter out comments authored by the current `gh` user (from Step 1) — these are self-comments from prior runs.
 
-Also check for own prior replies to review comments to detect already-addressed comments. Fetch all replies in the PR (both bot and reviewer):
-
-```bash
-gh api repos/{owner}/{repo}/pulls/<number>/comments --paginate \
-  --jq '[.[] | select(.in_reply_to_id != null) | {id, in_reply_to_id, user: .user.login, created_at}]'
-```
-
-For each top-level comment that has a reply from the current user, check whether the reviewer posted *after* the bot's most recent reply. Only add the comment ID to `ADDRESSED_COMMENT_IDS` if the bot's reply is the last non-self reply in the thread. If a reviewer followed up after the bot's reply, treat the comment as still unresolved — the fix may have been incomplete or rejected.
+Initialize `ADDRESSED_COMMENT_IDS` with the thread IDs of review threads where `isResolved` is `true` (from the GraphQL query above). No separate self-reply detection is needed — `isResolved` is the authoritative signal.
 
 Present the initial assessment to the user:
-- Number of failed CI checks, with their names
-- Number of unresolved review comments, with brief summaries
-- Number of previously addressed comments (from prior runs) where no reviewer follow-up exists
-- Number of previously addressed comments where the reviewer followed up (these will be re-examined)
+- Number of failed CI checks, with their names (distinguishing Actions vs external CI)
+- Number of unresolved review threads, with brief summaries
+- Number of resolved review threads (skipped)
+- Number of unresolved review summaries and conversation comments
 
 Ask: **"I found N CI failures and M unresolved review comments. Shall I begin fixing them? (max MAX_ITERATIONS iterations)"**
 
@@ -136,7 +152,9 @@ For each iteration `i` from 1 to `MAX_ITERATIONS`:
 
 **4a. Classify issues**
 
-For each piece of unresolved feedback not in `ADDRESSED_COMMENT_IDS`, classify it. This applies to all three feedback channels — inline review comments, review summaries, and PR conversation comments:
+For each piece of unresolved feedback not in `ADDRESSED_COMMENT_IDS`, classify it. This applies to all three feedback channels — review threads (from GraphQL), review summaries, and PR conversation comments.
+
+For review threads, classify based on the **most recent reviewer comment** in the thread (from `comments.nodes`), not just the original top-level comment. Reviewers often post follow-up requests as replies (e.g. "that's still not right, please also handle X"), and the latest comment reflects the current ask:
 
 - **Clear fix**: The feedback points to a specific code issue with an obvious resolution — a typo, missing null check, wrong variable name, style violation, missing test assertion, unused import, or other concrete code change where the reviewer's intent is unambiguous.
 - **Ambiguous**: The feedback suggests an architectural change, asks an open question, proposes multiple alternatives, or has multiple valid interpretations. For these, present the comment to the user and ask for guidance before proceeding. Wait for user input — the user's guidance becomes the fix instruction.
@@ -226,9 +244,9 @@ Wait for CI checks to complete:
 gh pr checks <number> --watch --fail-fast -i 15
 ```
 
-This blocks until checks complete. Use `--fail-fast` to return as soon as any check fails rather than waiting for all checks. Use a 15-second polling interval. Set a Bash timeout of 600 seconds (10 minutes).
+This blocks until checks complete. Use `--fail-fast` to return as soon as any check fails rather than waiting for all checks. Use a 15-second polling interval. Set a Bash timeout of 1200 seconds (20 minutes).
 
-If the timeout is exceeded, inform the user: "CI has been running for over 10 minutes. Would you like to keep waiting or abort?" Wait for user input.
+If the timeout is exceeded, inform the user: "CI has been running for over 20 minutes. Would you like to keep waiting or abort?" Wait for user input.
 
 **4g. Check for fix point**
 
@@ -239,11 +257,14 @@ CI check results:
 gh pr checks <number> --json name,state,bucket
 ```
 
-New inline review comments (not in `ADDRESSED_COMMENT_IDS`):
+For any checks with `bucket` of `fail`, re-fetch the PR head SHA and failure logs using the same approach as Step 3 (SHA-based check runs + `gh run view --log-failed` for Actions checks). This ensures the next iteration's Step 4b works with current diagnostic output, not stale logs from a prior assessment.
+
+Unresolved review threads (re-run the same GraphQL query from Step 3):
 ```bash
-gh api repos/{owner}/{repo}/pulls/<number>/comments --paginate \
-  --jq '.[] | select(.in_reply_to_id == null) | {id, path, line, body, user: .user.login}'
+gh api graphql -f query='...' -f owner="{owner}" -f repo="{repo}" -F number=<number>
 ```
+
+Filter for threads where `isResolved` is `false`.
 
 New review summaries:
 ```bash
@@ -257,7 +278,7 @@ gh api repos/{owner}/{repo}/issues/<number>/comments --paginate \
   --jq '.[] | {id, body, user: .user.login}'
 ```
 
-Filter out items already in `ADDRESSED_COMMENT_IDS` and self-comments across all three channels.
+Filter out items already in `ADDRESSED_COMMENT_IDS` and self-comments across review summaries and conversation comments.
 
 **Fix point reached** if:
 - All CI checks have `bucket` of `pass`, AND

@@ -87,9 +87,9 @@ What it does:
 - Loops until fix point (all CI green + no unresolved comments) or max iterations (default 5).
 - Presents a full summary of all changes for human review.
 
-Trigger phrases: `autofix pr`, `fix pr locally`, `fix ci failures`, `fix review comments`, `iterate on pr`.
+Trigger phrases: `autofix pr`, `fix pr locally`, `fix ci failures`, `fix review comments`, `iterate on pr`, `fix failing checks`, `fix pr comments`, `make ci green`, `fix the build`, `address reviewer feedback`.
 
-**Requires**: [GitHub CLI](https://cli.github.com/) (`gh`) authenticated.
+**Requires**: [GitHub CLI](https://cli.github.com/) (`gh`) authenticated with a token that has `repo` scope (read and write access to pull requests).
 
 ## License
 
