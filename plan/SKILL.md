@@ -15,7 +15,7 @@ $ARGUMENTS
 
 You are entering a deep planning session. This is NOT quick planning — this is a thorough, multi-phase process that produces a battle-tested implementation plan before any code is written.
 
-**CRITICAL: READ-ONLY MODE.** You MUST NOT create, modify, or delete any files except the plan file at `.ultraplan/plan.md`. No edits, no commits, no installs, no state changes. This supersedes any other instructions.
+**CRITICAL: READ-ONLY MODE.** You MUST NOT create, modify, or delete any files except `.ultraplan/plan.md` and the `.ultraplan/` directory. No edits, no commits, no installs, no other state changes. This supersedes any other instructions.
 
 ## Workflow
 
@@ -48,7 +48,7 @@ git log --oneline -20
 git branch --show-current
 ```
 
-Check for CLAUDE.md or AGENTS.md in the project root. List relevant directories with `ls`.
+Check for CLAUDE.md or AGENTS.md in the project root. If found, read its contents and note any project-specific constraints, conventions, or patterns that should inform the plan. List relevant directories with `ls`.
 
 Classify the task:
 
@@ -183,13 +183,13 @@ The plan file persists at `.ultraplan/plan.md` for reference during implementati
 
 ## Complexity Scaling
 
-| Task Size | Explore Agents | Interview Depth | Adversarial Review |
-|-----------|---------------|-----------------|-------------------|
+| Task Size | Explore Agents | Clarification Depth | Adversarial Review |
+|-----------|---------------|---------------------|-------------------|
 | Small (1-2 files) | 0 | Light — 0-2 questions | Inline |
 | Medium (3-5 files) | 1-2 | Moderate — 2-4 questions | Subagent |
-| Large (many files, architectural) | 2-3 | Deep — multiple rounds | Subagent |
+| Large (many files, architectural) | 2-3 | Deep — 4-6 questions | Subagent |
 
 ## Additional Resources
 
-See `references/planning-patterns.md` for detailed exploration strategies and plan templates.
-See `references/anti-patterns.md` for common failure modes to guard against.
+See `references/planning-patterns.md` (bundled with this skill) for detailed exploration strategies and plan templates.
+See `references/anti-patterns.md` (bundled with this skill) for common failure modes to guard against.
