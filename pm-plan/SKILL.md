@@ -66,9 +66,14 @@ For each area the task touches, explore systematically:
 - **History**: `git log --oneline -10 -- <relevant paths>` to understand recent changes
 - **Config**: Check build files, CI config, package manifests if relevant
 
-**For Medium/Large tasks**, dispatch parallel Explore agents (Agent tool, subagent_type: "Explore", mode: "plan"). Give each agent a specific, focused mission:
+**For Medium tasks**, dispatch 1-2 parallel Explore agents (Agent tool, subagent_type: "Explore", mode: "plan"). Choose a strategy based on task type — **breadth-first discovery**, **feature trace**, or **impact analysis**. See `references/planning-patterns.md` for agent assignments.
 
-Choose an exploration strategy based on task type — **breadth-first discovery** (scan layers in parallel), **feature trace** (follow a feature through the stack), or **impact analysis** (assess blast radius). See `references/planning-patterns.md` for detailed agent assignments and dispatch guidance.
+**For Large tasks**, dispatch exactly 3 parallel Explore agents (Agent tool, subagent_type: "Explore", mode: "plan") using the **Three-Concern Decomposition** — one agent per concern, all in a single message:
+1. **Architecture Understanding** — how the affected subsystems work, patterns, conventions, reference implementations
+2. **Change Surface Identification** — every file to modify/create, existing utilities to reuse
+3. **Risks, Edge Cases & Dependencies** — callers, consumers, edge cases, test gaps, integration points
+
+Each agent has a strict boundary: architecture doesn't propose changes, change surface doesn't assess risks, risks doesn't propose implementations. See `references/planning-patterns.md` for prompt templates and synthesis guidance.
 
 **For each discovery, capture:**
 - Existing functions/utilities to reuse (with `file_path:line_number`)
