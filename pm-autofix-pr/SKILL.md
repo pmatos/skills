@@ -6,7 +6,7 @@ user-invocable: true
 
 # Autofix PR
 
-Iteratively fix CI failures and address review comments on a GitHub PR, working entirely in the local CLI. Fetch failures and reviewer feedback, make code fixes, run local validation, commit, push, and wait for CI — repeating until all issues are resolved or a maximum iteration count is reached.
+Iteratively fix CI failures and address review comments on a GitHub PR, working entirely in the local CLI. Fetch failures and reviewer feedback, make code fixes, run local validation, commit, push, and wait for CI — repeating until all issues are resolved or a maximum iteration count is reached. After convergence, enters a monitoring phase that watches for new CI failures or review comments for a configurable duration before exiting.
 
 ## Prerequisites
 
@@ -41,6 +41,8 @@ git branch --show-current
 If the branches don't match, ask the user whether to check out the PR branch (`git switch <headRefName>`) or abort.
 
 Set `MAX_ITERATIONS` to 5, unless the user specified a different value as an argument (e.g., `/autofix-pr 10` or "autofix pr with 10 iterations").
+
+Set `MONITOR_DURATION` to 10 minutes, unless the user specified a different value as an argument (e.g., `/autofix-pr --monitor 20` or "autofix pr monitoring for 20 minutes"). The value is in minutes. Set to 0 to disable the monitoring phase entirely.
 
 Determine the current `gh` user for filtering self-comments later:
 
@@ -308,7 +310,36 @@ Iteration i/MAX_ITERATIONS complete.
 - Proceeding to next iteration...
 ```
 
-### Step 5: Final Summary
+### Step 5: Monitoring Phase
+
+If there are unresolved issues after `MAX_ITERATIONS`, skip the monitoring phase and go directly to Step 6.
+
+If `MONITOR_DURATION` is 0, skip the monitoring phase and go directly to Step 6.
+
+Otherwise, all issues are resolved — enter the monitoring phase. Report:
+
+**"All issues resolved. Monitoring PR for new CI failures or review comments for MONITOR_DURATION minutes... (Ctrl+C to stop early)"**
+
+Record the monitoring start time. Then loop:
+
+**5a. Wait 60 seconds.**
+
+**5b. Poll for new issues.**
+
+Re-fetch the current state using the same queries as Step 4g:
+- CI check results via `gh pr checks`
+- Unresolved review threads via GraphQL
+- New review summaries
+- New PR conversation comments
+
+Filter out items already in `ADDRESSED_COMMENT_IDS` and self-comments.
+
+**5c. Evaluate.**
+
+- **New issues found**: Report what was detected ("New CI failure in check X" or "New review comment from @user on file.ts"). Re-enter the fix loop (Step 4) with a fresh iteration counter (reset `i` to 1, keep `MAX_ITERATIONS` and `ADDRESSED_COMMENT_IDS` as-is). After the fix loop converges again, return to the monitoring phase with the remaining monitor time.
+- **No new issues**: Check elapsed time since monitoring started. If `MONITOR_DURATION` minutes have passed, exit to Step 6. Otherwise, continue to Step 5a.
+
+### Step 6: Final Summary
 
 Present a comprehensive report:
 
@@ -317,6 +348,7 @@ Present a comprehensive report:
 
 ### PR: #<number> — <title>
 ### Iterations: i of MAX_ITERATIONS
+### Monitoring: X minutes (if monitoring phase ran)
 
 ### Changes Made
 | Iteration | Commit | Fixes Applied |
@@ -334,4 +366,4 @@ Present a comprehensive report:
 
 If there are unresolved issues, ask: **"Would you like me to attempt further fixes on the remaining issues, or would you prefer to handle them manually?"**
 
-If everything is resolved: **"All CI checks pass and all review comments have been addressed. The PR is ready for re-review."**
+If everything is resolved: **"All CI checks pass and all review comments have been addressed. Monitoring period complete — the PR is ready for re-review."**
