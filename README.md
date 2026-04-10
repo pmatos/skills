@@ -106,6 +106,22 @@ Trigger phrases: `plan this`, `make a plan`, `implementation plan`, `deep plan`,
 
 No external dependencies.
 
+### `/fork` — Dual-Model Implementation
+
+Implements the same task with both Claude Code and OpenAI Codex CLI in parallel git worktrees, then runs the best-of skill to compare and select the superior implementation.
+
+What it does:
+- Creates two isolated git worktrees from the current HEAD.
+- Sends the identical prompt to both Claude Code (`claude -p`) and Codex (`codex exec --full-auto`) in parallel.
+- Collects the diffs and commit history from each implementation.
+- Invokes the best-of skill to compare correctness, code quality, and completeness — or performs an inline comparison as a fallback.
+- Merges the winning implementation into the original branch (with user confirmation).
+- Cleans up worktrees and temporary branches.
+
+Trigger phrases: `fork`, `race claude and codex`, `dual implement`, `run both models`, `compare implementations`, `implement with both`.
+
+**Requires**: [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) and [OpenAI Codex CLI](https://github.com/openai/codex) installed with `OPENAI_API_KEY` set.
+
 
 ## License
 
