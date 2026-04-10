@@ -33,3 +33,7 @@ Slash command `/pm-plan` that performs deep, multi-phase implementation planning
 ## best-of
 
 Slash command `/best-of` that compares code across two git worktrees against 15 software engineering best practices (correctness, security, SOLID, DRY, testing, etc.) and project contribution guidelines (CLAUDE.md, CONTRIBUTING.md, linter configs). Dispatches parallel analysis agents, scores each solution on a weighted rubric, and presents a structured verdict with specific file:line evidence.
+
+## is-skill
+
+Slash command `/is-skill` that analyzes the current session's conversation, context, and work patterns to determine whether the knowledge or workflow used could be extracted into a reusable Claude Code skill. Classifies proposals as user-level (cross-project, issue filed in `pmatos/skills`) or project-specific (issue filed in the current project's repo), then creates a GitHub issue with a structured skill proposal after user approval.
