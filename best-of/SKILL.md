@@ -1,6 +1,6 @@
 ---
-name: code-comparison
-description: This skill should be used when the user asks to "compare code", "compare worktrees", "compare solutions", "which solution is better", "compare branches", "code comparison", "diff worktrees", "evaluate solutions", "pick the better implementation", "compare implementations", "review both solutions", or wants a structured, criteria-driven comparison of code across two git worktrees. Also triggered by the /code-comparison command.
+name: best-of
+description: This skill should be used when the user asks to "compare code", "compare worktrees", "compare solutions", "which solution is better", "compare branches", "best of", "diff worktrees", "evaluate solutions", "pick the better implementation", "compare implementations", "review both solutions", or wants a structured, criteria-driven comparison of code across two git worktrees. Also triggered by the /best-of command.
 argument-hint: "<worktree-path-A> <worktree-path-B> [focus area or file path]"
 user-invocable: true
 ---
