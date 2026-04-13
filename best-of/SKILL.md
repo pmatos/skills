@@ -58,10 +58,10 @@ Files to search for (using Glob in each worktree root):
 - `CONTRIBUTING.md`, `CONTRIBUTING.rst`
 - `.editorconfig`
 - Linter configs: `.eslintrc*`, `.prettierrc*`, `pyproject.toml`, `setup.cfg`, `.flake8`, `.rubocop.yml`, `biome.json`, `deno.json`
-- CI configs: `.github/workflows/*.yml`, `Makefile`, `Taskfile.yml`, `justfile`
+- CI configs: `.github/workflows/*.{yml,yaml}`, `Makefile`, `Taskfile.yml`, `justfile`
 - `package.json` (scripts and lint config sections), `Cargo.toml`, `go.mod`, `tsconfig.json`
 
-Read each file found. Extract every actionable rule, convention, or constraint. Compile them into a **Project Rules Checklist** — one line per rule, with the source file referenced. This checklist is used in Step 5.
+Read each file found. Extract every actionable rule, convention, or constraint. Compile them into a **Project Rules Checklist** — one line per rule, with the source file and its directory scope referenced (e.g. rules from `src/backend/CLAUDE.md` apply only to files under `src/backend/`). Root-level files apply globally. When evaluating compliance in Step 5, only apply each rule to files within its scope.
 
 If the two worktrees have different guideline files, note the differences — this itself is a finding.
 
