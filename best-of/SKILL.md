@@ -37,13 +37,13 @@ Run a quick orientation in both:
 # For each worktree
 git -C <worktree> log --oneline -5
 git -C <worktree> branch --show-current
-git -C <worktree> diff --stat HEAD~1 HEAD  # last commit's scope
+git -C <worktree> show --stat --oneline -1  # last commit's scope
 ```
 
 If the two worktrees share a common ancestor (same repo, different branches), compute the divergence:
 
 ```bash
-MERGE_BASE=$(git -C <worktree-A> merge-base HEAD <worktree-B-branch>)
+MERGE_BASE=$(git -C <worktree-A> merge-base HEAD $(git -C <worktree-B> rev-parse HEAD))
 git -C <worktree-A> diff --stat $MERGE_BASE HEAD
 git -C <worktree-B> diff --stat $MERGE_BASE HEAD
 ```
@@ -59,7 +59,7 @@ Files to search for (using Glob in each worktree root):
 - `.editorconfig`
 - Linter configs: `.eslintrc*`, `.prettierrc*`, `pyproject.toml`, `setup.cfg`, `.flake8`, `.rubocop.yml`, `biome.json`, `deno.json`
 - CI configs: `.github/workflows/*.yml`, `Makefile`, `Taskfile.yml`, `justfile`
-- `package.json` (scripts and lint config sections), `Cargo.toml`, `go.mod`
+- `package.json` (scripts and lint config sections), `Cargo.toml`, `go.mod`, `tsconfig.json`
 
 Read each file found. Extract every actionable rule, convention, or constraint. Compile them into a **Project Rules Checklist** — one line per rule, with the source file referenced. This checklist is used in Step 5.
 
@@ -80,8 +80,10 @@ git -C <worktree-B> diff --name-only $MERGE_BASE HEAD
 
 **Strategy B — Direct diff** (when worktrees are independent):
 ```bash
-diff -rq --exclude='.git' <worktree-A> <worktree-B> | head -100
+diff -rq --exclude='.git' <worktree-A> <worktree-B> | head -200
 ```
+
+If the output reaches exactly 200 lines, warn the user that the file list was truncated and suggest narrowing the comparison scope with a focus area argument.
 
 **Strategy C — Focused** (when user specified a file or directory):
 Compare only the specified path(s) across both worktrees.
