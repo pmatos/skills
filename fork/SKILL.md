@@ -45,7 +45,7 @@ Run `git status --porcelain`. If there are uncommitted changes, warn the user an
 Generate a short unique suffix:
 
 ```bash
-SUFFIX=$(date +%s%N | sha256sum | head -c 8)
+SUFFIX=$(python3 -c "import time,hashlib; print(hashlib.sha256(str(time.time_ns()).encode()).hexdigest()[:8])")
 ```
 
 Create a temporary directory and two worktrees branching from the current HEAD:
