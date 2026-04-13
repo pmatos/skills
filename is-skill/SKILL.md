@@ -153,7 +153,7 @@ Compose a structured skill proposal with:
 6. **Extracted Knowledge**: The key insights, patterns, or domain knowledge that make this skill valuable — what would be lost if the session ended without capturing it.
 7. **Complexity Estimate**: Simple (< 50 lines SKILL.md), Medium (50-150 lines), or Complex (150+ lines, may need reference files).
 
-Present this proposal to the user using the `AskUserQuestion` tool and ask:
+Present this proposal to the user and ask:
 - Does this look right?
 - Any adjustments to the name, scope, or workflow?
 - Should I proceed with creating the GitHub issue?
