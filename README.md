@@ -121,7 +121,7 @@ What it does:
 
 Trigger phrases: `is this a skill`, `can we extract a skill`, `skill extraction`, `is there a reusable pattern here`, `should this be a skill`, `extract skill`.
 
-No external dependencies.
+**Requires**: [GitHub CLI](https://cli.github.com/) authenticated (optional, for automated issue creation).
 
 ## License
 

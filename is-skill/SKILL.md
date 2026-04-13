@@ -10,7 +10,7 @@ Analyze the current session's conversation, context, and work patterns to determ
 
 ## Workflow
 
-Run Steps 1 and 2 **in parallel** (they are independent). Then run Steps 3-6 sequentially.
+Run Steps 1 and 2 **in parallel** (they are independent). Then run Steps 3-7 sequentially.
 
 ### Step 1: Gather Session Context
 
@@ -54,7 +54,7 @@ for fname in files:
     path = os.path.join(log_dir, fname)
     session_id = fname.replace('.jsonl', '')
     print(f'\n=== Session: {session_id} ===')
-    with open(path) as fh:
+    with open(path, encoding='utf-8') as fh:
         for line in fh:
             line = line.strip()
             if not line:
@@ -212,13 +212,16 @@ Use this template:
 Try the following methods in order to create the issue:
 
 1. **GitHub MCP tools**: Look for `mcp__github__create_issue` or similar tools via ToolSearch. If available, use them.
-2. **`gh` CLI**: If available, use:
+2. **`gh` CLI**: If available, use a heredoc to avoid shell escaping issues with multi-line markdown:
    ```bash
-   gh issue create --repo <owner/repo> --title "<title>" --body "<body>"
+   gh issue create --repo <owner/repo> --title "<title>" --body "$(cat <<'EOF'
+   <body>
+   EOF
+   )"
    ```
 3. **Fallback**: If neither is available, present the full issue title and body to the user and ask them to create it manually. Provide the target repository URL.
 
-For **user-level skills**, the target repo is `pmatos/skills`.
+For **user-level skills**, the target repo is `pmatos/skills` — unless the current repo IS `pmatos/skills`, in which case skip issue creation and instead add the skill directly (create the `<skill-name>/SKILL.md` file and update `CLAUDE.md` and `README.md`).
 For **project-specific skills**, the target repo is the current project's `owner/repo` (from Step 2).
 
 ### Step 7: Report
