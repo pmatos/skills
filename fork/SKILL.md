@@ -34,6 +34,7 @@ Record the current state:
 ```bash
 REPO_ROOT=$(git rev-parse --show-toplevel)
 BRANCH=$(git branch --show-current)
+[ -z "$BRANCH" ] && { echo "ERROR: detached HEAD — checkout a branch first"; exit 1; }
 SHORT_SHA=$(git rev-parse --short HEAD)
 ```
 
@@ -44,14 +45,15 @@ Run `git status --porcelain`. If there are uncommitted changes, warn the user an
 Generate a short unique suffix:
 
 ```bash
-SUFFIX=$(date +%s | tail -c 6)
+SUFFIX=$(date +%s%N | sha256sum | head -c 8)
 ```
 
-Create two worktrees branching from the current HEAD:
+Create a temporary directory and two worktrees branching from the current HEAD:
 
 ```bash
-git worktree add "$REPO_ROOT/../fork-claude-$SUFFIX" -b fork/claude-$SUFFIX HEAD
-git worktree add "$REPO_ROOT/../fork-codex-$SUFFIX" -b fork/codex-$SUFFIX HEAD
+FORK_DIR=$(mktemp -d "${TMPDIR:-/tmp}/fork-XXXXXX")
+git worktree add "$FORK_DIR/claude-$SUFFIX" -b fork/claude-$SUFFIX HEAD
+git worktree add "$FORK_DIR/codex-$SUFFIX" -b fork/codex-$SUFFIX HEAD
 ```
 
 Record the two worktree absolute paths and branch names — you will need them in every subsequent step.
@@ -193,9 +195,10 @@ rm -f "$PROMPT_FILE"
 Remove both worktrees:
 
 ```bash
-git worktree remove "$REPO_ROOT/../fork-claude-$SUFFIX" --force
-git worktree remove "$REPO_ROOT/../fork-codex-$SUFFIX" --force
+git worktree remove "$FORK_DIR/claude-$SUFFIX" --force
+git worktree remove "$FORK_DIR/codex-$SUFFIX" --force
 git worktree prune
+rm -rf "$FORK_DIR"
 ```
 
 Optionally delete the fork branches if the user no longer needs them:
