@@ -123,6 +123,22 @@ Trigger phrases: `fork`, `race claude and codex`, `dual implement`, `run both mo
 **Requires**: [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) and [OpenAI Codex CLI](https://github.com/openai/codex) installed with `OPENAI_API_KEY` set.
 
 
+### `/is-skill` — Skill Extraction Analyzer
+
+Analyzes the current session's conversation, context, and work patterns to determine whether the knowledge or workflow used could be extracted into a reusable Claude Code skill. Creates a GitHub issue with a structured proposal after user approval.
+
+What it does:
+- Mines session logs and conversation history to identify repeatable patterns, complex workflows, or domain knowledge worth codifying.
+- Evaluates skill indicators: repeated workflows, complex coordination, domain knowledge bottlenecks, user-taught processes.
+- Classifies the proposal as user-level (general, cross-project) or project-specific.
+- Drafts a structured skill proposal with name, trigger phrases, workflow outline, and extracted knowledge.
+- Presents the proposal for user approval before creating a GitHub issue.
+- Creates the issue in `pmatos/skills` for user-level skills, or in the current project's repo for project-specific skills.
+
+Trigger phrases: `is this a skill`, `can we extract a skill`, `skill extraction`, `is there a reusable pattern here`, `should this be a skill`, `extract skill`.
+
+**Requires**: [GitHub CLI](https://cli.github.com/) authenticated (optional, for automated issue creation).
+
 ## License
 
 MIT
