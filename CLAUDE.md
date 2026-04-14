@@ -30,6 +30,10 @@ Slash command `/pm-autofix-pr` that iteratively fixes CI failures and addresses 
 
 Slash command `/pm-plan` that performs deep, multi-phase implementation planning with parallel agent exploration, targeted clarifying questions, and structured plan output to `.ultraplan/<plan-name>.md` — all locally, without web sessions.
 
+## fork
+
+Slash command `/fork` that accepts a prompt and implements it with both Claude Code and OpenAI Codex CLI in parallel git worktrees. After both finish, runs the best-of skill to compare implementations and pick the winner.
+
 ## best-of
 
 Slash command `/best-of` that compares code across two git worktrees against 15 software engineering best practices (correctness, security, SOLID, DRY, testing, etc.) and project contribution guidelines (CLAUDE.md, CONTRIBUTING.md, linter configs). Dispatches parallel analysis agents, scores each solution on a weighted rubric, and presents a structured verdict with specific file:line evidence.
