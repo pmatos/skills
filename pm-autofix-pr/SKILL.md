@@ -10,7 +10,18 @@ Iteratively fix CI failures and address review comments on a GitHub PR, working 
 
 ## Prerequisites
 
-- `gh` CLI installed and authenticated with a token that has `repo` scope (read and write access to pull requests). The skill posts reply comments on PR review threads, which requires write permission.
+- `gh` CLI installed and authenticated with a token that has `repo` scope (read and write access to pull requests). The skill posts reply comments on PR review threads and resolves review threads, which requires write permission.
+
+## Configuration
+
+All parameters below have sensible defaults and can be overridden via the user's prompt arguments (e.g., `/pm-autofix-pr 10 --ci-timeout 30 --monitor 0`).
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `MAX_ITERATIONS` | 5 | Maximum number of fix-loop iterations before stopping. |
+| `MONITOR_DURATION` | 10 min | Minutes to watch for new failures after convergence. Set to 0 to skip monitoring. |
+| `CI_TIMEOUT` | 20 min | Minutes to wait for CI checks before prompting the user. |
+| `LOG_TAIL_LINES` | 500 | Lines of CI failure log to inspect when diagnosing errors. |
 
 ## Workflow
 
@@ -40,9 +51,7 @@ git branch --show-current
 
 If the branches don't match, ask the user whether to check out the PR branch (`git switch <headRefName>`) or abort.
 
-Set `MAX_ITERATIONS` to 5, unless the user specified a different value as an argument (e.g., `/autofix-pr 10` or "autofix pr with 10 iterations").
-
-Set `MONITOR_DURATION` to 10 minutes, unless the user specified a different value as an argument (e.g., `/autofix-pr --monitor 20` or "autofix pr monitoring for 20 minutes"). The value is in minutes. Set to 0 to disable the monitoring phase entirely.
+Set `MAX_ITERATIONS`, `MONITOR_DURATION`, `CI_TIMEOUT`, and `LOG_TAIL_LINES` from the user's prompt arguments, falling back to the defaults listed in the **Configuration** section above.
 
 Determine the current `gh` user for filtering self-comments later:
 
@@ -81,7 +90,7 @@ gh api repos/{owner}/{repo}/commits/$sha/check-runs --paginate \
 
 Filter for check runs with a terminal non-success `conclusion`. The conclusions to detect are: `failure`, `timed_out`, `cancelled`, `startup_failure`, and `action_required`. For each such check, inspect `app_slug` and `conclusion` to determine how to handle it:
 
-- **Fixable failures** (`conclusion` is `failure` AND `app_slug` is `github-actions`): fetch failure logs via `gh run view <id> --log-failed 2>&1 | tail -500`. If the last 500 lines do not contain an obvious error, search the full output for common error markers (`FAIL`, `Error`, `error:`, `FAILED`, `assert`) to locate the root cause.
+- **Fixable failures** (`conclusion` is `failure` AND `app_slug` is `github-actions`): fetch failure logs via `gh run view <id> --log-failed 2>&1 | tail -$LOG_TAIL_LINES`. If the last `LOG_TAIL_LINES` lines do not contain an obvious error, search the full output for common error markers (`FAIL`, `Error`, `error:`, `FAILED`, `assert`) to locate the root cause.
 - **Non-fixable CI issues** (`conclusion` is `timed_out`, `cancelled`, `startup_failure`, or `action_required`, OR `app_slug` is not `github-actions`): logs are either unavailable or the issue is not code-fixable. Record the check name and conclusion, and report these to the user as CI issues requiring manual inspection. Do not attempt to auto-fix these.
 
 Store each item with its check name, conclusion, log output (if available), check run ID, and whether it is fixable.
@@ -227,7 +236,9 @@ If the push fails due to a network error, retry up to 4 times with exponential b
 
 **4e. Reply to addressed feedback and record IDs**
 
-For each review thread addressed in this iteration, post a reply on GitHub. Use the `databaseId` of the first comment in the thread (from the GraphQL query's `comments.nodes[0].databaseId`) — this is the numeric REST ID required by the reply endpoint:
+For each review thread addressed in this iteration, post a reply on GitHub and then resolve the thread.
+
+**Reply** — use the `databaseId` of the first comment in the thread (from the GraphQL query's `comments.nodes[0].databaseId`) — this is the numeric REST ID required by the reply endpoint:
 
 ```bash
 gh api repos/{owner}/{repo}/pulls/<number>/comments \
@@ -236,7 +247,19 @@ gh api repos/{owner}/{repo}/pulls/<number>/comments \
   --method POST
 ```
 
-If the API call fails with 403 or 429 (rate limiting), wait 60 seconds and retry once. If it still fails, note the error and continue — the fix was already pushed.
+**Resolve** — use the GraphQL node `id` of the review thread (from `reviewThreads.nodes[].id`) to mark it as resolved:
+
+```bash
+gh api graphql -f query='
+  mutation($threadId: ID!) {
+    resolveReviewThread(input: {threadId: $threadId}) {
+      thread { isResolved }
+    }
+  }
+' -f threadId="<thread-node-id>"
+```
+
+If either API call fails with 403 or 429 (rate limiting), wait 60 seconds and retry once. If it still fails, note the error and continue — the fix was already pushed. A failed resolve is non-fatal: the thread will remain unresolved on GitHub but the code fix is in place.
 
 Add the IDs of all addressed feedback to `ADDRESSED_COMMENT_IDS` — this includes review thread IDs, review summary IDs, and conversation comment IDs. All three channels must be tracked to prevent Step 4g from re-surfacing already-fixed items.
 
@@ -248,9 +271,9 @@ Wait for CI checks to complete:
 gh pr checks <number> --watch --fail-fast -i 15
 ```
 
-This blocks until checks complete. Use `--fail-fast` to return as soon as any check fails rather than waiting for all checks. Use a 15-second polling interval. Set a Bash timeout of 1200 seconds (20 minutes).
+This blocks until checks complete. Use `--fail-fast` to return as soon as any check fails rather than waiting for all checks. Use a 15-second polling interval. Set a Bash timeout of `CI_TIMEOUT` minutes.
 
-If the timeout is exceeded, inform the user: "CI has been running for over 20 minutes. Would you like to keep waiting or abort?" Wait for user input.
+If the timeout is exceeded, inform the user: "CI has been running for over `CI_TIMEOUT` minutes. Would you like to keep waiting or abort?" Wait for user input.
 
 **4g. Check for fix point**
 
