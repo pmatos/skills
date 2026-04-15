@@ -19,8 +19,8 @@ All parameters below have sensible defaults and can be overridden via the user's
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `MAX_ITERATIONS` | 5 | Maximum number of fix-loop iterations before stopping. |
-| `MONITOR_DURATION` | 10 min | Minutes to watch for new failures after convergence. Set to 0 to skip monitoring. |
-| `CI_TIMEOUT` | 20 min | Minutes to wait for CI checks before prompting the user. |
+| `MONITOR_DURATION` | 10 | Minutes to watch for new failures after convergence. Set to 0 to skip monitoring. |
+| `CI_TIMEOUT` | 20 | Minutes to wait for CI checks before prompting the user. |
 | `LOG_TAIL_LINES` | 500 | Lines of CI failure log to inspect when diagnosing errors. |
 
 ## Workflow
