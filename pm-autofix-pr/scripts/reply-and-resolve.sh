@@ -17,9 +17,10 @@ THREAD_NODE_ID="$5"
 MESSAGE="$6"
 
 reply_to_comment() {
-  gh api "repos/${OWNER}/${REPO}/pulls/${PR_NUMBER}/comments" \
+  # Use the dedicated replies endpoint — POST .../comments with `in_reply_to_id`
+  # is rejected (422) by the current API.
+  gh api "repos/${OWNER}/${REPO}/pulls/${PR_NUMBER}/comments/${COMMENT_DB_ID}/replies" \
     -f body="$MESSAGE" \
-    -F in_reply_to_id="$COMMENT_DB_ID" \
     --method POST 2>&1
 }
 

@@ -55,7 +55,7 @@ Find CLAUDE.md (or AGENTS.md) by walking from working directory to repo root. Ex
 
 Run `scripts/fetch-pr-state.sh {owner} {repo} {pr_number} {gh_user} {LOG_TAIL_LINES}`. Parse the JSON output to get: CI failures (fixable vs non-fixable), unresolved review threads, review summaries, PR conversation comments, and resolved thread IDs.
 
-Initialize `ADDRESSED_IDS` with the resolved thread IDs from the output.
+Initialize `ADDRESSED_IDS` with the resolved thread IDs from the output. Initialize `REJECTED_THREADS` as an empty map `{thread_id → latest_comment_db_id_at_rejection}`.
 
 Present the initial assessment and ask: **"Found N CI failures and M unresolved review comments. Begin fixing?"**
 
@@ -86,7 +86,7 @@ For ambiguous comments (open questions, architectural suggestions, multiple alte
 
 Loop until fixed point:
 
-**5a. Reject invalid comments.** For each comment evaluated as INVALID, run `scripts/reject-comment.sh` with the appropriate category and a clear reason derived from the evaluators' reasoning. Add to `ADDRESSED_IDS`.
+**5a. Reject invalid comments.** For each comment evaluated as INVALID, run `scripts/reject-comment.sh` with the appropriate category and a clear reason derived from the evaluators' reasoning. Record the thread in `REJECTED_THREADS` as `thread_id → current_latest_comment_db_id`. Do **not** add to `ADDRESSED_IDS` — rejected threads are intentionally left unresolved so the reviewer can push back, and Step 5g must re-surface the thread when they do.
 
 **5b. Fix valid comments and CI failures.** Apply fixes one issue at a time:
 - CI failures: read error logs, identify failing file/line, read source, fix.
@@ -103,7 +103,7 @@ After handling each review summary or PR conversation comment, add its ID to `AD
 
 **5f. Wait for CI.** Run `scripts/wait-for-ci.sh {pr_number} {CI_TIMEOUT}`. On timeout (exit 2), ask the user whether to keep waiting or abort.
 
-**5g. Re-fetch state and check for fixed point.** Run `scripts/fetch-pr-state.sh` again. Filter out `ADDRESSED_IDS`. If the output contains a non-empty `errors` array, do **not** declare a fixed point — report the fetch failures to the user and retry after 30 seconds.
+**5g. Re-fetch state and check for fixed point.** Run `scripts/fetch-pr-state.sh` again. Filter out threads whose ID is in `ADDRESSED_IDS`. For each thread in `REJECTED_THREADS`, suppress it **only if** its newest comment databaseId still matches the value recorded at rejection; if a later comment exists, the reviewer has replied — remove the thread from `REJECTED_THREADS` and treat it as fresh feedback to re-evaluate in Step 4. If the output contains a non-empty `errors` array, do **not** declare a fixed point — report the fetch failures to the user and retry after 30 seconds.
 
 **Fixed point reached** if:
 - All CI checks pass (no `fail` bucket — `cancel` is informational, doesn't block)

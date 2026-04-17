@@ -36,9 +36,9 @@ BODY="${PREFIX} ${REASON}
 
 _This assessment was made by two independent AI reviewers (Claude Opus 4.6 and GPT-5.4). If you disagree, please reply and we'll re-evaluate._"
 
-gh api "repos/${OWNER}/${REPO}/pulls/${PR_NUMBER}/comments" \
-  -f body="$BODY" \
-  -F in_reply_to_id="$COMMENT_DB_ID" \
-  --method POST 2>/dev/null || {
-    echo "WARNING: Failed to post rejection reply (non-fatal)" >&2
-  }
+if ! gh api "repos/${OWNER}/${REPO}/pulls/${PR_NUMBER}/comments/${COMMENT_DB_ID}/replies" \
+    -f body="$BODY" \
+    --method POST; then
+  echo "ERROR: Failed to post rejection reply for comment ${COMMENT_DB_ID}" >&2
+  exit 1
+fi
