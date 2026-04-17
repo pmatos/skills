@@ -78,60 +78,68 @@ while IFS= read -r check; do
   CI_FAILURES=$(echo "$CI_FAILURES" | jq --argjson e "$entry" '. + [$e]')
 done < "$TMPDIR/checks_raw.jsonl"
 
-# --- Unresolved review threads (GraphQL) ---
-if ! THREADS_JSON=$(gh api graphql -f query='
-  query($owner: String!, $repo: String!, $number: Int!) {
-    repository(owner: $owner, name: $repo) {
-      pullRequest(number: $number) {
-        reviewThreads(first: 100) {
-          pageInfo { hasNextPage }
-          nodes {
-            id
-            isResolved
-            isOutdated
-            path
-            line
-            comments(first: 50) {
-              pageInfo { hasNextPage }
-              nodes {
-                id
-                databaseId
-                body
-                author { login }
-                createdAt
+# --- Unresolved review threads (GraphQL, paginated) ---
+# Paginate review threads so large PRs (>100 threads) do not hard-fail
+# convergence. Each thread includes the first 100 comments plus a
+# `latestComment` alias for reliable rejection-tracking of long threads.
+: > "$TMPDIR/thread_pages.jsonl"
+THREADS_CURSOR=""
+THREADS_FETCH_OK=true
+while :; do
+  if [[ -z "$THREADS_CURSOR" ]]; then
+    cursor_args=()
+  else
+    cursor_args=(-f cursor="$THREADS_CURSOR")
+  fi
+  if ! page=$(gh api graphql -f query='
+    query($owner: String!, $repo: String!, $number: Int!, $cursor: String) {
+      repository(owner: $owner, name: $repo) {
+        pullRequest(number: $number) {
+          reviewThreads(first: 100, after: $cursor) {
+            pageInfo { hasNextPage endCursor }
+            nodes {
+              id
+              isResolved
+              isOutdated
+              path
+              line
+              comments(first: 100) {
+                pageInfo { hasNextPage }
+                nodes {
+                  id
+                  databaseId
+                  body
+                  author { login }
+                  createdAt
+                }
+              }
+              latestComment: comments(last: 1) {
+                nodes { id databaseId author { login } createdAt }
               }
             }
           }
         }
       }
     }
-  }
-' -f owner="$OWNER" -f repo="$REPO" -F number="$PR_NUMBER" 2>"$TMPDIR/err_threads.txt"); then
-  ERRORS=$(echo "$ERRORS" | jq --arg e "review_threads: $(cat "$TMPDIR/err_threads.txt")" '. + [$e]')
-  THREADS_JSON='{}'
+  ' -f owner="$OWNER" -f repo="$REPO" -F number="$PR_NUMBER" "${cursor_args[@]}" 2>"$TMPDIR/err_threads.txt"); then
+    ERRORS=$(echo "$ERRORS" | jq --arg e "review_threads: $(cat "$TMPDIR/err_threads.txt")" '. + [$e]')
+    THREADS_FETCH_OK=false
+    break
+  fi
+  echo "$page" | jq -c '.data.repository.pullRequest.reviewThreads.nodes[]' >> "$TMPDIR/thread_pages.jsonl"
+  has_next=$(echo "$page" | jq -r '.data.repository.pullRequest.reviewThreads.pageInfo.hasNextPage')
+  [[ "$has_next" == "true" ]] || break
+  THREADS_CURSOR=$(echo "$page" | jq -r '.data.repository.pullRequest.reviewThreads.pageInfo.endCursor')
+done
+
+if [[ "$THREADS_FETCH_OK" == "true" ]]; then
+  THREAD_NODES=$(jq -s '.' "$TMPDIR/thread_pages.jsonl")
+else
+  THREAD_NODES='[]'
 fi
 
-UNRESOLVED_THREADS=$(echo "$THREADS_JSON" | jq '
-  [.data.repository.pullRequest.reviewThreads.nodes[]
-   | select(.isResolved == false)]' 2>/dev/null || echo '[]')
-
-RESOLVED_THREAD_IDS=$(echo "$THREADS_JSON" | jq '
-  [.data.repository.pullRequest.reviewThreads.nodes[]
-   | select(.isResolved == true) | .id]' 2>/dev/null || echo '[]')
-
-# Check for truncation (fail closed — prevents false convergence on large PRs)
-THREADS_TRUNCATED=$(echo "$THREADS_JSON" | jq '
-  .data.repository.pullRequest.reviewThreads.pageInfo.hasNextPage // false' 2>/dev/null || echo 'false')
-COMMENTS_TRUNCATED=$(echo "$THREADS_JSON" | jq '
-  [.data.repository.pullRequest.reviewThreads.nodes[]
-   | .comments.pageInfo.hasNextPage] | any' 2>/dev/null || echo 'false')
-
-if [[ "$THREADS_TRUNCATED" == "true" ]]; then
-  ERRORS=$(echo "$ERRORS" | jq --arg e "review_threads: truncated — PR has >100 review threads" '. + [$e]')
-fi
-if [[ "$COMMENTS_TRUNCATED" == "true" ]]; then
-  ERRORS=$(echo "$ERRORS" | jq --arg e "review_thread_comments: truncated — a thread has >50 comments" '. + [$e]')
-fi
+UNRESOLVED_THREADS=$(echo "$THREAD_NODES" | jq '[.[] | select(.isResolved == false)]' 2>/dev/null || echo '[]')
+RESOLVED_THREAD_IDS=$(echo "$THREAD_NODES" | jq '[.[] | select(.isResolved == true) | .id]' 2>/dev/null || echo '[]')
 
 # --- Review summaries with supersession logic ---
 if ! REVIEWS_RAW=$(gh api "repos/${OWNER}/${REPO}/pulls/${PR_NUMBER}/reviews" --paginate \

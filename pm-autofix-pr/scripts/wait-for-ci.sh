@@ -17,11 +17,25 @@ TIMEOUT_SECONDS=$((TIMEOUT_MINUTES * 60))
 
 if timeout "${TIMEOUT_SECONDS}s" gh pr checks "$PR_NUMBER" --watch --fail-fast -i 15 2>&1; then
   exit 0
-else
-  RC=$?
-  if [[ $RC -eq 124 ]]; then
-    echo "TIMEOUT: CI checks did not complete within ${TIMEOUT_MINUTES} minutes" >&2
-    exit 2
-  fi
-  exit $RC
 fi
+RC=$?
+
+if [[ $RC -eq 124 ]]; then
+  echo "TIMEOUT: CI checks did not complete within ${TIMEOUT_MINUTES} minutes" >&2
+  exit 2
+fi
+
+# Independently verify status to distinguish a genuine CI failure (exit 1)
+# from an infrastructure/auth/rate-limit error (exit 3). `gh pr checks`
+# collapses both into non-zero exits, so callers need a separate signal.
+if ! status_json=$(gh pr checks "$PR_NUMBER" --json bucket 2>&1); then
+  echo "ERROR: Could not fetch CI status after watch failed: $status_json" >&2
+  exit 3
+fi
+
+if echo "$status_json" | jq -e 'any(.[]; .bucket == "fail")' > /dev/null 2>&1; then
+  exit 1
+fi
+
+echo "ERROR: gh pr checks --watch exited $RC but no failed bucket found — treating as infrastructure error" >&2
+exit 3
