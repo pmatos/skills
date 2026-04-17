@@ -25,14 +25,22 @@ trap 'rm -rf "$TMPDIR"' EXIT
 ERRORS="[]"
 
 # --- Fetch head SHA ---
-HEAD_SHA=$(gh api "repos/${OWNER}/${REPO}/pulls/${PR_NUMBER}" --jq '.head.sha')
+# Guarded so transient API failures surface in the structured `errors` output
+# instead of aborting the whole script under `set -euo pipefail`.
+if ! HEAD_SHA=$(gh api "repos/${OWNER}/${REPO}/pulls/${PR_NUMBER}" --jq '.head.sha' 2>"$TMPDIR/err_sha.txt"); then
+  ERRORS=$(echo "$ERRORS" | jq --arg e "head_sha: $(cat "$TMPDIR/err_sha.txt")" '. + [$e]')
+  HEAD_SHA=""
+fi
 
 # --- CI check runs ---
-if ! gh api "repos/${OWNER}/${REPO}/commits/${HEAD_SHA}/check-runs" --paginate \
-  --jq '.check_runs[] | {id, name, status, conclusion, app_slug: .app.slug}' \
-  > "$TMPDIR/checks_raw.jsonl" 2>"$TMPDIR/err_ci.txt"; then
-  ERRORS=$(echo "$ERRORS" | jq --arg e "ci_check_runs: $(cat "$TMPDIR/err_ci.txt")" '. + [$e]')
-  : > "$TMPDIR/checks_raw.jsonl"
+: > "$TMPDIR/checks_raw.jsonl"
+if [[ -n "$HEAD_SHA" ]]; then
+  if ! gh api "repos/${OWNER}/${REPO}/commits/${HEAD_SHA}/check-runs" --paginate \
+    --jq '.check_runs[] | {id, name, status, conclusion, app_slug: .app.slug}' \
+    > "$TMPDIR/checks_raw.jsonl" 2>"$TMPDIR/err_ci.txt"; then
+    ERRORS=$(echo "$ERRORS" | jq --arg e "ci_check_runs: $(cat "$TMPDIR/err_ci.txt")" '. + [$e]')
+    : > "$TMPDIR/checks_raw.jsonl"
+  fi
 fi
 
 # Filter for terminal non-success conclusions
@@ -52,12 +60,11 @@ while IFS= read -r check; do
 
   if [[ "$conclusion" == "failure" && "$app_slug" == "github-actions" ]]; then
     fixable=true
+    # For GitHub Actions, the check-run `id` equals the jobs.id, so `gh run view
+    # --job` fetches logs for exactly this job — avoiding the prior bug where
+    # every failing check on the SHA got logs from the first workflow run.
     # Best-effort: log fetching can fail for many reasons (expired, permissions, etc.)
-    run_id=$(gh api "repos/${OWNER}/${REPO}/actions/runs" \
-      --jq ".workflow_runs[] | select(.head_sha==\"${HEAD_SHA}\") | .id" 2>/dev/null | head -1 || true)
-    if [[ -n "$run_id" ]]; then
-      log_excerpt=$(gh run view "$run_id" --log-failed 2>&1 | tail -"$LOG_TAIL_LINES" || true)
-    fi
+    log_excerpt=$(gh run view --job "$check_id" --log-failed 2>&1 | tail -"$LOG_TAIL_LINES" || true)
   fi
 
   entry=$(jq -n \
