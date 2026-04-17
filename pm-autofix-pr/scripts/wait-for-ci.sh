@@ -15,10 +15,15 @@ PR_NUMBER="$1"
 TIMEOUT_MINUTES="${2:-20}"
 TIMEOUT_SECONDS=$((TIMEOUT_MINUTES * 60))
 
-if timeout "${TIMEOUT_SECONDS}s" gh pr checks "$PR_NUMBER" --watch --fail-fast -i 15 2>&1; then
+# Capture the real exit status of `timeout`. Using `if ...; then exit 0; fi`
+# and then reading `$?` would return the `if` compound's status (0 when the
+# then-branch did not run), which would mask the 124 timeout signal.
+RC=0
+timeout "${TIMEOUT_SECONDS}s" gh pr checks "$PR_NUMBER" --watch --fail-fast -i 15 2>&1 || RC=$?
+
+if [[ $RC -eq 0 ]]; then
   exit 0
 fi
-RC=$?
 
 if [[ $RC -eq 124 ]]; then
   echo "TIMEOUT: CI checks did not complete within ${TIMEOUT_MINUTES} minutes" >&2
