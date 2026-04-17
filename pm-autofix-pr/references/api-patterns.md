@@ -12,26 +12,45 @@ Returns the authenticated user object. Use `login` for self-comment filtering. I
 
 ## Identifying the PR
 
-The MCP has no equivalent of `gh pr view`'s branch autodetect, so combine local git with `list_pull_requests`:
+The MCP has no equivalent of `gh pr view`'s branch autodetect, so combine local git with `list_pull_requests` and cascade through the remotes a user might have configured:
 
 ```bash
-git remote get-url origin     # parse to {owner}/{repo}
-git rev-parse --abbrev-ref HEAD
+git remote get-url origin        # parse to {origin_owner}/{origin_repo}
+git remote get-url upstream      # optional — present in fork checkouts
+git rev-parse --abbrev-ref HEAD  # local branch name
 ```
 
 Owner/repo parsing rules: strip `git@github.com:` or `https://github.com/` prefixes and any trailing `.git`.
 
+**Origin lookup (default case):**
+
 ```
 mcp__github__list_pull_requests(
-  owner=<owner>,
-  repo=<repo>,
-  head="<owner>:<branch>",
-  state="open",
-  perPage=1
+  owner=<origin_owner>, repo=<origin_repo>,
+  head="<origin_owner>:<branch>",
+  state="open", perPage=5
 )
 ```
 
-Returns an array of PR summaries. Empty → no open PR for the branch; stop.
+**Upstream lookup (fork workflow fallback).** If origin returned no open PRs and an `upstream` remote exists, query upstream with `head` still scoped to the fork owner — GitHub expects `head="<fork_owner>:<branch>"` for cross-repo PRs:
+
+```
+mcp__github__list_pull_requests(
+  owner=<upstream_owner>, repo=<upstream_repo>,
+  head="<origin_owner>:<branch>",
+  state="open", perPage=5
+)
+```
+
+**`gh pr view` last-resort fallback.** If MCP lookups return empty and the user has `gh` installed, let `gh` resolve the base repo via `git config` (it walks the remote tracking branch and the `.github` config):
+
+```bash
+gh pr view --json number,headRepositoryOwner,headRepository,baseRepositoryOwner,baseRepository,url
+```
+
+Use the returned `baseRepositoryOwner.login` and `baseRepository.name` as the PR's owner/repo. If `gh` is not installed or returns nothing, stop and report that no open PR exists for the current branch.
+
+Pick the first strategy that yields exactly one PR whose `head.ref` matches the local branch.
 
 ```
 mcp__github__pull_request_read(

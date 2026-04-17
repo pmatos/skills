@@ -55,10 +55,13 @@ Do not fall back to `gh` for the workflow. On success, capture `login` as `GH_US
 
 ### Step 1: Identify the PR
 
-1. Get `{owner}/{repo}`: run `git remote get-url origin`, then parse to `owner/repo` (strip `git@github.com:`, `https://github.com/`, and trailing `.git`). If parsing fails, stop and ask the user for the repository.
-2. Get the current branch: `git rev-parse --abbrev-ref HEAD`.
-3. If a PR number was provided as argument, use it directly. Otherwise call `mcp__github__list_pull_requests` with `head={owner}:{branch}`, `state=open`, `perPage=1`. If no PR is returned, stop and tell the user there is no open PR for the current branch.
-4. Validate by calling `mcp__github__pull_request_read` method=`get` to retrieve `title`, `body`, `head.ref`, `head.sha`, `url`. Confirm `head.ref` matches the local branch.
+1. Get the current branch: `git rev-parse --abbrev-ref HEAD`.
+2. If a PR number was provided as argument, resolve its repo via `mcp__github__pull_request_read` method=`get` (requires owner/repo — derive them from `origin` as in step 3a; if the resolved PR's `head.ref` doesn't match the local branch, warn and continue with the user's explicit number). Skip to step 5.
+3. Auto-detect the PR. Try the following resolution strategies in order and stop at the first that yields exactly one open PR whose `head.ref` matches the local branch:
+   - **3a. Origin lookup.** Parse `git remote get-url origin` to `{owner}/{repo}` (strip `git@github.com:`, `https://github.com/`, trailing `.git`). Call `mcp__github__list_pull_requests` with `head={owner}:{branch}`, `state=open`, `perPage=5`.
+   - **3b. Upstream lookup (fork workflow).** If step 3a returned no PRs and `git remote get-url upstream` exists, parse it the same way to `{upstream_owner}/{upstream_repo}` and call `mcp__github__list_pull_requests` against that repo with `head={origin_owner}:{branch}` (PRs from a fork use the fork owner as the head prefix).
+   - **3c. `gh pr view` fallback.** If both MCP lookups fail and `gh` is available, run `gh pr view --json number,headRepositoryOwner,headRepository,baseRepositoryOwner,baseRepository,url` to let `gh` resolve the base repo via `git config`. On success, treat the returned `baseRepositoryOwner.login` / `baseRepository.name` as the PR's owner/repo. If `gh` is not installed or returns nothing, stop and tell the user there is no open PR for the current branch.
+4. Validate by calling `mcp__github__pull_request_read` method=`get` on the resolved `{owner, repo, pullNumber}` to retrieve `title`, `body`, `head.ref`, `head.sha`, `url`. Confirm `head.ref` matches the local branch.
 5. Subscribe to PR activity once: call `mcp__github__subscribe_pr_activity` with `{owner, repo, pullNumber}`. From this point on, CI completions, new reviews, and new comments will arrive as `<github-webhook-activity>` events in the conversation. The subscription is idempotent; do not call it again per iteration.
 
 ### Step 2: Read Project Pre-commit Requirements
@@ -159,7 +162,7 @@ Track wall-clock elapsed time since the last commit was pushed. If `CI_TIMEOUT` 
 **5g. Re-fetch state and check for fixed point.** Re-run Step 3's MCP calls. Filter out threads whose ID is in `ADDRESSED_IDS`. For each thread in `REJECTED_THREADS`, suppress it **only if** its newest comment `databaseId` still matches the value recorded at rejection; if a later comment exists, the reviewer has replied — remove the thread from `REJECTED_THREADS` and treat it as fresh feedback to re-evaluate in Step 4. If the merged state has a non-empty `errors` list, do **not** declare a fixed point — report the fetch failures and retry after 30 seconds.
 
 **Fixed point reached** if:
-- All CI checks pass (no `failure` bucket — `cancelled` is informational, doesn't block)
+- `ci_failures` is empty after filtering out `cancelled` (the only non-success conclusion treated as informational). Any remaining entry — including `timed_out`, `startup_failure`, `action_required`, and non-`github-actions` `failure` — blocks convergence and is reported to the user.
 - No new unresolved feedback exists
 
 → Proceed to Step 6.
