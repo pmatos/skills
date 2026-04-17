@@ -41,7 +41,7 @@ All GitHub interaction is direct MCP tool calls — no bundled scripts.
 | `mcp__github__subscribe_pr_activity` | One-time subscription so CI/review/comment events arrive as `<github-webhook-activity>` messages. |
 | `mcp__github__unsubscribe_pr_activity` | Cleanup on exit. |
 | `mcp__github__add_reply_to_pull_request_comment` | Post replies (both "fixed" replies and rejection replies). |
-| `mcp__github__resolve_review_thread` | Resolve threads after a fix is pushed. |
+| `mcp__github__pull_request_review_write` (`method="resolve_thread"`) | Resolve threads after a fix is pushed. |
 
 ## Workflow
 
@@ -112,7 +112,7 @@ For ambiguous comments (open questions, architectural suggestions, multiple alte
 
 Loop until fixed point:
 
-**5a. Reject invalid comments.** For each comment evaluated as INVALID, compose a rejection body using the prefix table below, then call `mcp__github__add_reply_to_pull_request_comment` with the comment's `databaseId` and the body. Do **not** call `resolve_review_thread` — the thread stays unresolved so the reviewer can push back. Record the thread in `REJECTED_THREADS` as `thread_id → current_latest_comment_database_id`. Do **not** add to `ADDRESSED_IDS`.
+**5a. Reject invalid comments.** For each comment evaluated as INVALID, compose a rejection body using the prefix table below, then call `mcp__github__add_reply_to_pull_request_comment` with `commentId = latestComment.databaseId` and the body. Do **not** resolve the thread — it stays unresolved so the reviewer can push back. Record the thread in `REJECTED_THREADS` as `thread_id → current_latest_comment_database_id`. Do **not** add to `ADDRESSED_IDS`.
 
 Rejection body format:
 
@@ -145,8 +145,8 @@ After handling each review summary or PR conversation comment, add its ID to `AD
 **5d. Commit and push.** If `git status --porcelain` shows no changes, skip to 5f. Otherwise: stage files by name (not `git add -A`), commit with a descriptive message, push. On rejected push, stop and tell user to `git pull --rebase`. On network error, retry with exponential backoff (2s, 4s, 8s, 16s).
 
 **5e. Reply to every addressed comment.** For each review thread fixed in this iteration:
-1. Call `mcp__github__add_reply_to_pull_request_comment` with the thread's `databaseId` and body `Fixed in \`<short-sha>\``. If it fails with 403/429, wait 60s and retry once. Reply failure is **non-fatal** — the code fix is already pushed.
-2. Call `mcp__github__resolve_review_thread` with the thread's GraphQL `threadId`. Same 403/429 retry rule. If resolve succeeds, add the thread to `ADDRESSED_IDS`. If resolve fails, do **not** suppress the thread — it will reappear on re-fetch and be retried.
+1. Call `mcp__github__add_reply_to_pull_request_comment` with `commentId = latestComment.databaseId` (the numeric REST ID of the thread's most recent comment — **not** the thread's GraphQL `id`) and body `Fixed in \`<short-sha>\``. If it fails with 403/429, wait 60s and retry once. Reply failure is **non-fatal** — the code fix is already pushed.
+2. Call `mcp__github__pull_request_review_write` with `method="resolve_thread"` and `threadId = <thread.id>` (the GraphQL node ID from `get_review_comments`). Same 403/429 retry rule. If resolve succeeds, add the thread to `ADDRESSED_IDS`. If resolve fails, do **not** suppress the thread — it will reappear on re-fetch and be retried.
 
 This step is **mandatory** — never skip it.
 

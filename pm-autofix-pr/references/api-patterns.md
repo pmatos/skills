@@ -161,27 +161,33 @@ mcp__github__add_reply_to_pull_request_comment(
 )
 ```
 
-Use the **latest** comment's `databaseId` so replies attach correctly even on long threads. Reply failure is non-fatal — the code fix is already pushed.
+`commentId` is a **comment** ID, not a thread ID. Pass the numeric `databaseId` of the thread's **latest** comment (last element of `thread.comments`) — the tool rejects the thread's GraphQL `id`. Using the latest comment keeps replies attached correctly on long threads. Reply failure is non-fatal — the code fix is already pushed.
 
 ## Resolving review threads
 
+Thread resolution goes through `pull_request_review_write` with `method="resolve_thread"` — there is no standalone `resolve_review_thread` tool:
+
 ```
-mcp__github__resolve_review_thread(
-  threadId=<thread.id>
+mcp__github__pull_request_review_write(
+  method="resolve_thread",
+  threadId=<thread.id>,
+  owner=<owner>, repo=<repo>, pullNumber=<num>
 )
 ```
 
-Uses the thread's GraphQL node ID (the `id` field from `get_review_comments`). On success, add the thread to `ADDRESSED_IDS`. On failure, leave it off `ADDRESSED_IDS` so the next re-fetch re-surfaces it for retry.
+`threadId` is the thread's GraphQL node ID (the `id` field from `get_review_comments`, e.g. `PRRT_kwDOxxx`). The `owner`/`repo`/`pullNumber` are required by the tool schema but ignored by this method. Resolving an already-resolved thread is a no-op.
+
+On success, add the thread to `ADDRESSED_IDS`. On failure, leave it off `ADDRESSED_IDS` so the next re-fetch re-surfaces it for retry.
 
 ## Rejecting comments
 
-Same tool as replying — `add_reply_to_pull_request_comment` — but with a categorized prefix and disclaimer body (see SKILL.md Step 5a for the prefix table). Do **not** call `resolve_review_thread`: rejected threads stay open so the reviewer can push back.
+Same tool as replying — `add_reply_to_pull_request_comment` — but with a categorized prefix and disclaimer body (see SKILL.md Step 5a for the prefix table). Do **not** resolve the thread: rejected threads stay open so the reviewer can push back.
 
 ## Rate limiting
 
 If any MCP call errors with `403` or `429`, wait 60 seconds and retry once. After a single failed retry:
 - Reply failures (`add_reply_to_pull_request_comment`) are non-fatal — log and continue.
-- Resolve failures (`resolve_review_thread`) are non-fatal but the thread stays off `ADDRESSED_IDS` so it re-surfaces.
+- Resolve failures (`pull_request_review_write` with `method="resolve_thread"`) are non-fatal but the thread stays off `ADDRESSED_IDS` so it re-surfaces.
 - State-fetch failures get added to the `errors` list and prevent the fixed-point declaration in Step 5g.
 
 ## Push handling (unchanged — still local `git`)
