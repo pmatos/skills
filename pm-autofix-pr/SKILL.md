@@ -6,387 +6,150 @@ user-invocable: true
 
 # Autofix PR
 
-Iteratively fix CI failures and address review comments on a GitHub PR, working entirely in the local CLI. Fetch failures and reviewer feedback, make code fixes, run local validation, commit, push, and wait for CI — repeating until all issues are resolved or a maximum iteration count is reached. After convergence, enters a monitoring phase that watches for new CI failures or review comments for a configurable duration before exiting.
+Iteratively fix CI failures and address review comments on a GitHub PR until a true fixed point is reached — all CI green, all valid review comments addressed, all invalid comments rejected with reasons. A single invocation handles everything.
+
+## Core Principle: Say NO
+
+Not every review comment deserves a code change. Before touching code, evaluate every comment with two independent AI reviewers (Opus 4.6 + Codex/GPT-5.4). Reject comments that are wrong, out of scope, or unrelated. Post a clear explanation on the PR when rejecting. This prevents scope creep and unnecessary churn.
 
 ## Prerequisites
 
-- `gh` CLI installed and authenticated with a token that has `repo` scope (read and write access to pull requests). The skill posts reply comments on PR review threads and resolves review threads, which requires write permission.
+- `gh` CLI installed and authenticated with `repo` scope (read/write access to pull requests)
 
 ## Configuration
 
-All parameters below have sensible defaults and can be overridden via the user's prompt arguments (e.g., `/pm-autofix-pr 10 --ci-timeout 30 --monitor 0`).
+Override via prompt arguments (e.g., `/pm-autofix-pr 10 --ci-timeout 30 --monitor 0`).
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `MAX_ITERATIONS` | 5 | Maximum number of fix-loop iterations before stopping. |
-| `MONITOR_DURATION` | 10 | Minutes to watch for new failures after convergence. Set to 0 to skip monitoring. |
-| `CI_TIMEOUT` | 20 | Minutes to wait for CI checks before prompting the user. |
-| `LOG_TAIL_LINES` | 500 | Lines of CI failure log to inspect when diagnosing errors. |
+| `MONITOR_DURATION` | 10 | Minutes to watch for new issues after convergence. 0 to skip. |
+| `CI_TIMEOUT` | 20 | Minutes to wait for CI before prompting user. |
+| `LOG_TAIL_LINES` | 500 | Lines of CI failure log to inspect. |
+
+There is no iteration limit. The loop runs until a fixed point or until a stale-loop is detected.
+
+## Bundled Scripts
+
+All API interaction is handled by scripts in `scripts/`. Execute them directly — read them only if patching is needed.
+
+| Script | Purpose |
+|--------|---------|
+| `scripts/fetch-pr-state.sh <owner> <repo> <pr> <gh_user> [log_lines]` | Fetch CI failures, unresolved review threads, review summaries, PR comments. Outputs JSON. |
+| `scripts/reply-and-resolve.sh <owner> <repo> <pr> <comment_db_id> <thread_node_id> <message>` | Post reply to a review thread and resolve it. Rate-limit aware. |
+| `scripts/reject-comment.sh <owner> <repo> <pr> <comment_db_id> <category> <reason>` | Post rejection reply (does NOT resolve — lets reviewer respond). |
+| `scripts/wait-for-ci.sh <pr> [timeout_minutes]` | Wait for CI. Exit 0=pass, 1=fail, 2=timeout. |
 
 ## Workflow
 
 ### Step 1: Identify the PR
 
-Determine the current GitHub repository:
+Run `gh repo view --json nameWithOwner -q '.nameWithOwner'` to get `{owner}/{repo}`. If this fails, stop — the user needs `gh auth login`.
 
-```bash
-gh repo view --json nameWithOwner -q '.nameWithOwner'
-```
+If a PR number was provided as argument, use it. Otherwise auto-detect: `gh pr view --json number,title,headRefName,url,body`. Validate the local branch matches `headRefName`. Get the current gh user: `gh api user -q '.login'`.
 
-If this fails, report the error and stop — the user likely needs to authenticate with `gh auth login` or is not inside a Git repository. Split the result into `{owner}` and `{repo}` for later API calls.
+### Step 2: Read Project Pre-commit Requirements
 
-If the user provided a PR number as an argument, use it directly. Otherwise, auto-detect from the current branch:
+Find CLAUDE.md (or AGENTS.md) by walking from working directory to repo root. Extract **only explicitly stated** pre-commit commands: format, lint, type-check, test, build. If none are stated, skip pre-commit checks entirely.
 
-```bash
-gh pr view --json number,title,headRefName,url
-```
+### Step 3: Fetch PR State
 
-If no PR is found, ask the user for a PR number.
+Run `scripts/fetch-pr-state.sh {owner} {repo} {pr_number} {gh_user} {LOG_TAIL_LINES}`. Parse the JSON output to get: CI failures (fixable vs non-fixable), unresolved review threads, review summaries, PR conversation comments, and resolved thread IDs.
 
-Validate that the local branch matches the PR's `headRefName`:
+Initialize `ADDRESSED_IDS` with the resolved thread IDs from the output. Initialize `REJECTED_THREADS` as an empty map `{thread_id → latest_comment_db_id_at_rejection}`.
 
-```bash
-git branch --show-current
-```
+Present the initial assessment and ask: **"Found N CI failures and M unresolved review comments. Begin fixing?"**
 
-If the branches don't match, ask the user whether to check out the PR branch (`git switch <headRefName>`) or abort.
+If nothing to fix, report the PR is clean and stop.
 
-Set `MAX_ITERATIONS`, `MONITOR_DURATION`, `CI_TIMEOUT`, and `LOG_TAIL_LINES` from the user's prompt arguments, falling back to the defaults listed in the **Configuration** section above.
+### Step 4: Evaluate Every Review Comment
 
-Determine the current `gh` user for filtering self-comments later:
+**This is the most important step.** For each unresolved review comment not in `ADDRESSED_IDS`, read the referenced file and code context, then spawn **two subagents in parallel**:
 
-```bash
-gh api user -q '.login'
-```
+1. **Opus Evaluator** — Agent tool with `model="opus"`. Provide the comment, code context, PR title/description, and changed files summary. Ask for a VALID/INVALID verdict with category, confidence, and reasoning. See `references/comment-evaluation.md` for the full prompt template.
 
-### Step 2: Read the project's CLAUDE.md
+2. **Codex Evaluator** — Invoke `/codex-2nd-opinion` via the Skill tool with the same context. Ask for the same verdict format.
 
-Determine the Git repository root by running `git rev-parse --show-toplevel`. Look for a CLAUDE.md (or AGENTS.md) starting from the **working directory** and walking up through ancestor directories, stopping at the repo root. Use the nearest file found; if both exist in the same directory, prefer CLAUDE.md. Read the file and extract pre-commit requirements:
+**Decision logic** (from `references/comment-evaluation.md`):
 
-- Formatting commands (e.g. `prettier`, `black`, `gofmt`)
-- Linting commands (e.g. `eslint`, `ruff`, `clippy`)
-- Type-checking commands (e.g. `tsc --noEmit`, `mypy`)
-- Test commands (e.g. `npm test`, `pytest`, `cargo test`)
-- Build commands (e.g. `npm run build`, `cargo build`)
+| Opus | Codex | Action |
+|------|-------|--------|
+| VALID | VALID | Address it |
+| VALID | INVALID | Address it |
+| INVALID | VALID | Address it |
+| INVALID | INVALID | **Reject it** |
 
-**Only** extract requirements that are explicitly stated. If CLAUDE.md says nothing about pre-commit checks, do not run any. These checks will be used as local validation before each push in the fix loop.
+Exception: if one says INVALID with HIGH confidence and the other says VALID with LOW confidence, treat as INVALID.
 
-### Step 3: Initial assessment
+For ambiguous comments (open questions, architectural suggestions, multiple alternatives), present to the user with both evaluators' reasoning and wait for guidance.
 
-Gather all current issues on the PR.
+### Step 5: The Fix Loop
 
-**CI failures** — get the PR head SHA and fetch check runs for that exact commit:
+Loop until fixed point:
 
-```bash
-sha=$(gh api repos/{owner}/{repo}/pulls/<number> --jq '.head.sha')
-```
+**5a. Reject invalid comments.** For each comment evaluated as INVALID, run `scripts/reject-comment.sh` with the appropriate category and a clear reason derived from the evaluators' reasoning. Record the thread in `REJECTED_THREADS` as `thread_id → current_latest_comment_db_id`. Do **not** add to `ADDRESSED_IDS` — rejected threads are intentionally left unresolved so the reviewer can push back, and Step 5g must re-surface the thread when they do.
 
-List check runs for that commit:
+**5b. Fix valid comments and CI failures.** Apply fixes one issue at a time:
+- CI failures: read error logs, identify failing file/line, read source, fix.
+- Review comments: read the referenced file, understand context, apply the requested change.
+- Review summaries / PR comments: parse for specific asks, locate files, apply changes.
 
-```bash
-gh api repos/{owner}/{repo}/commits/$sha/check-runs --paginate \
-  --jq '.check_runs[] | {id, name, status, conclusion, app_slug: .app.slug}'
-```
+After handling each review summary or PR conversation comment, add its ID to `ADDRESSED_IDS`.
 
-Filter for check runs with a terminal non-success `conclusion`. The conclusions to detect are: `failure`, `timed_out`, `cancelled`, `startup_failure`, and `action_required`. For each such check, inspect `app_slug` and `conclusion` to determine how to handle it:
+**5c. Run pre-commit checks** (from Step 2) in order: format → lint → type-check → test → build. If a formatter modifies files, stage them. If a check fails, attempt one sub-fix (does not count as an iteration). If the sub-fix also fails, ask the user.
 
-- **Fixable failures** (`conclusion` is `failure` AND `app_slug` is `github-actions`): fetch failure logs via `gh run view <id> --log-failed 2>&1 | tail -$LOG_TAIL_LINES`. If the last `LOG_TAIL_LINES` lines do not contain an obvious error, search the full output for common error markers (`FAIL`, `Error`, `error:`, `FAILED`, `assert`) to locate the root cause.
-- **Non-fixable CI issues** (`conclusion` is `timed_out`, `cancelled`, `startup_failure`, or `action_required`, OR `app_slug` is not `github-actions`): logs are either unavailable or the issue is not code-fixable. Record the check name and conclusion, and report these to the user as CI issues requiring manual inspection. Do not attempt to auto-fix these.
+**5d. Commit and push.** If `git status --porcelain` shows no changes, skip to 5f. Otherwise: stage files by name (not `git add -A`), commit with a descriptive message, push. On rejected push, stop and tell user to `git pull --rebase`. On network error, retry with exponential backoff (2s, 4s, 8s, 16s).
 
-Store each item with its check name, conclusion, log output (if available), check run ID, and whether it is fixable.
+**5e. Reply to every addressed comment.** For each review thread fixed in this iteration, run `scripts/reply-and-resolve.sh` with message `"Fixed in \`<short-sha>\`"`. If the script exits 0, add to `ADDRESSED_IDS`. If it exits non-zero (resolve failed), do **not** suppress the thread — it will reappear on re-fetch and be retried. This step is **mandatory** — never skip it.
 
-**Review comments** — fetch unresolved review threads using GraphQL to access thread resolution state:
+**5f. Wait for CI.** Run `scripts/wait-for-ci.sh {pr_number} {CI_TIMEOUT}`. On timeout (exit 2), ask the user whether to keep waiting or abort.
 
-```bash
-gh api graphql -f query='
-  query($owner: String!, $repo: String!, $number: Int!) {
-    repository(owner: $owner, name: $repo) {
-      pullRequest(number: $number) {
-        reviewThreads(first: 100) {
-          nodes {
-            id
-            databaseId
-            isResolved
-            isOutdated
-            path
-            line
-            comments(first: 50) {
-              nodes {
-                id
-                databaseId
-                body
-                author { login }
-                createdAt
-              }
-            }
-          }
-        }
-      }
-    }
-  }
-' -f owner="{owner}" -f repo="{repo}" -F number=<number>
-```
+**5g. Re-fetch state and check for fixed point.** Run `scripts/fetch-pr-state.sh` again. Filter out threads whose ID is in `ADDRESSED_IDS`. For each thread in `REJECTED_THREADS`, suppress it **only if** its newest comment databaseId still matches the value recorded at rejection; if a later comment exists, the reviewer has replied — remove the thread from `REJECTED_THREADS` and treat it as fresh feedback to re-evaluate in Step 4. If the output contains a non-empty `errors` array, do **not** declare a fixed point — report the fetch failures to the user and retry after 30 seconds.
 
-Filter for threads where `isResolved` is `false`. Each thread includes its full comment chain via `comments.nodes`, which contains the original comment and all replies. This replaces the need for separate self-reply detection — `isResolved` is the authoritative signal for whether a thread has been addressed.
+**Fixed point reached** if:
+- All CI checks pass (no `fail` bucket — `cancel` is informational, doesn't block)
+- No new unresolved feedback exists
 
-**Review summaries** — fetch review bodies (the top-level text submitted with each review):
+→ Proceed to Step 6.
 
-```bash
-gh api repos/{owner}/{repo}/pulls/<number>/reviews --paginate \
-  --jq '.[] | select(.body != "" and .body != null) | {id, body, state, user: .user.login, submitted_at}'
-```
+**Stale loop detected** if the same CI checks are failing with similar error patterns as the previous iteration → report to user, ask whether to continue or stop.
 
-Filter out reviews authored by the current `gh` user. Apply supersession logic: group reviews by `user`, sort by `submitted_at`, and for each reviewer discard all reviews that are superseded by a later `APPROVED` or `DISMISSED` review from the same reviewer. Only then treat the remaining reviews with `state` of `CHANGES_REQUESTED` or `COMMENTED` that contain actionable text (e.g. "please add tests", "this needs error handling") as feedback to address.
+**New issues found** → run Step 4 (evaluate new comments) and continue the loop.
 
-**PR conversation comments** — fetch general discussion comments:
+### Step 6: Monitoring Phase
 
-```bash
-gh api repos/{owner}/{repo}/issues/<number>/comments --paginate \
-  --jq '.[] | {id, body, user: .user.login, created_at}'
-```
+Skip if `MONITOR_DURATION` is 0 or if there are unresolved issues.
 
-Filter out comments authored by the current `gh` user (from Step 1) — these are self-comments from prior runs.
+Report: **"All issues resolved. Monitoring for {MONITOR_DURATION} minutes..."**
 
-Initialize `ADDRESSED_COMMENT_IDS` with the thread IDs of review threads where `isResolved` is `true` (from the GraphQL query above). No separate self-reply detection is needed — `isResolved` is the authoritative signal.
+Every 60 seconds, run `scripts/fetch-pr-state.sh`. If new issues appear, re-enter the evaluate + fix loop (Step 4 → Step 5) with a fresh sub-loop. After fixing, resume monitoring with remaining time.
 
-Present the initial assessment to the user:
-- Number of failed CI checks, with their names (distinguishing Actions vs external CI)
-- Number of unresolved review threads, with brief summaries
-- Number of resolved review threads (skipped)
-- Number of unresolved review summaries and conversation comments
-
-Ask: **"I found N CI failures and M unresolved review comments. Shall I begin fixing them? (max MAX_ITERATIONS iterations)"**
-
-If there are no failures and no unresolved comments, report that the PR looks clean and stop.
-
-### Step 4: The Fix Loop
-
-For each iteration `i` from 1 to `MAX_ITERATIONS`:
-
-**4a. Classify issues**
-
-For each piece of unresolved feedback not in `ADDRESSED_COMMENT_IDS`, classify it. This applies to all three feedback channels — review threads (from GraphQL), review summaries, and PR conversation comments.
-
-For review threads, classify based on the **most recent reviewer comment** in the thread (from `comments.nodes`), not just the original top-level comment. Reviewers often post follow-up requests as replies (e.g. "that's still not right, please also handle X"), and the latest comment reflects the current ask:
-
-- **Clear fix**: The feedback points to a specific code issue with an obvious resolution — a typo, missing null check, wrong variable name, style violation, missing test assertion, unused import, or other concrete code change where the reviewer's intent is unambiguous.
-- **Ambiguous**: The feedback suggests an architectural change, asks an open question, proposes multiple alternatives, or has multiple valid interpretations. For these, present the comment to the user and ask for guidance before proceeding. Wait for user input — the user's guidance becomes the fix instruction.
-- **No action**: The feedback is an approval, acknowledgment, praise, or informational note not requesting a code change ("looks good", "nice!", "FYI"). Skip these and add their IDs to `ADDRESSED_COMMENT_IDS`.
-
-For CI failures, all are treated as actionable — read the error log and determine the fix.
-
-**4b. Make fixes**
-
-For CI failures:
-1. Read the error log from Step 3 (or re-fetched in Step 4g).
-2. Identify the failing file(s) and line(s) from the error output.
-3. Read the relevant source files.
-4. Make the code fix.
-
-For inline review comments:
-1. Read the file at the path and line referenced by the comment.
-2. Understand the surrounding context.
-3. Apply the requested change.
-
-For review summaries and PR conversation comments:
-1. Parse the feedback to identify specific requested changes (e.g. "add tests for X", "handle error case Y").
-2. Locate the relevant source files based on the request context and PR diff.
-3. Apply the requested changes.
-
-Apply fixes one issue at a time. After each fix, verify the change makes sense in context.
-
-**4c. Run local pre-commit checks**
-
-Run the checks extracted from CLAUDE.md in Step 2, in order: format → lint → type-check → test → build.
-
-- If a formatter modifies files, stage those formatting changes.
-- If any check fails, attempt to fix the new failure immediately. This is a sub-iteration — it does **not** count against `MAX_ITERATIONS`.
-- If the sub-fix fails after one attempt, report the failure to the user and ask how to proceed. Do **not** commit broken code.
-
-If no pre-commit requirements were found in CLAUDE.md, skip this step.
-
-**4d. Commit and push**
-
-First check if there are any changes to commit:
-
-```bash
-git status --porcelain
-```
-
-If there are no changes (empty diff), skip the commit/push for this iteration and report: "No code changes were necessary for the identified issues." Proceed to Step 4f.
-
-Otherwise:
-
-1. Stage changes with explicit file names (not `git add -A`).
-2. Commit with a descriptive message using a HEREDOC:
-
-```bash
-git commit -F - <<'EOF'
-fix: address CI failures and review comments [i/MAX_ITERATIONS]
-
-- <summary of each fix applied>
-EOF
-```
-
-3. Push. Check whether the branch has an upstream configured via `git rev-parse --abbrev-ref <branch>@{upstream}`. If upstream exists, run `git push`. If not, run `git push -u origin <branch>`.
-
-If the push is rejected (e.g. upstream has new commits), report the conflict to the user and suggest: "Push was rejected — run `git pull --rebase` and re-invoke `/autofix-pr`." Then stop.
-
-If the push fails due to a network error, retry up to 4 times with exponential backoff (2s, 4s, 8s, 16s).
-
-**4e. Reply to addressed feedback and record IDs**
-
-For each review thread addressed in this iteration, post a reply on GitHub and then resolve the thread.
-
-**Reply** — use the `databaseId` of the first comment in the thread (from the GraphQL query's `comments.nodes[0].databaseId`) — this is the numeric REST ID required by the reply endpoint:
-
-```bash
-gh api repos/{owner}/{repo}/pulls/<number>/comments \
-  -f body="Fixed in \`$(git rev-parse --short HEAD)\` [$i/$MAX_ITERATIONS]" \
-  -F in_reply_to_id=<comment-databaseId> \
-  --method POST
-```
-
-**Resolve** — use the GraphQL node `id` of the review thread (from `reviewThreads.nodes[].id`) to mark it as resolved:
-
-```bash
-gh api graphql -f query='
-  mutation($threadId: ID!) {
-    resolveReviewThread(input: {threadId: $threadId}) {
-      thread { isResolved }
-    }
-  }
-' -f threadId="<thread-node-id>"
-```
-
-If either API call fails with 403 or 429 (rate limiting), wait 60 seconds and retry once. If it still fails, note the error and continue — the fix was already pushed. A failed resolve is non-fatal: the thread will remain unresolved on GitHub but the code fix is in place.
-
-Add the IDs of all addressed feedback to `ADDRESSED_COMMENT_IDS` — this includes review thread IDs, review summary IDs, and conversation comment IDs. All three channels must be tracked to prevent Step 4g from re-surfacing already-fixed items.
-
-**4f. Wait for CI**
-
-Wait for CI checks to complete:
-
-```bash
-gh pr checks <number> --watch --fail-fast -i 15
-```
-
-This blocks until checks complete. Use `--fail-fast` to return as soon as any check fails rather than waiting for all checks. Use a 15-second polling interval. Set a Bash timeout of `CI_TIMEOUT` minutes.
-
-If the timeout is exceeded, inform the user: "CI has been running for over `CI_TIMEOUT` minutes. Would you like to keep waiting or abort?" Wait for user input.
-
-**4g. Check for fix point**
-
-After CI completes, re-fetch the current state:
-
-CI check results:
-```bash
-gh pr checks <number> --json name,state,bucket
-```
-
-For any checks with `bucket` of `fail`, re-fetch the PR head SHA and failure logs using the same approach as Step 3 (SHA-based check runs + `gh run view --log-failed` for Actions checks). This ensures the next iteration's Step 4b works with current diagnostic output, not stale logs from a prior assessment.
-
-Unresolved review threads (re-run the same GraphQL query from Step 3):
-```bash
-gh api graphql -f query='...' -f owner="{owner}" -f repo="{repo}" -F number=<number>
-```
-
-Filter for threads where `isResolved` is `false`.
-
-New review summaries:
-```bash
-gh api repos/{owner}/{repo}/pulls/<number>/reviews --paginate \
-  --jq '.[] | select(.body != "" and .body != null) | {id, body, state, user: .user.login, submitted_at}'
-```
-
-Apply the same supersession logic as Step 3: group by reviewer, discard reviews superseded by a later `APPROVED` or `DISMISSED` from the same reviewer.
-
-New PR conversation comments:
-```bash
-gh api repos/{owner}/{repo}/issues/<number>/comments --paginate \
-  --jq '.[] | {id, body, user: .user.login}'
-```
-
-Filter out items already in `ADDRESSED_COMMENT_IDS` and self-comments across review summaries and conversation comments.
-
-**Fix point reached** if:
-- All CI checks have `bucket` of `pass` or `skipping` (no `fail` or `pending` buckets remain). Checks with `bucket` of `cancel` should be reported to the user as informational ("Check <name> was cancelled — this may need manual re-triggering") but do not block convergence, AND
-- No new unresolved feedback exists across any channel (all IDs are in `ADDRESSED_COMMENT_IDS` or are self-comments)
-
-→ Break the loop and proceed to Step 5.
-
-**Stale loop detected** if:
-- The same CI check names are failing as in the previous iteration, with similar error patterns in the logs
-
-→ Report to the user: "The following failures persisted after my fix attempt: [list check names]. This may require human judgment or indicate a flaky test." Ask whether to continue trying or stop.
-
-**New issues found**:
-- New CI failures or new review comments appeared → continue to the next iteration.
-
-**4h. Brief status update**
-
-After each iteration, report:
-```
-Iteration i/MAX_ITERATIONS complete.
-- Fixed: [list of issues addressed]
-- Remaining: N CI failures, M unresolved review comments
-- Proceeding to next iteration...
-```
-
-### Step 5: Monitoring Phase
-
-If there are unresolved issues after `MAX_ITERATIONS`, skip the monitoring phase and go directly to Step 6.
-
-If `MONITOR_DURATION` is 0, skip the monitoring phase and go directly to Step 6.
-
-Otherwise, all issues are resolved — enter the monitoring phase. Report:
-
-**"All issues resolved. Monitoring PR for new CI failures or review comments for MONITOR_DURATION minutes... (Ctrl+C to stop early)"**
-
-Record the monitoring start time. Then loop:
-
-**5a. Wait 60 seconds.**
-
-**5b. Poll for new issues.**
-
-Re-fetch the current state using the same queries as Step 4g:
-- CI check results via `gh pr checks`
-- Unresolved review threads via GraphQL
-- New review summaries
-- New PR conversation comments
-
-Filter out items already in `ADDRESSED_COMMENT_IDS` and self-comments.
-
-**5c. Evaluate.**
-
-- **New issues found**: Report what was detected ("New CI failure in check X" or "New review comment from @user on file.ts"). Re-enter the fix loop (Step 4) with a fresh iteration counter (reset `i` to 1, keep `MAX_ITERATIONS` and `ADDRESSED_COMMENT_IDS` as-is). After the fix loop converges again, return to the monitoring phase with the remaining monitor time.
-- **No new issues**: Check elapsed time since monitoring started. If `MONITOR_DURATION` minutes have passed, exit to Step 6. Otherwise, continue to Step 5a.
-
-### Step 6: Final Summary
-
-Present a comprehensive report:
+### Step 7: Final Summary
 
 ```
 ## Autofix PR Summary
 
 ### PR: #<number> — <title>
-### Iterations: i of MAX_ITERATIONS
-### Monitoring: X minutes (if monitoring phase ran)
+### Iterations: N
 
 ### Changes Made
 | Iteration | Commit | Fixes Applied |
 |-----------|--------|---------------|
-| 1/5       | abc123 | Fixed lint error in foo.ts, addressed review comment on bar.ts |
-| 2/5       | def456 | Fixed test failure in baz_test.py |
+| 1 | abc123 | Fixed lint error in foo.ts, addressed review on bar.ts |
+| 2 | def456 | Fixed test failure in baz_test.py |
+
+### Rejected Comments
+| Comment | Category | Reason |
+|---------|----------|--------|
+| @reviewer on file.ts:42 | scope-creep | Retry logic is valid but out of scope |
 
 ### Current Status
 - CI: All passing / N failures remaining
 - Review comments: All addressed / M unresolved
-
-### Unresolved Issues (if any)
-- [List of remaining CI failures or review comments that could not be auto-fixed]
 ```
 
-If there are unresolved issues, ask: **"Would you like me to attempt further fixes on the remaining issues, or would you prefer to handle them manually?"**
+If unresolved issues remain, ask if the user wants further attempts. If everything is resolved: **"PR is ready for re-review."**
 
-If everything is resolved: **"All CI checks pass and all review comments have been addressed. Monitoring period complete — the PR is ready for re-review."**
+## References
+
+- **`references/api-patterns.md`** — GraphQL queries, REST endpoints, supersession logic, push handling
+- **`references/comment-evaluation.md`** — Full evaluation prompt templates, decision matrix, rejection taxonomy, ambiguity handling
