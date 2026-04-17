@@ -1,152 +1,196 @@
 # API Patterns Reference
 
-Detailed API interaction patterns for the pm-autofix-pr skill. These are implemented in the scripts but documented here for troubleshooting and manual use.
+Detailed GitHub MCP tool signatures and response shapes for the pm-autofix-pr skill. The skill calls these tools directly — there is no script layer.
+
+## Preflight: verify the MCP
+
+```
+mcp__github__get_me()
+```
+
+Returns the authenticated user object. Use `login` for self-comment filtering. If the tool is unavailable in the session or the call errors, the skill stops with the "GitHub MCP not available" message (see SKILL.md Step 0).
 
 ## Identifying the PR
 
-Determine repository:
+The MCP has no equivalent of `gh pr view`'s branch autodetect, so combine local git with `list_pull_requests`:
+
 ```bash
-gh repo view --json nameWithOwner -q '.nameWithOwner'
+git remote get-url origin     # parse to {owner}/{repo}
+git rev-parse --abbrev-ref HEAD
 ```
 
-Auto-detect PR from current branch:
-```bash
-gh pr view --json number,title,headRefName,url
+Owner/repo parsing rules: strip `git@github.com:` or `https://github.com/` prefixes and any trailing `.git`.
+
+```
+mcp__github__list_pull_requests(
+  owner=<owner>,
+  repo=<repo>,
+  head="<owner>:<branch>",
+  state="open",
+  perPage=1
+)
 ```
 
-Get current gh user (for filtering self-comments):
-```bash
-gh api user -q '.login'
+Returns an array of PR summaries. Empty → no open PR for the branch; stop.
+
+```
+mcp__github__pull_request_read(
+  method="get",
+  owner=<owner>, repo=<repo>, pullNumber=<num>
+)
 ```
 
-## CI Check Runs
+Returns full PR details including `title`, `body`, `head.ref`, `head.sha`, `url`. Validate `head.ref` matches the local branch.
 
-Fetch the PR head SHA:
-```bash
-sha=$(gh api repos/{owner}/{repo}/pulls/<number> --jq '.head.sha')
+## Subscription (event-driven CI/comment monitoring)
+
+Subscribe **once** after PR identification:
+
+```
+mcp__github__subscribe_pr_activity(
+  owner=<owner>, repo=<repo>, pullNumber=<num>
+)
 ```
 
-List check runs for that commit:
-```bash
-gh api repos/{owner}/{repo}/commits/$sha/check-runs --paginate \
-  --jq '.check_runs[] | {id, name, status, conclusion, app_slug: .app.slug}'
+The call is idempotent. Once subscribed, GitHub events arrive in the conversation as `<github-webhook-activity>` messages covering:
+
+- CI: `check_run.completed`, `workflow_run.completed`
+- Reviews: `pull_request_review.submitted`
+- Comments: `pull_request_review_comment.created`, `issue_comment.created`
+
+These events replace the old `gh pr checks --watch` polling loop. Treat the arrival of a relevant event as a trigger to re-fetch state. Honour `CI_TIMEOUT` via wall-clock so the loop doesn't wait forever if a webhook is dropped.
+
+Always unsubscribe on exit:
+
+```
+mcp__github__unsubscribe_pr_activity(
+  owner=<owner>, repo=<repo>, pullNumber=<num>
+)
 ```
 
-### Terminal conclusions to handle
+## CI check runs
+
+```
+mcp__github__pull_request_read(
+  method="get_check_runs",
+  owner=<owner>, repo=<repo>, pullNumber=<num>
+)
+```
+
+Returns check runs for the PR head. Filter by `conclusion`:
 
 | Conclusion | Fixable? | Action |
 |-----------|----------|--------|
-| `failure` + `app_slug: github-actions` | Yes | Fetch logs, diagnose, fix |
-| `failure` + other `app_slug` | No | Report to user |
+| `failure` + `app.slug == "github-actions"` | Yes | Fetch log tail (see below), diagnose, fix |
+| `failure` + other `app.slug` | No | Report to user |
 | `timed_out` | No | Report to user |
-| `cancelled` | No | Report (may need re-trigger) |
+| `cancelled` | No | Informational; doesn't block fixed point |
 | `startup_failure` | No | Report to user |
 | `action_required` | No | Report to user |
 
-### Fetching failure logs
+### Fetching failure logs (the one remaining `gh` dependency)
 
-Find the workflow run for the head SHA:
-```bash
-run_id=$(gh api repos/{owner}/{repo}/actions/runs \
-  --jq ".workflow_runs[] | select(.head_sha==\"${sha}\") | .id" | head -1)
-```
-
-Fetch failed job logs:
-```bash
-gh run view "$run_id" --log-failed 2>&1 | tail -$LOG_TAIL_LINES
-```
-
-If the tail doesn't contain an obvious error, search the full output for common error markers: `FAIL`, `Error`, `error:`, `FAILED`, `assert`.
-
-## Review Threads (GraphQL)
-
-Fetch all review threads with resolution state and full comment chains:
-
-```graphql
-query($owner: String!, $repo: String!, $number: Int!) {
-  repository(owner: $owner, name: $repo) {
-    pullRequest(number: $number) {
-      reviewThreads(first: 100) {
-        nodes {
-          id
-          isResolved
-          isOutdated
-          path
-          line
-          comments(first: 50) {
-            nodes {
-              id
-              databaseId
-              body
-              author { login }
-              createdAt
-            }
-          }
-        }
-      }
-    }
-  }
-}
-```
-
-- `isResolved` is the authoritative signal for whether a thread has been addressed
-- `id` (node ID) is used for the GraphQL `resolveReviewThread` mutation
-- `comments.nodes[0].databaseId` is the numeric REST ID needed for the reply endpoint
-
-## Review Summaries
-
-Fetch review bodies (top-level text submitted with each review):
-```bash
-gh api repos/{owner}/{repo}/pulls/<number>/reviews --paginate \
-  --jq '.[] | select(.body != "" and .body != null) | {id, body, state, user: .user.login, submitted_at}'
-```
-
-### Supersession Logic
-
-Group reviews by `user`, sort by `submitted_at`. For each reviewer, discard all reviews superseded by a later `APPROVED` or `DISMISSED` review from the same reviewer. Only then treat the remaining `CHANGES_REQUESTED` or `COMMENTED` reviews with actionable text as feedback.
-
-## PR Conversation Comments
+The MCP exposes no tool for raw GitHub Actions job logs. For each fixable failure, use `Bash`:
 
 ```bash
-gh api repos/{owner}/{repo}/issues/<number>/comments --paginate \
-  --jq '.[] | {id, body, user: .user.login, created_at}'
+gh run view --job <check_run.id> --log-failed 2>&1 | tail -<LOG_TAIL_LINES>
 ```
 
-Filter out comments authored by the current `gh` user.
+The check-run `id` from `get_check_runs` equals the `jobs.id` for GitHub Actions, so this fetches logs for the exact failing job. If the tail doesn't contain an obvious error, search the full output for common error markers: `FAIL`, `Error`, `error:`, `FAILED`, `assert`.
 
-## Replying to Review Threads
+If `gh` is not installed, log-tail fetching is best-effort — fall back to whatever `output.summary` and `output.text` the check run carries, plus `details_url` for the user.
 
-Post a reply using the first comment's `databaseId`:
+## Review threads and comments
+
+```
+mcp__github__pull_request_read(
+  method="get_review_comments",
+  owner=<owner>, repo=<repo>, pullNumber=<num>,
+  perPage=100, after=<cursor>
+)
+```
+
+Returns review threads with comments grouped by code location. Each thread carries `id` (GraphQL node ID for resolution), `isResolved`, `isOutdated`, `path`, `line`, and a `comments` array. Each comment carries `id`, `databaseId` (numeric REST ID — needed for replies), `body`, `author.login`, `createdAt`.
+
+Paginate via `perPage` and `after` until exhausted.
+
+Derived state:
+- `unresolved_threads = [t for t in threads if not t.isResolved]`
+- `resolved_thread_ids = [t.id for t in threads if t.isResolved]`
+- `latestComment(thread)` = last element of `thread.comments` (sort by `createdAt` if order is not guaranteed). Used for `REJECTED_THREADS` re-evaluation tracking.
+
+## Review summaries
+
+```
+mcp__github__pull_request_read(
+  method="get_reviews",
+  owner=<owner>, repo=<repo>, pullNumber=<num>
+)
+```
+
+Returns reviews with `id`, `body`, `state` (`APPROVED`, `CHANGES_REQUESTED`, `COMMENTED`, `DISMISSED`), `user.login`, `submitted_at`.
+
+### Supersession algorithm
+
+1. Group reviews by `user.login`.
+2. Within each group, sort by `submitted_at` ascending.
+3. Find the index of the latest `APPROVED` or `DISMISSED` review (or `-1` if none).
+4. Discard everything at or before that index.
+5. From the remainder, keep only `CHANGES_REQUESTED` or `COMMENTED` reviews with a non-empty `body` and `user.login != GH_USER`.
+
+The result is the actionable summary list.
+
+## PR conversation comments
+
+```
+mcp__github__pull_request_read(
+  method="get_comments",
+  owner=<owner>, repo=<repo>, pullNumber=<num>
+)
+```
+
+Returns issue-level comments on the PR. Filter out entries where `user.login == GH_USER` to avoid acting on the skill's own posts.
+
+## Replying to review threads
+
+```
+mcp__github__add_reply_to_pull_request_comment(
+  owner=<owner>, repo=<repo>, pullNumber=<num>,
+  commentId=<latestComment.databaseId>,
+  body="Fixed in `<short-sha>`"
+)
+```
+
+Use the **latest** comment's `databaseId` so replies attach correctly even on long threads. Reply failure is non-fatal — the code fix is already pushed.
+
+## Resolving review threads
+
+```
+mcp__github__resolve_review_thread(
+  threadId=<thread.id>
+)
+```
+
+Uses the thread's GraphQL node ID (the `id` field from `get_review_comments`). On success, add the thread to `ADDRESSED_IDS`. On failure, leave it off `ADDRESSED_IDS` so the next re-fetch re-surfaces it for retry.
+
+## Rejecting comments
+
+Same tool as replying — `add_reply_to_pull_request_comment` — but with a categorized prefix and disclaimer body (see SKILL.md Step 5a for the prefix table). Do **not** call `resolve_review_thread`: rejected threads stay open so the reviewer can push back.
+
+## Rate limiting
+
+If any MCP call errors with `403` or `429`, wait 60 seconds and retry once. After a single failed retry:
+- Reply failures (`add_reply_to_pull_request_comment`) are non-fatal — log and continue.
+- Resolve failures (`resolve_review_thread`) are non-fatal but the thread stays off `ADDRESSED_IDS` so it re-surfaces.
+- State-fetch failures get added to the `errors` list and prevent the fixed-point declaration in Step 5g.
+
+## Push handling (unchanged — still local `git`)
+
 ```bash
-gh api repos/{owner}/{repo}/pulls/<number>/comments \
-  -f body="Fixed in \`$(git rev-parse --short HEAD)\`" \
-  -F in_reply_to_id=<comment-databaseId> \
-  --method POST
+git rev-parse --abbrev-ref <branch>@{upstream}   # check upstream exists
+git push                                          # if upstream exists
+git push -u origin <branch>                       # if not
 ```
-
-## Resolving Review Threads
-
-Use the thread's GraphQL node `id`:
-```graphql
-mutation($threadId: ID!) {
-  resolveReviewThread(input: {threadId: $threadId}) {
-    thread { isResolved }
-  }
-}
-```
-
-## Rate Limiting
-
-On 403 or 429 responses, wait 60 seconds and retry once. A failed resolve is non-fatal — the code fix is already pushed.
-
-## Push Handling
-
-Check for upstream:
-```bash
-git rev-parse --abbrev-ref <branch>@{upstream}
-```
-
-If upstream exists: `git push`. If not: `git push -u origin <branch>`.
 
 On rejected push (upstream has new commits): stop and tell the user to `git pull --rebase` and re-invoke.
 
