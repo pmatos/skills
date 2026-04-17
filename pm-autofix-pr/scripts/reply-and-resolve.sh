@@ -36,14 +36,16 @@ resolve_thread() {
 retry_on_rate_limit() {
   local fn="$1"
   local result
-  result=$($fn 2>&1)
-  local rc=$?
+  local rc=0
+  # Guard command substitutions with `|| rc=$?` so `set -e` does not abort
+  # the function before we inspect the exit code and trigger the retry branch.
+  result=$($fn 2>&1) || rc=$?
 
   if [[ $rc -ne 0 ]] && echo "$result" | grep -qE '(403|429|rate limit)'; then
     echo "Rate limited, retrying in 60s..." >&2
     sleep 60
-    result=$($fn 2>&1)
-    rc=$?
+    rc=0
+    result=$($fn 2>&1) || rc=$?
   fi
 
   if [[ $rc -ne 0 ]]; then

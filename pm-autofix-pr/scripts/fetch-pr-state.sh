@@ -151,11 +151,19 @@ if [[ -n "$REVIEWS_RAW" ]]; then
 fi
 
 # --- PR conversation comments ---
-if ! PR_COMMENTS=$(gh api "repos/${OWNER}/${REPO}/issues/${PR_NUMBER}/comments" --paginate \
-  --jq '[.[] | {id, body, user: .user.login, created_at} | select(.user != "'"$GH_USER"'")]' \
+# `gh api --paginate --jq` applies the filter per page and concatenates outputs,
+# so wrapping with `[...]` would emit one array per page (invalid JSON when
+# there are multiple pages). Emit a stream of objects and slurp them after.
+if ! PR_COMMENTS_RAW=$(gh api "repos/${OWNER}/${REPO}/issues/${PR_NUMBER}/comments" --paginate \
+  --jq '.[] | {id, body, user: .user.login, created_at} | select(.user != "'"$GH_USER"'")' \
   2>"$TMPDIR/err_comments.txt"); then
   ERRORS=$(echo "$ERRORS" | jq --arg e "pr_comments: $(cat "$TMPDIR/err_comments.txt")" '. + [$e]')
-  PR_COMMENTS="[]"
+  PR_COMMENTS_RAW=""
+fi
+
+PR_COMMENTS="[]"
+if [[ -n "$PR_COMMENTS_RAW" ]]; then
+  PR_COMMENTS=$(echo "$PR_COMMENTS_RAW" | jq -s '.')
 fi
 
 # --- Output ---
