@@ -207,26 +207,33 @@ def extract(url: str, out: Path, html_override: str | None = None) -> dict:
         if prop.startswith("og:"):
             manifest["open_graph"][prop] = content
 
+    # An HTML document may override relative-URL resolution with <base href>.
+    # Fall back to the redirect-aware base_url when no <base> tag is present.
+    base_tag = soup.find("base")
+    base_href = attr_opt(base_tag, "href") if base_tag else None
+    doc_base = urljoin(base_url, base_href) if base_href else base_url
+
     for link in soup.find_all("link"):
-        rel = attr(link, "rel")
+        # `rel` is case-insensitive and space-separated in HTML.
+        rel_tokens = {t.lower() for t in attr(link, "rel").split() if t}
         href = attr_opt(link, "href")
         if not href:
             continue
-        abs_url = urljoin(base_url, href)
-        if "icon" in rel or "shortcut" in rel:
+        abs_url = urljoin(doc_base, href)
+        if "icon" in rel_tokens or "shortcut" in rel_tokens:
             fname = safe_name(abs_url, "favicon.ico")
             dest = out / "images/favicons" / fname
             if download_binary(session, abs_url, dest):
                 manifest["favicons"].append({
                     "url": abs_url,
                     "path": str(dest.relative_to(out)),
-                    "rel": rel,
+                    "rel": " ".join(sorted(rel_tokens)),
                     "sizes": attr_opt(link, "sizes"),
                     "type": attr_opt(link, "type"),
                 })
-        elif rel == "manifest":
+        elif "manifest" in rel_tokens:
             manifest["manifest_url"] = abs_url
-        elif "stylesheet" in rel:
+        elif "stylesheet" in rel_tokens:
             manifest["stylesheets"].append(abs_url)
 
     css_queue = list(manifest["stylesheets"])
@@ -301,7 +308,7 @@ def extract(url: str, out: Path, html_override: str | None = None) -> dict:
 
     og_img = manifest["open_graph"].get("og:image") or manifest["twitter"].get("twitter:image")
     if og_img:
-        abs_og = urljoin(base_url, og_img)
+        abs_og = urljoin(doc_base, og_img)
         fname = safe_name(abs_og, "og-image")
         dest = out / "images" / fname
         if download_binary(session, abs_og, dest):
