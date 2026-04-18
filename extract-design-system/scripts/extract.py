@@ -68,7 +68,11 @@ def safe_name(url: str, fallback: str = "asset") -> str:
     path = urlparse(url).path
     name = Path(path).name or fallback
     name = re.sub(r"[^A-Za-z0-9._-]", "_", name).strip("._-") or fallback
-    return name[:120]
+    name = name[:120]
+    # Prefix a short hash of the full URL (including query + path segments)
+    # so two distinct URLs that share a basename don't overwrite each other.
+    digest = hashlib.md5(url.encode()).hexdigest()[:8]
+    return f"{digest}-{name}"
 
 
 def fetch(session: requests.Session, url: str) -> requests.Response | None:

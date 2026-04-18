@@ -26,9 +26,11 @@ Use `WebFetch` on the URL and ask it to return: page title, meta description, an
 
 ```bash
 mkdir -p "<parent>/<repo-name>"
-uv run /home/pmatos/dev/skills/extract-design-system/scripts/extract.py \
+uv run "${CLAUDE_PLUGIN_ROOT}/extract-design-system/scripts/extract.py" \
   "<url>" --output "<parent>/<repo-name>"
 ```
+
+`${CLAUDE_PLUGIN_ROOT}` is set by Claude Code to the plugin's install directory. If it is unset (skill loaded outside a plugin), fall back to the path shown in the skill's own directory — e.g. resolve the script relative to this SKILL.md.
 
 The script uses `requests` + `beautifulsoup4` + `tinycss2` to:
 
@@ -72,7 +74,7 @@ node /tmp/render.js "<url>" > /tmp/rendered.html
 Then re-run the extractor with the rendered HTML:
 
 ```bash
-uv run /home/pmatos/dev/skills/extract-design-system/scripts/extract.py \
+uv run "${CLAUDE_PLUGIN_ROOT}/extract-design-system/scripts/extract.py" \
   "<url>" --output "<parent>/<repo-name>" --html /tmp/rendered.html
 ```
 
