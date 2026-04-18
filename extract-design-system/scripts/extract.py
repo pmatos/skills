@@ -145,17 +145,23 @@ def extract(url: str, out: Path, html_override: str | None = None) -> dict:
 
     if html_override is not None:
         html = html_override
+        base_url = url
     else:
         r = fetch(session, url)
         if r is None:
             raise SystemExit(f"Cannot fetch {url}. Use Playwright to render, then pass --html.")
         html = r.text
+        # Resolve relative resources against the final URL after any redirects,
+        # not the originally requested one, otherwise a redirect to a different
+        # host/path silently mis-resolves stylesheets, icons, and images.
+        base_url = r.url
 
     (out / "source" / "page.html").write_text(html, encoding="utf-8")
     soup = BeautifulSoup(html, "html.parser")
 
     manifest: dict = {
         "source_url": url,
+        "final_url": base_url,
         "extracted_at": datetime.now(timezone.utc).isoformat(),
         "title": (soup.title.string.strip() if soup.title and soup.title.string else None),
         "meta": {},
@@ -198,7 +204,7 @@ def extract(url: str, out: Path, html_override: str | None = None) -> dict:
         href = attr_opt(link, "href")
         if not href:
             continue
-        abs_url = urljoin(url, href)
+        abs_url = urljoin(base_url, href)
         if "icon" in rel or "shortcut" in rel:
             fname = safe_name(abs_url, "favicon.ico")
             dest = out / "images/favicons" / fname
@@ -242,22 +248,29 @@ def extract(url: str, out: Path, html_override: str | None = None) -> dict:
                 css_queue.append(imp)
 
     for src, text in all_css:
-        base = src if src != "<inline>" else url
+        base = src if src != "<inline>" else base_url
         manifest["fonts"].extend(parse_fontface(text, base))
         manifest["custom_properties"].update(parse_custom_props(text))
 
-    seen_font_urls: set[str] = set()
+    # URL → local relative path. When the same URL appears in multiple
+    # @font-face rules, every rule should still reference the downloaded file.
+    font_url_to_path: dict[str, str] = {}
     for f in manifest["fonts"]:
         downloaded: list[str] = []
         urls = sorted(f["urls"], key=lambda u: 0 if u.lower().endswith(".woff2") else 1)
         for fu in urls:
-            if fu in seen_font_urls or fu.startswith("data:"):
+            if fu.startswith("data:"):
                 continue
-            seen_font_urls.add(fu)
+            cached = font_url_to_path.get(fu)
+            if cached is not None:
+                downloaded.append(cached)
+                continue
             fname = safe_name(fu, "font")
             dest = out / "fonts" / fname
             if download_binary(session, fu, dest):
-                downloaded.append(f"fonts/{fname}")
+                rel_path = f"fonts/{fname}"
+                font_url_to_path[fu] = rel_path
+                downloaded.append(rel_path)
         f["local_paths"] = downloaded
 
     for i, svg in enumerate(soup.find_all("svg")[:15]):
@@ -275,7 +288,7 @@ def extract(url: str, out: Path, html_override: str | None = None) -> dict:
 
     og_img = manifest["open_graph"].get("og:image") or manifest["twitter"].get("twitter:image")
     if og_img:
-        abs_og = urljoin(url, og_img)
+        abs_og = urljoin(base_url, og_img)
         fname = safe_name(abs_og, "og-image")
         dest = out / "images" / fname
         if download_binary(session, abs_og, dest):
