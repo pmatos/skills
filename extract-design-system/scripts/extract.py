@@ -143,17 +143,24 @@ def extract(url: str, out: Path, html_override: str | None = None) -> dict:
     session = requests.Session()
     session.headers["User-Agent"] = UA
 
+    # Resolve relative resources against the final URL after any redirects, not
+    # the originally requested one — otherwise a redirect to a different host or
+    # path silently mis-resolves stylesheets, icons, and images.
     if html_override is not None:
         html = html_override
-        base_url = url
+        # In --html mode we already have the rendered HTML from a browser, but
+        # we still need the post-redirect URL as the resolution base. Use HEAD
+        # (cheap) and fall back to the input URL if the probe fails.
+        try:
+            probe = session.head(url, timeout=TIMEOUT, allow_redirects=True)
+            base_url = probe.url if probe.ok else url
+        except requests.RequestException:
+            base_url = url
     else:
         r = fetch(session, url)
         if r is None:
             raise SystemExit(f"Cannot fetch {url}. Use Playwright to render, then pass --html.")
         html = r.text
-        # Resolve relative resources against the final URL after any redirects,
-        # not the originally requested one, otherwise a redirect to a different
-        # host/path silently mis-resolves stylesheets, icons, and images.
         base_url = r.url
 
     (out / "source" / "page.html").write_text(html, encoding="utf-8")
@@ -238,12 +245,17 @@ def extract(url: str, out: Path, html_override: str | None = None) -> dict:
         if r is None:
             continue
         text = r.text
+        # Use the post-redirect URL so @import and @font-face relative paths
+        # resolve against the stylesheet's actual location, not the pre-redirect
+        # request URL.
+        css_base = r.url
+        seen_css.add(css_base)
         fname = safe_name(cu, "style.css")
         if not fname.lower().endswith(".css"):
             fname += ".css"
         (out / "css" / fname).write_text(text, encoding="utf-8")
-        all_css.append((cu, text))
-        for imp in collect_imports(text, cu):
+        all_css.append((css_base, text))
+        for imp in collect_imports(text, css_base):
             if imp not in seen_css:
                 css_queue.append(imp)
 
