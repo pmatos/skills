@@ -149,11 +149,12 @@ def extract(url: str, out: Path, html_override: str | None = None) -> dict:
     if html_override is not None:
         html = html_override
         # In --html mode we already have the rendered HTML from a browser, but
-        # we still need the post-redirect URL as the resolution base. Use HEAD
-        # (cheap) and fall back to the input URL if the probe fails.
+        # we still need the post-redirect URL as the resolution base. HEAD is
+        # cheap; accept its `url` even on non-2xx status because many origins
+        # reply 405 for HEAD while still having followed the redirect chain.
         try:
             probe = session.head(url, timeout=TIMEOUT, allow_redirects=True)
-            base_url = probe.url if probe.ok else url
+            base_url = probe.url or url
         except requests.RequestException:
             base_url = url
     else:
@@ -314,13 +315,17 @@ def extract(url: str, out: Path, html_override: str | None = None) -> dict:
         r = fetch(session, manifest["manifest_url"])
         if r is not None:
             (out / "source" / "manifest.webmanifest").write_text(r.text, encoding="utf-8")
+            # Resolve icon hrefs from the post-redirect manifest URL so a
+            # manifest that redirected to a different path/host still yields
+            # correct icon URLs.
+            manifest_base = r.url
             try:
                 wm = r.json()
                 for icon in wm.get("icons", []) or []:
                     src_icon = icon.get("src")
                     if not src_icon:
                         continue
-                    abs_icon = urljoin(manifest["manifest_url"], src_icon)
+                    abs_icon = urljoin(manifest_base, src_icon)
                     fname = safe_name(abs_icon, "icon")
                     dest = out / "images/favicons" / fname
                     if download_binary(session, abs_icon, dest):
