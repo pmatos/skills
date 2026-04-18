@@ -139,6 +139,23 @@ Trigger phrases: `is this a skill`, `can we extract a skill`, `skill extraction`
 
 **Requires**: [GitHub CLI](https://cli.github.com/) authenticated (optional, for automated issue creation).
 
+### `extract-design-system` — Extract a Design System from a URL
+
+Turns a public URL into a local git repo containing that site's real design assets: downloaded fonts, inline SVG logos, favicons, Open Graph image, stylesheets, and CSS custom properties. Produces a fact-only `README.md` and a structured `manifest.json` — ready to feed into `claude.ai/design` or use as a reference baseline.
+
+What it does:
+- Fetches the page with `requests` and parses HTML + all linked stylesheets (following `@import` one level).
+- Downloads every `@font-face` source into `fonts/`.
+- Extracts `:root` / `html` CSS custom properties into `tokens/variables.css`.
+- Saves favicons, Apple touch icons, and web-manifest icons into `images/favicons/`.
+- Captures inline `<svg>` blocks (candidate logos) into `logos/`.
+- Writes a fact-only `README.md` — never inferred from visual inspection.
+- Falls back to Playwright CLI (or MCP Playwright / claude-in-chrome) for JS-rendered pages.
+
+Trigger phrases: `extract design system`, `steal a design`, `pull fonts and colors from a site`, `scrape design tokens`, `build a design-system repo from a URL`.
+
+**Requires**: [`uv`](https://github.com/astral-sh/uv) for the extraction script; [Playwright](https://playwright.dev/) and `node` only if the target page is JS-rendered.
+
 ## License
 
 MIT
