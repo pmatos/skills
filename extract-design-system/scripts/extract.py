@@ -220,7 +220,7 @@ def extract(url: str, out: Path, html_override: str | None = None) -> dict:
         if not href:
             continue
         abs_url = urljoin(doc_base, href)
-        if "icon" in rel_tokens or "shortcut" in rel_tokens:
+        if rel_tokens & {"icon", "shortcut", "apple-touch-icon", "apple-touch-icon-precomposed", "mask-icon", "fluid-icon"}:
             fname = safe_name(abs_url, "favicon.ico")
             dest = out / "images/favicons" / fname
             if download_binary(session, abs_url, dest):
@@ -268,7 +268,9 @@ def extract(url: str, out: Path, html_override: str | None = None) -> dict:
                 css_queue.append(imp)
 
     for src, text in all_css:
-        base = src if src != "<inline>" else base_url
+        # Inline <style> URLs resolve against the document base (<base href>
+        # when present), matching how the browser itself would resolve them.
+        base = src if src != "<inline>" else doc_base
         manifest["fonts"].extend(parse_fontface(text, base))
         manifest["custom_properties"].update(parse_custom_props(text))
 
