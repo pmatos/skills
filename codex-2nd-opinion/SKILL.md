@@ -1,12 +1,14 @@
 ---
 name: codex-2nd-opinion
-description: This skill should be used when the user asks to "get a second opinion", "ask codex", "what does GPT think", "compare with codex", "run codex", "2nd opinion", "second opinion on this code", or wants an independent analysis from OpenAI Codex CLI (GPT-5.4). Also triggered by the /codex-2nd-opinion command.
+description: This skill should be used when the user asks to "get a second opinion", "ask codex", "what does GPT think", "compare with codex", "run codex", "2nd opinion", "second opinion on this code", or wants an independent analysis from OpenAI Codex CLI. Also triggered by the /codex-2nd-opinion command.
 user-invocable: true
 ---
 
 # Codex Second Opinion
 
-Invoke OpenAI Codex CLI (GPT-5.4 with xhigh reasoning) to get an independent analysis on any discussion, plan, code, or thought. Present both perspectives fairly with a structured comparison.
+Invoke OpenAI Codex CLI to get an independent analysis on any discussion, plan, code, or thought. Present both perspectives fairly with a structured comparison.
+
+The model and reasoning effort are NOT hardcoded — they come from the user's Codex configuration (`~/.codex/config.toml`, project-level `.codex/config.toml`, or Codex defaults). This matches the philosophy used by OpenAI's own `codex-plugin-cc`: pass through only when the user explicitly asks for a specific model or effort, otherwise let Codex's own config decide.
 
 ## Workflow
 
@@ -40,16 +42,20 @@ Please provide your independent analysis. Be specific and reference the code dir
 
 ### Step 3: Run Codex
 
-Execute the following command. Codex writes its response to stdout, which the Bash tool captures directly. **Use a 600000ms (10 minute) timeout on the Bash tool call** — Codex with xhigh reasoning can take several minutes.
+Execute the following command. Codex writes its response to stdout, which the Bash tool captures directly. **Use a 600000ms (10 minute) timeout on the Bash tool call** — high-reasoning runs can take several minutes.
 
 ```bash
-CODEX=$(command -v codex || echo "$HOME/node_modules/.bin/codex") && \
-"$CODEX" exec \
+codex exec \
   --full-auto --sandbox read-only --ephemeral \
   - < /tmp/codex-2op-XXXXXX  # substitute the actual mktemp path here
 ```
 
-No `-m` or `-c` flags — the user's `~/.codex/config.toml` already configures `model=gpt-5.4` and `model_reasoning_effort=xhigh`.
+**Do NOT pass `-m` / `--model` or `-c model_reasoning_effort=...` by default.** Codex reads its model and reasoning effort from `~/.codex/config.toml` (and any project-level `.codex/config.toml`). Letting it resolve its own config means the skill works unmodified for any user.
+
+Only add model/effort flags when the user explicitly asks for a specific one in the triggering message. Accepted effort values: `none`, `minimal`, `low`, `medium`, `high`, `xhigh`. Examples:
+- User says "get a second opinion with high reasoning" → add `-c model_reasoning_effort=high`.
+- User says "ask GPT-5.5 what it thinks" → add `-m gpt-5.5`.
+- User just says "2nd opinion" → no extra flags.
 
 ### Step 4: Handle Errors
 
@@ -57,9 +63,10 @@ If the command fails (non-zero exit code or empty stdout):
 
 - Report the error clearly to the user.
 - Suggest checking:
-  - `OPENAI_API_KEY` is set and valid
-  - `codex` is installed and in `$PATH` (or at `~/node_modules/.bin/codex`)
-  - Network connectivity
+  - `codex` is installed and on `$PATH` (install with `npm install -g @openai/codex`).
+  - The user is authenticated — `codex login` (ChatGPT account) or `OPENAI_API_KEY` is set for API-key auth.
+  - Network connectivity.
+  - The configured model is valid — check `~/.codex/config.toml`.
 - Skip to Step 6 (Cleanup).
 
 ### Step 5: Present and Compare
@@ -67,8 +74,10 @@ If the command fails (non-zero exit code or empty stdout):
 Present the Bash tool output (Codex's response) under a clear heading:
 
 ```
-## Codex's Analysis (GPT-5.4, xhigh reasoning)
+## Codex's Analysis
 ```
+
+If Codex's response mentions the model it ran under (it usually does in its header lines), include that in parentheses, e.g. `## Codex's Analysis (gpt-5.5, high reasoning)`. Otherwise keep the heading generic — don't guess.
 
 Present the full response without editorializing. Then provide a structured, honest comparison. Follow these rules strictly:
 
