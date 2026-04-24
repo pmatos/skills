@@ -4,13 +4,15 @@ Personal skills for agentic coding with [Claude Code](https://docs.anthropic.com
 
 ## Installation
 
-Add this repository to your Claude Code configuration:
+Install individual skills with the [`skills`](https://www.npmjs.com/package/skills) CLI:
 
 ```bash
-claude plugin add /path/to/skills
+npx skills@latest add pmatos/skills/<skill-name>
 ```
 
-Or install from GitHub:
+Add `-g` to install globally (`~/.claude/skills/`) instead of to the current project. Per-skill commands are listed below.
+
+Or add the whole repository as a Claude Code plugin:
 
 ```bash
 claude plugin add pmatos/skills
@@ -19,6 +21,10 @@ claude plugin add pmatos/skills
 ## Available Skills
 
 ### `/cp` — Commit & Push
+
+```bash
+npx skills@latest add pmatos/skills/cp
+```
 
 Commits and pushes changes to the current branch, running **only** the pre-commit checks described in the project's `CLAUDE.md` (or `AGENTS.md`). If the project specifies no requirements, it skips straight to commit and push.
 
@@ -32,6 +38,10 @@ Trigger phrases: `commit and push`, `cp`, `ship it`, `push my changes`.
 
 ### `/codex-2nd-opinion` — Codex Second Opinion
 
+```bash
+npx skills@latest add pmatos/skills/codex-2nd-opinion
+```
+
 Invokes OpenAI Codex CLI (GPT-5.4 with xhigh reasoning) to get an independent analysis on any discussion, plan, code, or thought. Presents both perspectives fairly with a structured comparison.
 
 What it does:
@@ -44,6 +54,10 @@ Trigger phrases: `get a second opinion`, `ask codex`, `what does GPT think`, `co
 **Requires**: [OpenAI Codex CLI](https://github.com/openai/codex) installed and `OPENAI_API_KEY` set.
 
 ### `/auto-merge-dependabot` — Auto-Merge Dependabot PRs
+
+```bash
+npx skills@latest add pmatos/skills/auto-merge-dependabot
+```
 
 Reviews all open Dependabot PRs in the current repository, assesses each for risk, and automatically merges safe ones while flagging those that need manual review.
 
@@ -60,6 +74,10 @@ Trigger phrases: `merge dependabot PRs`, `review dependabot`, `auto-merge depend
 
 ### `/wigo` — What Is Going On?
 
+```bash
+npx skills@latest add pmatos/skills/wigo
+```
+
 Gives a comprehensive situational briefing on the current git tree. Mines git state, Claude session history, and GitHub to tell you where you are, what you've been doing, and what to do next.
 
 What it does:
@@ -74,6 +92,10 @@ Trigger phrases: `what's going on`, `wigo`, `status`, `where was I`, `what were 
 **Requires**: [GitHub CLI](https://cli.github.com/) (`gh`) authenticated.
 
 ### `/pm-autofix-pr` — Autofix PR
+
+```bash
+npx skills@latest add pmatos/skills/pm-autofix-pr
+```
 
 Iteratively fixes CI failures and addresses review comments on a GitHub PR, working entirely in the local CLI. Monitors check results and reviewer feedback, makes code changes, runs local validation, commits, pushes, and waits for CI — repeating until all issues are resolved or a maximum iteration count is reached.
 
@@ -93,6 +115,10 @@ Trigger phrases: `autofix pr`, `fix pr locally`, `fix ci failures`, `fix review 
 
 ### `/pm-plan` — Deep Implementation Planning
 
+```bash
+npx skills@latest add pmatos/skills/pm-plan
+```
+
 Performs thorough, multi-phase implementation planning with parallel agent exploration before any code is written. Produces a battle-tested, file-path-grounded plan at `.ultraplan/<plan-name>.md` (name generated from the task description).
 
 What it does:
@@ -108,6 +134,10 @@ No external dependencies.
 
 ### `/fork` — Dual-Model Implementation
 
+```bash
+npx skills@latest add pmatos/skills/fork
+```
+
 Implements the same task with both Claude Code and OpenAI Codex CLI in parallel git worktrees, then runs the best-of skill to compare and select the superior implementation.
 
 What it does:
@@ -122,8 +152,30 @@ Trigger phrases: `fork`, `race claude and codex`, `dual implement`, `run both mo
 
 **Requires**: [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) and [OpenAI Codex CLI](https://github.com/openai/codex) installed with `OPENAI_API_KEY` set.
 
+### `/best-of` — Code Comparison
+
+```bash
+npx skills@latest add pmatos/skills/best-of
+```
+
+Compares code across two git worktrees against 15 software-engineering best practices and the project's contribution guidelines (`CLAUDE.md`, `CONTRIBUTING.md`, linter configs). Dispatches parallel analysis agents, scores each solution on a weighted rubric, and presents a structured verdict with specific `file:line` evidence.
+
+What it does:
+- Validates both input paths are git worktrees.
+- Dispatches parallel agents scoring correctness, security, SOLID/DRY, testing, idiomaticity, and project-convention adherence.
+- Applies a 15-criteria weighted rubric; every claim is anchored to `file:line` evidence.
+- Emits a structured verdict (winner, per-criterion scores, rationale, specific citations).
+- Used internally by `/fork`, but runs standalone against any pair of worktrees.
+
+Trigger phrases: `best of`, `compare worktrees`, `compare solutions`, `which solution is better`, `pick the better implementation`, `evaluate solutions`.
+
+No external dependencies.
 
 ### `/is-skill` — Skill Extraction Analyzer
+
+```bash
+npx skills@latest add pmatos/skills/is-skill
+```
 
 Analyzes the current session's conversation, context, and work patterns to determine whether the knowledge or workflow used could be extracted into a reusable Claude Code skill. Creates a GitHub issue with a structured proposal after user approval.
 
@@ -139,7 +191,31 @@ Trigger phrases: `is this a skill`, `can we extract a skill`, `skill extraction`
 
 **Requires**: [GitHub CLI](https://cli.github.com/) authenticated (optional, for automated issue creation).
 
+### `brainstorming` — Collaborative Design
+
+```bash
+npx skills@latest add pmatos/skills/brainstorming
+```
+
+Guides collaborative design before implementation. Explores user intent through one-question-at-a-time dialogue, proposes 2-3 approaches with trade-offs, presents the design in sections for approval, then writes and commits a spec document. Stops at the approved spec — does not auto-trigger implementation.
+
+What it does:
+- Enforces a hard gate: no code, no scaffolding until the user approves a design.
+- Explores project context (files, docs, recent commits) before asking questions.
+- Asks clarifying questions one at a time to surface purpose, constraints, and success criteria.
+- Proposes 2-3 approaches with trade-offs and a recommendation.
+- Presents the design incrementally; each section requires explicit approval.
+- Saves the spec to `docs/specs/YYYY-MM-DD-<topic>-design.md` and commits it.
+
+Trigger phrases: `brainstorm`, `help me design`, `before I build this`, `let's figure out what to build`.
+
+Forked from [obra/superpowers](https://github.com/obra/superpowers) with superpowers-specific references removed.
+
 ### `extract-design-system` — Extract a Design System from a URL
+
+```bash
+npx skills@latest add pmatos/skills/extract-design-system
+```
 
 Turns a public URL into a local git repo containing that site's real design assets: downloaded fonts, inline SVG logos, favicons, Open Graph image, stylesheets, and CSS custom properties. Produces a fact-only `README.md` and a structured `manifest.json` — ready to feed into `claude.ai/design` or use as a reference baseline.
 
