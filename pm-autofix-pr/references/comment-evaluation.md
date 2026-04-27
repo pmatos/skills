@@ -7,7 +7,7 @@ Every unresolved review comment must be evaluated before any action is taken. Th
 For each unresolved review comment, spawn two subagents **in parallel**:
 
 1. **Opus Evaluator** — Claude Opus 4.6, model="opus", used via the Agent tool
-2. **Codex Evaluator** — invokes `/codex-2nd-opinion` via the Skill tool
+2. **Codex Evaluator** — invokes the user-level `codex-2nd-opinion` skill (Skill tool, `skill="codex-2nd-opinion"`). **Never** substitute `codex:rescue`, `codex:codex-rescue`, or any other `codex:*` plugin skill — those are unrelated tools.
 
 Both receive identical context and return independent verdicts.
 
@@ -65,7 +65,14 @@ REASONING: 2-3 sentences explaining the verdict
 
 ## Codex Evaluator Prompt
 
-Use the `/codex-2nd-opinion` skill with a prompt constructed from the same template above. The skill handles formatting and invocation.
+Invoke the `codex-2nd-opinion` skill via the Skill tool — exact form: `Skill(skill="codex-2nd-opinion", args=<the evaluation prompt above>)`. The skill handles Codex CLI formatting and invocation; pass the same template you used for Opus.
+
+**Forbidden substitutes** (do not call any of these even if `codex-2nd-opinion` seems unavailable — stop and report instead):
+- `codex:rescue` (Skill tool)
+- `codex:codex-rescue` (Agent subagent)
+- `codex:setup`, `codex:codex-cli-runtime`, `codex:gpt-5-4-prompting`, `codex:codex-result-handling`
+
+These are unrelated tools from the `codex` plugin. The Codex Evaluator's purpose is to get an *independent verdict* on a review comment, not to delegate rescue work.
 
 ## Decision Matrix
 

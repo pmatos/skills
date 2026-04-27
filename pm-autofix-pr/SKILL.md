@@ -96,7 +96,14 @@ If nothing to fix, report the PR is clean and proceed to Step 6 (monitoring).
 
 1. **Opus Evaluator** — Agent tool with `model="opus"`. Provide the comment, code context, PR title/description, and changed files summary. Ask for a VALID/INVALID verdict with category, confidence, and reasoning. See `references/comment-evaluation.md` for the full prompt template.
 
-2. **Codex Evaluator** — Invoke `/codex-2nd-opinion` via the Skill tool with the same context. Ask for the same verdict format.
+2. **Codex Evaluator** — Call the Skill tool with `skill="codex-2nd-opinion"` (the user-level skill in this repo, frontmatter `name: codex-2nd-opinion`). Pass the same evaluation prompt as the Opus Evaluator. Ask for the same verdict format.
+
+   **DO NOT** invoke any of the following — they look superficially related but are the wrong tool and will produce different output:
+   - `codex:rescue` / Skill tool with `skill="codex:rescue"` — this delegates rescue/fix work, not opinion-gathering.
+   - `codex:codex-rescue` — the rescue subagent in the Agent tool, same problem.
+   - `codex:setup`, `codex:codex-cli-runtime`, `codex:gpt-5-4-prompting`, `codex:codex-result-handling` — internal helpers, not user-facing review tools.
+
+   The only correct invocation is the Skill tool with `skill="codex-2nd-opinion"`. If `codex-2nd-opinion` is not in the available-skills list, **stop and report** — do not substitute another skill.
 
 **Decision logic** (from `references/comment-evaluation.md`):
 
