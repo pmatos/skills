@@ -129,7 +129,7 @@ mcp__github__pull_request_read(
 )
 ```
 
-Returns review threads with comments grouped by code location. Each thread carries `id` (GraphQL node ID for resolution), `isResolved`, `isOutdated`, `path`, `line`, and a `comments` array. Each comment carries `id`, `databaseId` (numeric REST ID — needed for replies), `body`, `author.login`, `createdAt`.
+Returns review threads with comments grouped by code location. Each thread carries `id` (GraphQL node ID for resolution), `isResolved`, `isOutdated`, `path`, `line`, and a `comments` array. Each comment carries `id`, `databaseId` (numeric REST ID — needed for replies), `body`, `author.login`, `createdAt`, and `updatedAt`/`updated_at` when available.
 
 Paginate via `perPage` and `after` until exhausted.
 
@@ -137,6 +137,8 @@ Derived state:
 - `unresolved_threads = [t for t in threads if not t.isResolved]`
 - `resolved_thread_ids = [t.id for t in threads if t.isResolved]`
 - `latestReviewerComment(thread)` = last non-self element of `thread.comments` (sort by `createdAt` if order is not guaranteed and ignore `author.login == GH_USER`). Use this for evaluation, reply anchoring, and `REJECTED_ITEMS` re-evaluation tracking.
+- `actionable_threads = [t for t in unresolved_threads if latestReviewerComment(t) != null]`. Drop unresolved self-only threads from feedback items; otherwise later reply code would dereference a missing `latestReviewerComment.databaseId`.
+- `rejection_marker(thread)` = `<latestReviewerComment.databaseId>:<latestReviewerComment.updatedAt || latestReviewerComment.updated_at || latestReviewerComment.createdAt>`, so edited reviewer comments re-enter evaluation.
 
 ## Review summaries
 
@@ -168,7 +170,7 @@ mcp__github__pull_request_read(
 )
 ```
 
-Returns issue-level comments on the PR. Filter out entries where `user.login == GH_USER` to avoid acting on the skill's own posts.
+Returns issue-level comments on the PR. Filter out entries where `user.login == GH_USER` to avoid acting on the skill's own posts. Track rejected PR conversation comments with a mutable marker such as `<comment.id>:<comment.updated_at>`; comment edits keep the same ID and must re-enter evaluation.
 
 ## Replying to review summaries and PR conversation comments
 

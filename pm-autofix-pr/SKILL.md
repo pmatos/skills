@@ -81,7 +81,7 @@ Issue these MCP calls (paginate where applicable) and merge into a single state 
 |---|---|
 | `head_sha` | `pull_request_read method=get` → `head.sha` |
 | `ci_failures` | `pull_request_read method=get_check_runs` → keep entries whose `conclusion ∈ {failure, timed_out, cancelled, startup_failure, action_required}`. For each `failure` whose `app.slug == "github-actions"`, mark `fixable=true` and fetch the log tail via `Bash`: `gh run view --job <check_run.id> --log-failed 2>&1 | tail -<LOG_TAIL_LINES>`. Other failure types are non-fixable — report them. |
-| `review_threads` | `pull_request_read method=get_review_comments` (paginate via `perPage=100`, `after`). Split into `unresolved = [t for t in threads if not t.isResolved]` and `resolved_thread_ids = [t.id for t in threads if t.isResolved]`. For each thread, take the last non-self element of `comments` (sorted by `createdAt` if order is not guaranteed and `author.login != GH_USER`) as `latestReviewerComment`. |
+| `review_threads` | `pull_request_read method=get_review_comments` (paginate via `perPage=100`, `after`). Split into `unresolved = [t for t in threads if not t.isResolved]` and `resolved_thread_ids = [t.id for t in threads if t.isResolved]`. For each unresolved thread, take the last non-self element of `comments` (sorted by `createdAt` if order is not guaranteed and `author.login != GH_USER`) as `latestReviewerComment`. Drop self-only threads whose `latestReviewerComment` is absent from `feedback_items`; they are author notes, not reviewer feedback, and must not be dereferenced later. |
 | `review_summaries` | `pull_request_read method=get_reviews`. Apply supersession (see below). |
 | `pr_comments` | `pull_request_read method=get_comments`. Drop entries where `user.login == GH_USER`. |
 
@@ -90,7 +90,7 @@ Issue these MCP calls (paginate where applicable) and merge into a single state 
 **Errors:** if any MCP call fails, accumulate the error message into an `errors` list. Do not abort — downstream steps tolerate partial state and re-fetch.
 
 Build `feedback_items` from:
-- `review_threads.unresolved`, keyed as `thread:<thread.id>`
+- unresolved review threads with a non-null `latestReviewerComment`, keyed as `thread:<thread.id>`
 - `review_summaries`, keyed as `review:<review.id>`
 - `pr_comments`, keyed as `comment:<comment.id>`
 
@@ -142,7 +142,7 @@ Loop until fixed point:
 - Inline review thread: call `mcp__github__add_reply_to_pull_request_comment` with `commentId = latestReviewerComment.databaseId`.
 - Review summary or PR conversation comment: call `mcp__github__add_issue_comment` with `issue_number = pullNumber`. Start the body with `@reviewer Regarding your <review/comment> (<short identifier>):` and quote or summarize the specific ask being rejected.
 
-Do **not** resolve rejected inline threads — they stay unresolved so the reviewer can push back. Record the item in `REJECTED_ITEMS` as `item_key → latest_reviewer_marker_at_outcome` (`latestReviewerComment.databaseId` for inline threads, `review.id` for summaries, `comment.id` for PR comments). Do **not** add it to `ADDRESSED_THREAD_IDS`; suppression depends on the recorded reviewer marker staying current.
+Do **not** resolve rejected inline threads — they stay unresolved so the reviewer can push back. Record the item in `REJECTED_ITEMS` as `item_key → latest_reviewer_marker_at_outcome` using a mutable marker: `latestReviewerComment.databaseId + updatedAt` for inline threads, `review.id + submitted_at` for review summaries, and `comment.id + updated_at` for PR conversation comments. Do **not** add it to `ADDRESSED_THREAD_IDS`; suppression depends on the recorded reviewer marker staying current.
 
 Rejection body format:
 
