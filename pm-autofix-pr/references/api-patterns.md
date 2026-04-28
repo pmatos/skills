@@ -136,7 +136,7 @@ Paginate via `perPage` and `after` until exhausted.
 Derived state:
 - `unresolved_threads = [t for t in threads if not t.isResolved]`
 - `resolved_thread_ids = [t.id for t in threads if t.isResolved]`
-- `latestComment(thread)` = last element of `thread.comments` (sort by `createdAt` if order is not guaranteed). Used for `REJECTED_THREADS` re-evaluation tracking.
+- `latestReviewerComment(thread)` = last non-self element of `thread.comments` (sort by `createdAt` if order is not guaranteed and ignore `author.login == GH_USER`). Use this for evaluation, reply anchoring, and `REJECTED_ITEMS` re-evaluation tracking.
 
 ## Review summaries
 
@@ -170,17 +170,31 @@ mcp__github__pull_request_read(
 
 Returns issue-level comments on the PR. Filter out entries where `user.login == GH_USER` to avoid acting on the skill's own posts.
 
+## Replying to review summaries and PR conversation comments
+
+Review summaries and PR conversation comments do not have inline review-thread reply anchors. A pull request is also an issue, so use the issues comment tool to post a PR-level outcome reply:
+
+```
+mcp__github__add_issue_comment(
+  owner=<owner>, repo=<repo>,
+  issue_number=<pullNumber>,
+  body="@reviewer Regarding your review/comment (<short identifier>):\n\nFixed in `<short-sha>`.\n\nChanged: <files/functions/behavior>.\nValidation: <checks run>."
+)
+```
+
+Use the same tool for no-change decisions, replacing the fixed body with the rejection prefix and rationale from SKILL.md. Because this is a PR-level comment, include enough context for humans to connect the reply to the original feedback: reviewer login, review/comment ID or timestamp, and a short quoted/summarized ask.
+
 ## Replying to review threads
 
 ```
 mcp__github__add_reply_to_pull_request_comment(
   owner=<owner>, repo=<repo>, pullNumber=<num>,
-  commentId=<latestComment.databaseId>,
-  body="Fixed in `<short-sha>`"
+  commentId=<latestReviewerComment.databaseId>,
+  body="Fixed in `<short-sha>`.\n\nChanged: <files/functions/behavior>.\nValidation: <checks run>."
 )
 ```
 
-`commentId` is a **comment** ID, not a thread ID. Pass the numeric `databaseId` of the thread's **latest** comment (last element of `thread.comments`) — the tool rejects the thread's GraphQL `id`. Using the latest comment keeps replies attached correctly on long threads. Reply failure is non-fatal — the code fix is already pushed.
+`commentId` is a **comment** ID, not a thread ID. Pass the numeric `databaseId` of the thread's **latest non-self reviewer comment** — the tool rejects the thread's GraphQL `id`. Using the latest reviewer comment keeps replies attached to the current ask instead of replying to the skill's own previous outcome message. A failed reply is not a reason to revert a code fix, but it does block convergence; retry it on the next loop.
 
 ## Resolving review threads
 
@@ -196,17 +210,21 @@ mcp__github__pull_request_review_write(
 
 `threadId` is the thread's GraphQL node ID (the `id` field from `get_review_comments`, e.g. `PRRT_kwDOxxx`). The `owner`/`repo`/`pullNumber` are required by the tool schema but ignored by this method. Resolving an already-resolved thread is a no-op.
 
-On success, add the thread to `ADDRESSED_IDS`. On failure, leave it off `ADDRESSED_IDS` so the next re-fetch re-surfaces it for retry.
+On success, add the thread to `ADDRESSED_THREAD_IDS`. On failure, leave it off `ADDRESSED_THREAD_IDS` so the next re-fetch re-surfaces it for retry.
 
-## Rejecting comments
+## Rejecting feedback
 
-Same tool as replying — `add_reply_to_pull_request_comment` — but with a categorized prefix and disclaimer body (see SKILL.md Step 5a for the prefix table). Do **not** resolve the thread: rejected threads stay open so the reviewer can push back.
+Use the same reply channel as the feedback source:
+- Inline review thread: `add_reply_to_pull_request_comment` with a categorized prefix and disclaimer body (see SKILL.md Step 5a for the prefix table).
+- Review summary or PR conversation comment: `add_issue_comment` with `issue_number=<pullNumber>`, reviewer/context prefix, and the categorized rationale.
+
+Do **not** resolve rejected inline threads: rejected threads stay open so the reviewer can push back.
 
 ## Rate limiting
 
 If any MCP call errors with `403` or `429`, wait 60 seconds and retry once. After a single failed retry:
-- Reply failures (`add_reply_to_pull_request_comment`) are non-fatal — log and continue.
-- Resolve failures (`pull_request_review_write` with `method="resolve_thread"`) are non-fatal but the thread stays off `ADDRESSED_IDS` so it re-surfaces.
+- Reply failures (`add_reply_to_pull_request_comment` or `add_issue_comment`) are not code-fatal, but they block convergence. Leave the item off `ADDRESSED_THREAD_IDS` / `REPLIED_ITEM_KEYS` so it re-surfaces for another reply attempt.
+- Resolve failures (`pull_request_review_write` with `method="resolve_thread"`) are non-fatal but the thread stays off `ADDRESSED_THREAD_IDS` so it re-surfaces.
 - State-fetch failures get added to the `errors` list and prevent the fixed-point declaration in Step 5g.
 
 ## Push handling (unchanged — still local `git`)

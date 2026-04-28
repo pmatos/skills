@@ -6,11 +6,15 @@ user-invocable: true
 
 # Autofix PR
 
-Iteratively fix CI failures and address review comments on a GitHub PR until a true fixed point is reached — all CI green, all valid review comments addressed, all invalid comments rejected with reasons. A single invocation handles everything.
+Iteratively fix CI failures and address reviewer feedback on a GitHub PR until a true fixed point is reached — all CI green, all valid feedback fixed, all invalid feedback rejected with reasons, and every feedback item has a reply documenting the outcome. A single invocation handles everything.
 
 ## Core Principle: Say NO
 
-Not every review comment deserves a code change. Before touching code, evaluate every comment with two independent AI reviewers (Opus 4.6 + Codex/GPT-5.4). Reject comments that are wrong, out of scope, or unrelated. Post a clear explanation on the PR when rejecting. This prevents scope creep and unnecessary churn.
+Not every review comment deserves a code change. Before touching code, evaluate every review thread, review summary, and PR conversation comment on its merits with two independent AI reviewers (Opus 4.6 + Codex/GPT-5.4). Reject comments that are wrong, out of scope, or unrelated. Post a clear explanation on the PR when rejecting. This prevents scope creep and unnecessary churn.
+
+## Core Principle: Always Reply
+
+Every reviewer feedback item must get an explicit reply before the skill can converge. Valid feedback gets a reply that says what was fixed, where it was fixed, and the commit that contains it. Invalid or out-of-scope feedback gets a reply that says no code change was made and why. Ambiguous feedback gets a reply after the user chooses the path. A missing reply is still unfinished work, even if the code and CI are already green.
 
 ## Prerequisites
 
@@ -40,7 +44,8 @@ All GitHub interaction is direct MCP tool calls — no bundled scripts.
 | `mcp__github__pull_request_read` | Fetch PR details, check runs, review comments/threads, reviews, conversation comments, status. |
 | `mcp__github__subscribe_pr_activity` | One-time subscription so CI/review/comment events arrive as `<github-webhook-activity>` messages. |
 | `mcp__github__unsubscribe_pr_activity` | Cleanup on exit. |
-| `mcp__github__add_reply_to_pull_request_comment` | Post replies (both "fixed" replies and rejection replies). |
+| `mcp__github__add_reply_to_pull_request_comment` | Post replies on inline review threads (both "fixed" replies and rejection replies). |
+| `mcp__github__add_issue_comment` | Post PR-level replies for review summaries and PR conversation comments. |
 | `mcp__github__pull_request_review_write` (`method="resolve_thread"`) | Resolve threads after a fix is pushed. |
 
 ## Workflow
@@ -76,7 +81,7 @@ Issue these MCP calls (paginate where applicable) and merge into a single state 
 |---|---|
 | `head_sha` | `pull_request_read method=get` → `head.sha` |
 | `ci_failures` | `pull_request_read method=get_check_runs` → keep entries whose `conclusion ∈ {failure, timed_out, cancelled, startup_failure, action_required}`. For each `failure` whose `app.slug == "github-actions"`, mark `fixable=true` and fetch the log tail via `Bash`: `gh run view --job <check_run.id> --log-failed 2>&1 | tail -<LOG_TAIL_LINES>`. Other failure types are non-fixable — report them. |
-| `review_threads` | `pull_request_read method=get_review_comments` (paginate via `perPage=100`, `after`). Split into `unresolved = [t for t in threads if not t.isResolved]` and `resolved_thread_ids = [t.id for t in threads if t.isResolved]`. For each thread, take the last element of `comments` (sorted by `createdAt` if order is not guaranteed) as `latestComment`. |
+| `review_threads` | `pull_request_read method=get_review_comments` (paginate via `perPage=100`, `after`). Split into `unresolved = [t for t in threads if not t.isResolved]` and `resolved_thread_ids = [t.id for t in threads if t.isResolved]`. For each thread, take the last non-self element of `comments` (sorted by `createdAt` if order is not guaranteed and `author.login != GH_USER`) as `latestReviewerComment`. |
 | `review_summaries` | `pull_request_read method=get_reviews`. Apply supersession (see below). |
 | `pr_comments` | `pull_request_read method=get_comments`. Drop entries where `user.login == GH_USER`. |
 
@@ -84,15 +89,26 @@ Issue these MCP calls (paginate where applicable) and merge into a single state 
 
 **Errors:** if any MCP call fails, accumulate the error message into an `errors` list. Do not abort — downstream steps tolerate partial state and re-fetch.
 
-Initialize `ADDRESSED_IDS` with `resolved_thread_ids`. Initialize `REJECTED_THREADS = {}` (`thread_id → latest_comment_database_id_at_rejection`).
+Build `feedback_items` from:
+- `review_threads.unresolved`, keyed as `thread:<thread.id>`
+- `review_summaries`, keyed as `review:<review.id>`
+- `pr_comments`, keyed as `comment:<comment.id>`
 
-Present the initial assessment and ask: **"Found N CI failures and M unresolved review comments. Begin fixing?"**
+Initialize `ADDRESSED_THREAD_IDS` with `resolved_thread_ids`. Initialize `REPLIED_ITEM_KEYS = {}` for review summaries and PR conversation comments that already received an outcome reply during this invocation. Initialize `REJECTED_ITEMS = {}` (`item_key → latest_reviewer_marker_at_outcome`) for rejected feedback.
+
+Present the initial assessment and ask: **"Found N CI failures and M reviewer feedback items. Begin fixing?"**
 
 If nothing to fix, report the PR is clean and proceed to Step 6 (monitoring).
 
-### Step 4: Evaluate Every Review Comment
+### Step 4: Evaluate Every Feedback Item
 
-**This is the most important step.** For each unresolved review comment not in `ADDRESSED_IDS`, read the referenced file and code context, then spawn **two subagents in parallel**:
+**This is the most important step.** Every time PR state is fetched, evaluate reviewer feedback before waiting on CI. Do not defer review handling until checks finish.
+
+For each feedback item not already answered, gather context, then spawn **two subagents in parallel**. Inline threads are already answered when `thread.id ∈ ADDRESSED_THREAD_IDS`; review summaries and PR conversation comments are already answered when `item_key ∈ REPLIED_ITEM_KEYS`; rejected feedback is already answered when `item_key ∈ REJECTED_ITEMS` and its reviewer marker has not changed.
+
+- Inline review threads: use `latestReviewerComment`, then read the referenced file and code context.
+- Review summaries: parse the body into concrete asks; read the PR diff, PR description, and any files mentioned by the review.
+- PR conversation comments: parse the body into concrete asks; read referenced files, logs, or diff context as needed.
 
 1. **Opus Evaluator** — Agent tool with `model="opus"`. Provide the comment, code context, PR title/description, and changed files summary. Ask for a VALID/INVALID verdict with category, confidence, and reasoning. See `references/comment-evaluation.md` for the full prompt template.
 
@@ -116,13 +132,17 @@ If nothing to fix, report the PR is clean and proceed to Step 6 (monitoring).
 
 Exception: if one says INVALID with HIGH confidence and the other says VALID with LOW confidence, treat as INVALID.
 
-For ambiguous comments (open questions, architectural suggestions, multiple alternatives), present to the user with both evaluators' reasoning and wait for guidance.
+For ambiguous feedback (open questions, architectural suggestions, multiple alternatives), present to the user with both evaluators' reasoning and wait for guidance. After the user decides, treat it as either VALID or INVALID and reply with that decision and rationale.
 
 ### Step 5: The Fix Loop
 
 Loop until fixed point:
 
-**5a. Reject invalid comments.** For each comment evaluated as INVALID, compose a rejection body using the prefix table below, then call `mcp__github__add_reply_to_pull_request_comment` with `commentId = latestComment.databaseId` and the body. Do **not** resolve the thread — it stays unresolved so the reviewer can push back. Record the thread in `REJECTED_THREADS` as `thread_id → current_latest_comment_database_id`. Do **not** add to `ADDRESSED_IDS`.
+**5a. Reject invalid feedback.** For each feedback item evaluated as INVALID, compose a rejection body using the prefix table below, then reply through the right channel:
+- Inline review thread: call `mcp__github__add_reply_to_pull_request_comment` with `commentId = latestReviewerComment.databaseId`.
+- Review summary or PR conversation comment: call `mcp__github__add_issue_comment` with `issue_number = pullNumber`. Start the body with `@reviewer Regarding your <review/comment> (<short identifier>):` and quote or summarize the specific ask being rejected.
+
+Do **not** resolve rejected inline threads — they stay unresolved so the reviewer can push back. Record the item in `REJECTED_ITEMS` as `item_key → latest_reviewer_marker_at_outcome` (`latestReviewerComment.databaseId` for inline threads, `review.id` for summaries, `comment.id` for PR comments). Do **not** add it to `ADDRESSED_THREAD_IDS`; suppression depends on the recorded reviewer marker staying current.
 
 Rejection body format:
 
@@ -141,46 +161,58 @@ Prefixes by category:
 | `unrelated` | `**Unrelated to this PR** —` |
 | `not-relevant` | `**Not applicable** —` |
 | `style-preference` | `**Style preference (no change)** —` |
+| `already-handled` | `**Already handled (no change)** —` |
 | (default) | `**No action taken** —` |
 
-**5b. Fix valid comments and CI failures.** Apply fixes one issue at a time:
+**5b. Fix valid feedback and CI failures.** Apply fixes one issue at a time:
 - CI failures: read error logs, identify failing file/line, read source, fix.
-- Review comments: read the referenced file, understand context, apply the requested change.
-- Review summaries / PR comments: parse for specific asks, locate files, apply changes.
+- Inline review threads: read the referenced file, understand context, apply the requested change.
+- Review summaries / PR conversation comments: parse for specific asks, locate files, apply changes.
 
-After handling each review summary or PR conversation comment, add its ID to `ADDRESSED_IDS`.
+For each valid feedback item, record a reply plan before moving on: changed files, line/function names where useful, test/check evidence, and the commit SHA once available.
 
 **5c. Run pre-commit checks** (from Step 2) in order: format → lint → type-check → test → build. If a formatter modifies files, stage them. If a check fails, attempt one sub-fix (does not count as an iteration). If the sub-fix also fails, ask the user.
 
 **5d. Commit and push.** If `git status --porcelain` shows no changes, skip to 5f. Otherwise: stage files by name (not `git add -A`), commit with a descriptive message, push. On rejected push, stop and tell user to `git pull --rebase`. On network error, retry with exponential backoff (2s, 4s, 8s, 16s).
 
-**5e. Reply to every addressed comment.** For each review thread fixed in this iteration:
-1. Call `mcp__github__add_reply_to_pull_request_comment` with `commentId = latestComment.databaseId` (the numeric REST ID of the thread's most recent comment — **not** the thread's GraphQL `id`) and body `Fixed in \`<short-sha>\``. If it fails with 403/429, wait 60s and retry once. Reply failure is **non-fatal** — the code fix is already pushed.
-2. Call `mcp__github__pull_request_review_write` with `method="resolve_thread"` and `threadId = <thread.id>` (the GraphQL node ID from `get_review_comments`). Same 403/429 retry rule. If resolve succeeds, add the thread to `ADDRESSED_IDS`. If resolve fails, do **not** suppress the thread — it will reappear on re-fetch and be retried.
+**5e. Reply to every addressed feedback item.** For each valid feedback item fixed in this iteration, post an outcome reply before it can count as addressed.
 
-This step is **mandatory** — never skip it.
+Reply body format:
 
-**5f. Wait for CI.** Wait passively for `<github-webhook-activity>` events from the active subscription. Treat these as the trigger to re-fetch:
+```
+Fixed in `<short-sha>`.
+
+Changed: <file/function/behavior summary>.
+Validation: <pre-commit check, targeted test, or reason validation was not run>.
+```
+
+Use the right channel:
+- Inline review thread: call `mcp__github__add_reply_to_pull_request_comment` with `commentId = latestReviewerComment.databaseId` (the numeric REST ID of the thread's most recent reviewer comment — **not** the thread's GraphQL `id`). After the reply succeeds, call `mcp__github__pull_request_review_write` with `method="resolve_thread"` and `threadId = <thread.id>` (the GraphQL node ID from `get_review_comments`). If both calls succeed, add the thread to `ADDRESSED_THREAD_IDS`.
+- Review summary or PR conversation comment: call `mcp__github__add_issue_comment` with `issue_number = pullNumber`. Start the body with `@reviewer Regarding your <review/comment> (<short identifier>):`, then include the fixed outcome. If the reply succeeds, add the item key to `REPLIED_ITEM_KEYS`.
+
+This step is **mandatory** — never skip it. If a reply or resolve call fails with 403/429, wait 60s and retry once. After a failed retry, continue the code loop if needed, but do not count that feedback item as addressed and do not declare convergence; it must reappear on the next fetch/retry cycle until a reply is posted.
+
+**5f. Wait for CI only after feedback is answered.** If any fetched feedback item still lacks an evaluation decision and an outcome reply, re-enter Step 4 immediately instead of waiting for CI. Once feedback is answered, wait passively for `<github-webhook-activity>` events from the active subscription. Treat these as the trigger to re-fetch:
 - `check_run.completed` / `workflow_run.completed` — CI finished, re-fetch immediately.
-- `pull_request_review.submitted` / `pull_request_review_comment.created` / `issue_comment.created` — new feedback, re-fetch immediately.
+- `pull_request_review.submitted` / `pull_request_review_comment.created` / `issue_comment.created` — new feedback, re-fetch immediately and process it before waiting for more CI events.
 
 Track wall-clock elapsed time since the last commit was pushed. If `CI_TIMEOUT` minutes elapse with no terminal CI event, ask the user whether to keep waiting or abort. If the subscription appears dropped (no events for an extended period), re-call `mcp__github__subscribe_pr_activity` (idempotent) and continue.
 
-**5g. Re-fetch state and check for fixed point.** Re-run Step 3's MCP calls. Filter out threads whose ID is in `ADDRESSED_IDS`. For each thread in `REJECTED_THREADS`, suppress it **only if** its newest comment `databaseId` still matches the value recorded at rejection; if a later comment exists, the reviewer has replied — remove the thread from `REJECTED_THREADS` and treat it as fresh feedback to re-evaluate in Step 4. If the merged state has a non-empty `errors` list, do **not** declare a fixed point — report the fetch failures and retry after 30 seconds.
+**5g. Re-fetch state and check for fixed point.** Re-run Step 3's MCP calls. Filter out threads whose ID is in `ADDRESSED_THREAD_IDS` and PR-level feedback whose key is in `REPLIED_ITEM_KEYS`. For each item in `REJECTED_ITEMS`, suppress it **only if** its latest reviewer marker still matches the value recorded at rejection; if a later reviewer reply exists, remove the item from `REJECTED_ITEMS` and treat it as fresh feedback to re-evaluate in Step 4. If the merged state has a non-empty `errors` list, do **not** declare a fixed point — report the fetch failures and retry after 30 seconds.
 
 **Fixed point reached** if:
 - `ci_failures` is empty after filtering out `cancelled` (the only non-success conclusion treated as informational). Any remaining entry — including `timed_out`, `startup_failure`, `action_required`, and non-`github-actions` `failure` — blocks convergence and is reported to the user.
-- No new unresolved feedback exists
+- No reviewer feedback item remains without an evaluation decision and an outcome reply.
 
 → Proceed to Step 6.
 
 **Stale loop detected** if the same CI checks are failing with similar error patterns as the previous iteration → report to user, ask whether to continue or stop.
 
-**New issues found** → run Step 4 (evaluate new comments) and continue the loop.
+**New issues found** → run Step 4 (evaluate new feedback) and continue the loop.
 
 ### Step 6: Monitoring Phase
 
-Skip if `MONITOR_DURATION` is 0 or if there are unresolved issues.
+Skip if `MONITOR_DURATION` is 0 or if there are CI failures or unanswered feedback items.
 
 Report: **"All issues resolved. Monitoring for {MONITOR_DURATION} minutes..."**
 
@@ -199,22 +231,22 @@ Then print:
 ### Iterations: N
 
 ### Changes Made
-| Iteration | Commit | Fixes Applied |
-|-----------|--------|---------------|
-| 1 | abc123 | Fixed lint error in foo.ts, addressed review on bar.ts |
-| 2 | def456 | Fixed test failure in baz_test.py |
+| Iteration | Commit | Fixes Applied | Replies Posted |
+|-----------|--------|---------------|----------------|
+| 1 | abc123 | Fixed lint error in foo.ts, addressed review on bar.ts | @reviewer fixed thread in bar.ts via abc123 |
+| 2 | def456 | Fixed test failure in baz_test.py | n/a |
 
-### Rejected Comments
-| Comment | Category | Reason |
-|---------|----------|--------|
-| @reviewer on file.ts:42 | scope-creep | Retry logic is valid but out of scope |
+### Rejected Feedback
+| Feedback | Category | Reason | Reply |
+|----------|----------|--------|-------|
+| @reviewer on file.ts:42 | scope-creep | Retry logic is valid but out of scope | Posted no-change rationale |
 
 ### Current Status
 - CI: All passing / N failures remaining
-- Review comments: All addressed / M unresolved
+- Reviewer feedback: All answered / M items still missing replies
 ```
 
-If unresolved issues remain, ask if the user wants further attempts. If everything is resolved: **"PR is ready for re-review."**
+If CI failures or unanswered feedback remain, ask if the user wants further attempts. If everything is resolved: **"PR is ready for re-review."**
 
 ## References
 
