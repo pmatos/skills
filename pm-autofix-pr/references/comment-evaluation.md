@@ -1,10 +1,10 @@
-# Dual-Agent Review Comment Evaluation
+# Dual-Agent Reviewer Feedback Evaluation
 
-Every unresolved review comment must be evaluated before any action is taken. This prevents wasting effort on invalid, out-of-scope, or irrelevant feedback. Two independent evaluators assess each comment in parallel, and their combined verdict determines the action.
+Every unresolved reviewer feedback item must be evaluated before any action is taken. This includes inline review threads, review summary bodies, and PR conversation comments. This prevents wasting effort on invalid, out-of-scope, or irrelevant feedback. Two independent evaluators assess each item in parallel, and their combined verdict determines the action.
 
 ## Evaluation Architecture
 
-For each unresolved review comment, spawn two subagents **in parallel**:
+For each unresolved feedback item, spawn two subagents **in parallel**:
 
 1. **Opus Evaluator** — Claude Opus 4.6, model="opus", used via the Agent tool
 2. **Codex Evaluator** — invokes the user-level `codex-2nd-opinion` skill (Skill tool, `skill="codex-2nd-opinion"`). **Never** substitute `codex:rescue`, `codex:codex-rescue`, or any other `codex:*` plugin skill — those are unrelated tools.
@@ -14,9 +14,10 @@ Both receive identical context and return independent verdicts.
 ## Context to Provide Each Evaluator
 
 Each evaluator needs:
-- The review comment text (use the **most recent reviewer comment** in the thread, not just the original)
-- The file path and line number referenced
-- The relevant code at that location (read it before spawning)
+- The feedback text. For inline threads, use the **most recent reviewer comment** in the thread, not just the original.
+- The feedback source: inline thread, review summary, or PR conversation comment.
+- The file path and line number referenced, if present.
+- The relevant code at that location, or the PR diff/files/logs needed to judge a summary or conversation comment.
 - The PR title and description (to understand scope)
 - The PR diff summary (what files changed and why)
 - The project's CLAUDE.md pre-commit requirements (if any)
@@ -24,24 +25,25 @@ Each evaluator needs:
 ## Opus Evaluator Prompt Template
 
 ```
-Evaluate this review comment on a GitHub PR. Determine if it should be addressed.
+Evaluate this reviewer feedback item on a GitHub PR. Determine if it should be addressed.
 
 ## PR Context
 - Title: {pr_title}
 - Description: {pr_description}
 - Files changed: {changed_files_summary}
 
-## Review Comment
-- File: {path}:{line}
+## Reviewer Feedback
+- Source: {inline-thread | review-summary | pr-comment}
+- File: {path}:{line or n/a}
 - Reviewer: @{reviewer}
-- Comment: {comment_body}
+- Feedback: {comment_body}
 
-## Code at Location
-{code_snippet}
+## Context
+{code_or_diff_context}
 
 ## Evaluation Criteria
 
-Rate this comment as VALID or INVALID:
+Rate this feedback as VALID or INVALID:
 
 VALID — Address it if:
 - Points to a real bug, correctness issue, or security concern
@@ -61,6 +63,7 @@ VERDICT: VALID or INVALID
 CATEGORY: (if INVALID) not-an-issue | scope-creep | unrelated | not-relevant | style-preference | already-handled
 CONFIDENCE: HIGH | MEDIUM | LOW
 REASONING: 2-3 sentences explaining the verdict
+REPLY_GUIDANCE: one sentence describing what the PR reply should say
 ```
 
 ## Codex Evaluator Prompt
@@ -78,10 +81,10 @@ These are unrelated tools from the `codex` plugin. The Codex Evaluator's purpose
 
 | Opus Verdict | Codex Verdict | Action |
 |-------------|---------------|--------|
-| VALID | VALID | **Address** the comment — make the code fix |
-| VALID | INVALID | **Address** the comment — err on the side of caution |
-| INVALID | VALID | **Address** the comment — err on the side of caution |
-| INVALID | INVALID | **Reject** the comment — post rejection reply |
+| VALID | VALID | **Address** the feedback — make the code fix |
+| VALID | INVALID | **Address** the feedback — err on the side of caution |
+| INVALID | VALID | **Address** the feedback — err on the side of caution |
+| INVALID | INVALID | **Reject** the feedback — post rejection reply |
 
 When both are INVALID, select the rejection category from the evaluator with higher confidence. If confidence is equal, use the Opus category.
 
@@ -91,7 +94,7 @@ If one evaluator says INVALID with HIGH confidence and the other says VALID with
 
 ## Rejection Taxonomy
 
-When rejecting a comment, use one of these categories:
+When rejecting feedback, use one of these categories:
 
 | Category | When to use | Example rejection message |
 |---------|-------------|--------------------------|
@@ -100,15 +103,25 @@ When rejecting a comment, use one of these categories:
 | `unrelated` | Concerns untouched code | "This function was not modified in this PR. The existing behavior is unchanged." |
 | `not-relevant` | Style preference without backing | "This is a stylistic preference. The project has no documented convention for this pattern (checked CLAUDE.md, .eslintrc, .prettierrc)." |
 | `style-preference` | Alternate style, equally valid | "Both approaches are valid here. The current style is consistent with the rest of the codebase (see similar patterns in utils/auth.ts and lib/api.ts)." |
+| `already-handled` | The requested behavior is already present in the PR | "This is already handled by `validateConfig()` and covered by `config.test.ts`; no code change was needed." |
 
-## Handling Ambiguous Comments
+## Reply Requirements
 
-If a review comment asks an open question, proposes multiple alternatives, or suggests an architectural change, classify it as **ambiguous** regardless of evaluator verdicts. Present it to the user with both evaluators' reasoning and ask for guidance.
+Every feedback item needs a reply after evaluation:
+- VALID and fixed: say `Fixed in <sha>`, identify the changed file/function/behavior, and mention validation.
+- INVALID and rejected: say no change was made, give the rejection category, and explain why.
+- Ambiguous and user-decided: state the user-selected decision and either the fix location or the no-change rationale.
+
+Reply before counting the item as addressed. If posting the reply fails, retry later and keep the item open in the loop.
+
+## Handling Ambiguous Feedback
+
+If a feedback item asks an open question, proposes multiple alternatives, or suggests an architectural change, classify it as **ambiguous** regardless of evaluator verdicts. Present it to the user with both evaluators' reasoning and ask for guidance.
 
 ## Thread Context
 
-Always evaluate based on the **most recent reviewer comment** in the thread, not just the original. Reviewers often post follow-ups ("that's still not right, please also handle X"), and the latest comment reflects the current ask.
+Always evaluate inline threads based on the **most recent reviewer comment** in the thread, not just the original. Reviewers often post follow-ups ("that's still not right, please also handle X"), and the latest comment reflects the current ask.
 
 ## Performance Note
 
-Comment evaluation is the most expensive step but also the most important. Each comment spawns two subagents — for a PR with 10 review comments, that's 20 subagent calls (10 pairs running in parallel). This is intentional. Getting the evaluation right means fewer wasted iterations and no unnecessary code churn.
+Feedback evaluation is the most expensive step but also the most important. Each item spawns two subagents — for a PR with 10 feedback items, that's 20 subagent calls (10 pairs running in parallel). This is intentional. Getting the evaluation right means fewer wasted iterations and no unnecessary code churn.

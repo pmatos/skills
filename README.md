@@ -97,21 +97,22 @@ Trigger phrases: `what's going on`, `wigo`, `status`, `where was I`, `what were 
 npx skills@latest add pmatos/skills/pm-autofix-pr
 ```
 
-Iteratively fixes CI failures and addresses review comments on a GitHub PR, working entirely in the local CLI. Monitors check results and reviewer feedback, makes code changes, runs local validation, commits, pushes, and waits for CI — repeating until all issues are resolved or a maximum iteration count is reached.
+Iteratively fixes CI failures and addresses reviewer feedback on a GitHub PR, working entirely in the local CLI. Monitors check results and reviewer feedback, evaluates each review on its merits, makes code changes only when warranted, runs local validation, commits, pushes, and repeats until CI is green and every feedback item has an outcome reply.
 
 What it does:
 - Detects the PR from the current branch (or accepts a PR number).
-- Fetches failed CI checks and unresolved review comments via `gh`.
-- Classifies issues: clear fixes are applied automatically, ambiguous comments prompt for user guidance.
+- Fetches failed CI checks, review threads, review summaries, and PR comments via the GitHub MCP.
+- Evaluates each feedback item before acting: valid issues are fixed, invalid/out-of-scope issues are rejected with rationale, ambiguous comments prompt for user guidance.
 - Runs local pre-commit checks from `CLAUDE.md` before each push.
-- Commits and pushes fixes, replies to addressed review comments.
-- Waits for CI to complete, then checks for new issues.
-- Loops until fix point (all CI green + no unresolved comments) or max iterations (default 5).
+- Commits and pushes fixes, then replies with what changed, where, and how it was validated.
+- Replies to rejected feedback explaining why no code change was made.
+- Processes new reviews as soon as they arrive instead of waiting for CI to finish first.
+- Loops until fixed point: all CI green and all reviewer feedback answered one way or another.
 - Presents a full summary of all changes for human review.
 
 Trigger phrases: `autofix pr`, `fix pr locally`, `fix ci failures`, `fix review comments`, `iterate on pr`, `fix failing checks`, `fix pr comments`, `make ci green`, `fix the build`, `address reviewer feedback`.
 
-**Requires**: [GitHub CLI](https://cli.github.com/) (`gh`) authenticated with a token that has `repo` scope (read and write access to pull requests).
+**Requires**: GitHub MCP configured. [GitHub CLI](https://cli.github.com/) (`gh`) is still used for failed GitHub Actions log tails.
 
 ### `/pm-plan` — Deep Implementation Planning
 
