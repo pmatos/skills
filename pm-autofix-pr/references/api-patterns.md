@@ -74,8 +74,8 @@ mcp__github__subscribe_pr_activity(
 The call is idempotent. Once subscribed, GitHub events arrive in the conversation as `<github-webhook-activity>` messages covering:
 
 - CI: `check_run.completed`, `workflow_run.completed`
-- Reviews: `pull_request_review.submitted`
-- Comments: `pull_request_review_comment.created`, `issue_comment.created`
+- Reviews: `pull_request_review.submitted`, `pull_request_review.edited`
+- Comments: `pull_request_review_comment.created`, `pull_request_review_comment.edited`, `issue_comment.created`, `issue_comment.edited`
 
 These events replace the old `gh pr checks --watch` polling loop. Treat the arrival of a relevant event as a trigger to re-fetch state. Honour `CI_TIMEOUT` via wall-clock so the loop doesn't wait forever if a webhook is dropped.
 
@@ -149,7 +149,7 @@ mcp__github__pull_request_read(
 )
 ```
 
-Returns reviews with `id`, `body`, `state` (`APPROVED`, `CHANGES_REQUESTED`, `COMMENTED`, `DISMISSED`), `user.login`, `submitted_at`.
+Returns reviews with `id`, `body`, `state` (`APPROVED`, `CHANGES_REQUESTED`, `COMMENTED`, `DISMISSED`), `user.login`, `submitted_at`, and `updated_at` when available. Track rejected review summaries with a mutable marker such as `<review.id>:<review.updated_at>`; if the API does not expose an update timestamp, use `<review.id>:<hash(review.body)>` so edited review bodies re-enter evaluation.
 
 ### Supersession algorithm
 

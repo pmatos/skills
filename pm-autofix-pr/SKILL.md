@@ -142,7 +142,7 @@ Loop until fixed point:
 - Inline review thread: call `mcp__github__add_reply_to_pull_request_comment` with `commentId = latestReviewerComment.databaseId`.
 - Review summary or PR conversation comment: call `mcp__github__add_issue_comment` with `issue_number = pullNumber`. Start the body with `@reviewer Regarding your <review/comment> (<short identifier>):` and quote or summarize the specific ask being rejected.
 
-Do **not** resolve rejected inline threads — they stay unresolved so the reviewer can push back. Record the item in `REJECTED_ITEMS` as `item_key → latest_reviewer_marker_at_outcome` using a mutable marker: `latestReviewerComment.databaseId + updatedAt` for inline threads, `review.id + submitted_at` for review summaries, and `comment.id + updated_at` for PR conversation comments. Do **not** add it to `ADDRESSED_THREAD_IDS`; suppression depends on the recorded reviewer marker staying current.
+Do **not** resolve rejected inline threads — they stay unresolved so the reviewer can push back. Record the item in `REJECTED_ITEMS` as `item_key → latest_reviewer_marker_at_outcome` using a mutable marker: `latestReviewerComment.databaseId + updatedAt` for inline threads, `review.id + updated_at` for review summaries when available, `review.id + body_hash(body)` for review summaries when no update timestamp exists, and `comment.id + updated_at` for PR conversation comments. Do **not** add it to `ADDRESSED_THREAD_IDS`; suppression depends on the recorded reviewer marker staying current.
 
 Rejection body format:
 
@@ -194,7 +194,7 @@ This step is **mandatory** — never skip it. If a reply or resolve call fails w
 
 **5f. Wait for CI only after feedback is answered.** If any fetched feedback item still lacks an evaluation decision and an outcome reply, re-enter Step 4 immediately instead of waiting for CI. Once feedback is answered, wait passively for `<github-webhook-activity>` events from the active subscription. Treat these as the trigger to re-fetch:
 - `check_run.completed` / `workflow_run.completed` — CI finished, re-fetch immediately.
-- `pull_request_review.submitted` / `pull_request_review_comment.created` / `issue_comment.created` — new feedback, re-fetch immediately and process it before waiting for more CI events.
+- `pull_request_review.submitted` / `pull_request_review.edited` / `pull_request_review_comment.created` / `pull_request_review_comment.edited` / `issue_comment.created` / `issue_comment.edited` — new or edited feedback, re-fetch immediately and process it before waiting for more CI events.
 
 Track wall-clock elapsed time since the last commit was pushed. If `CI_TIMEOUT` minutes elapse with no terminal CI event, ask the user whether to keep waiting or abort. If the subscription appears dropped (no events for an extended period), re-call `mcp__github__subscribe_pr_activity` (idempotent) and continue.
 
