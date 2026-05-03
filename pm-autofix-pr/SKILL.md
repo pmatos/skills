@@ -74,7 +74,7 @@ Per-host invocation table (referenced by Step 4):
 | Host | Local Evaluator (clean-context spawn of own model) | Cross-harness Evaluator |
 |------|---------------------------------------------------|-------------------------|
 | `claude` | Agent tool with `model="opus"` | Skill tool with `skill="codex-2nd-opinion"` |
-| `codex` | Bash: `codex exec --full-auto --sandbox read-only --ephemeral - < /tmp/eval-XXXX` (10-min timeout) | Bash: `claude -p --output-format text < /tmp/eval-XXXX` (10-min timeout) |
+| `codex` | Bash: `codex exec --full-auto --sandbox read-only --ephemeral - < /tmp/eval-XXXX` (10-min timeout) | Bash: `claude -p --permission-mode auto --output-format text < /tmp/eval-XXXX` (10-min timeout) |
 
 For Bash-based evaluator spawns, write the prompt to a `mktemp /tmp/eval-XXXXXX` file, run the command with stdin redirection, capture stdout, then `rm -f` the temp file.
 
@@ -146,7 +146,7 @@ For each feedback item not already answered, gather context, then spawn **two su
 
 2. **Cross-harness Evaluator** — runs the *other* model. Use the matching row from Step 0a's invocation table:
    - **Claude host:** Skill tool with `skill="codex-2nd-opinion"` (the user-level skill in this repo, frontmatter `name: codex-2nd-opinion`).
-   - **Codex host:** Bash with `claude -p --output-format text < /tmp/eval-XXXXXX` (10-minute timeout). Same `mktemp` / `rm -f` discipline as above.
+   - **Codex host:** Bash with `claude -p --permission-mode auto --output-format text < /tmp/eval-XXXXXX` (10-minute timeout; `--permission-mode auto` keeps `claude` from prompting when run headless inside the loop). Same `mktemp` / `rm -f` discipline as above.
 
    Pass the same evaluation prompt as the Local Evaluator. Ask for the same verdict format.
 

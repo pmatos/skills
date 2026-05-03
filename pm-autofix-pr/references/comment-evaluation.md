@@ -13,7 +13,7 @@ For each unresolved feedback item, spawn two subagents **in parallel**:
    - Codex host: Bash with `codex exec --full-auto --sandbox read-only --ephemeral - < /tmp/eval-XXXXXX` (10-minute timeout; write the prompt with `mktemp` and `rm -f` after).
 2. **Cross-harness Evaluator** — runs the other harness's model.
    - Claude host: Skill tool with `skill="codex-2nd-opinion"`. **Never** substitute `codex:rescue`, `codex:codex-rescue`, or any other `codex:*` plugin skill — those are unrelated tools.
-   - Codex host: Bash with `claude -p --output-format text < /tmp/eval-XXXXXX` (10-minute timeout; same `mktemp` / `rm -f` discipline). **Never** call `codex exec` again here — that would just be the Local Evaluator.
+   - Codex host: Bash with `claude -p --permission-mode auto --output-format text < /tmp/eval-XXXXXX` (10-minute timeout; same `mktemp` / `rm -f` discipline; `--permission-mode auto` keeps `claude` from prompting when run headless inside the loop). **Never** call `codex exec` again here — that would just be the Local Evaluator.
 
 Both receive identical context and return independent verdicts.
 
@@ -90,8 +90,10 @@ These are unrelated tools from the `codex` plugin. The Cross-harness Evaluator's
 Write the prompt above to `/tmp/eval-XXXXXX` via `mktemp`, then run via Bash with a 10-minute timeout:
 
 ```bash
-claude -p --output-format text < /tmp/eval-XXXXXX
+claude -p --permission-mode auto --output-format text < /tmp/eval-XXXXXX
 ```
+
+`--permission-mode auto` is required: without it, headless `claude` will block on permission prompts inside the loop and the evaluator call will hang.
 
 Capture stdout as the evaluator's verdict, then `rm -f` the temp file. **Never** invoke `codex exec` here — that would re-run the Local Evaluator and lose the independent-verdict guarantee.
 
