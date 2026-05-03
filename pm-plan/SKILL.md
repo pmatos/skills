@@ -20,7 +20,7 @@ $ARGUMENTS
 
 **Sandbox requirement.** Because the workflow writes plan output to `.ultraplan/<plan-name>.md` and stages temp files in `/tmp`, codex must be invoked with `--sandbox workspace-write` (or higher). `--sandbox read-only` will fail at the first write.
 
-**Subagent harness.** Every parallel exploration agent, the Haiku-based plan namer, and the adversarial reviewer are dispatched as `claude -p` CLI processes pinned to **`--permission-mode plan`** (read-only). This is what enforces the skill's "no source-tree mutations" guarantee at the harness level — even if a subagent reads off-target or hostile instructions while exploring repository content, plan mode prevents it from writing/deleting outside `.ultraplan/` and `$PLAN_TMP`. Do **not** use `--dangerously-skip-permissions`/`bypassPermissions` for these subagents; that would defeat the contract. Treat each `claude -p` call as a self-contained subagent: it has zero conversation context, so the prompt file you pipe into it must be fully self-contained (task description, what to look for, what to return, scope boundary).
+**Subagent harness.** Every parallel exploration agent, the Haiku-based plan namer, and the adversarial reviewer are dispatched as `claude -p` CLI processes with an explicit read-only tool allowlist: **`--allowed-tools "Read Grep Glob"`**. Anything not on the list — `Edit`, `Write`, `Bash`, `NotebookEdit`, etc. — is denied. The harness, not just the prompt, enforces the skill's "no source-tree mutations outside `.ultraplan/` and `$PLAN_TMP`" guarantee, so even if a subagent reads off-target or hostile instructions while exploring repository content, it cannot write or delete files. Do **not** swap this out for `--dangerously-skip-permissions`/`bypassPermissions` (defeats the contract) or `--permission-mode plan` (too restrictive for headless `-p`: plan mode disables Bash and most tools, and the run aborts when a needed tool isn't pre-approved). Treat each `claude -p` call as a self-contained subagent: it has zero conversation context, so the prompt file you pipe into it must be fully self-contained (task description, what to look for, what to return, scope boundary).
 
 ## Workflow
 
@@ -93,7 +93,7 @@ Reuse `$PLAN_TMP` for every `claude -p` dispatch in this session. Clean it up on
 Every subagent call below follows this shape:
 
 ```bash
-claude -p --permission-mode plan --verbose \
+claude -p --allowed-tools "Read Grep Glob" --verbose \
        < "$PLAN_TMP/<role>.prompt" \
        > "$PLAN_TMP/<role>.out" 2>&1
 ```
@@ -101,11 +101,11 @@ claude -p --permission-mode plan --verbose \
 To run multiple subagents **in parallel**, background each one and `wait`:
 
 ```bash
-claude -p --permission-mode plan --verbose < "$PLAN_TMP/arch.prompt"    > "$PLAN_TMP/arch.out"    2>&1 &
+claude -p --allowed-tools "Read Grep Glob" --verbose < "$PLAN_TMP/arch.prompt"    > "$PLAN_TMP/arch.out"    2>&1 &
 PID_ARCH=$!
-claude -p --permission-mode plan --verbose < "$PLAN_TMP/surface.prompt" > "$PLAN_TMP/surface.out" 2>&1 &
+claude -p --allowed-tools "Read Grep Glob" --verbose < "$PLAN_TMP/surface.prompt" > "$PLAN_TMP/surface.out" 2>&1 &
 PID_SURF=$!
-claude -p --permission-mode plan --verbose < "$PLAN_TMP/risks.prompt"   > "$PLAN_TMP/risks.out"   2>&1 &
+claude -p --allowed-tools "Read Grep Glob" --verbose < "$PLAN_TMP/risks.prompt"   > "$PLAN_TMP/risks.out"   2>&1 &
 PID_RISK=$!
 
 wait $PID_ARCH $PID_SURF $PID_RISK
@@ -144,7 +144,7 @@ Reply with ONLY the name, nothing else. Example: auth-token-refresh
 EOF
 
 claude -p --model claude-haiku-4-5-20251001 \
-       --permission-mode plan --verbose \
+       --allowed-tools "Read Grep Glob" --verbose \
        < "$PLAN_TMP/name.prompt" \
        > "$PLAN_TMP/name.out" 2>&1
 ```
@@ -231,7 +231,7 @@ Find:
 Report issues only — don't rewrite the plan.
 EOF
 
-claude -p --permission-mode plan --verbose \
+claude -p --allowed-tools "Read Grep Glob" --verbose \
        < "$PLAN_TMP/review.prompt" \
        > "$PLAN_TMP/review.out" 2>&1
 ```
