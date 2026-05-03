@@ -3,7 +3,7 @@
 All "agent" dispatches in this document are **`claude -p` CLI subagents** spawned by the Codex-hosted pm-plan workflow. Each subagent runs in its own headless Claude Code process, has zero inherited context, and must receive a fully self-contained prompt. The standard invocation is:
 
 ```bash
-claude -p --dangerously-skip-permissions --verbose \
+claude -p --permission-mode plan --verbose \
        < "$PLAN_TMP/<role>.prompt" \
        > "$PLAN_TMP/<role>.out" 2>&1
 ```
@@ -140,9 +140,9 @@ Dispatch all three `claude -p` subagents in a single shell command using `&` + `
 Reference shell template:
 
 ```bash
-claude -p --dangerously-skip-permissions --verbose < "$PLAN_TMP/arch.prompt"    > "$PLAN_TMP/arch.out"    2>&1 &
-claude -p --dangerously-skip-permissions --verbose < "$PLAN_TMP/surface.prompt" > "$PLAN_TMP/surface.out" 2>&1 &
-claude -p --dangerously-skip-permissions --verbose < "$PLAN_TMP/risks.prompt"   > "$PLAN_TMP/risks.out"   2>&1 &
+claude -p --permission-mode plan --verbose < "$PLAN_TMP/arch.prompt"    > "$PLAN_TMP/arch.out"    2>&1 &
+claude -p --permission-mode plan --verbose < "$PLAN_TMP/surface.prompt" > "$PLAN_TMP/surface.out" 2>&1 &
+claude -p --permission-mode plan --verbose < "$PLAN_TMP/risks.prompt"   > "$PLAN_TMP/risks.out"   2>&1 &
 wait
 ```
 
