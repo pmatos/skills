@@ -114,24 +114,24 @@ Trigger phrases: `autofix pr`, `fix pr locally`, `fix ci failures`, `fix review 
 
 **Requires**: GitHub MCP configured. [GitHub CLI](https://cli.github.com/) (`gh`) is still used for failed GitHub Actions log tails.
 
-### `/pm-plan` — Deep Implementation Planning
+### `/pm-plan` — Deep Implementation Planning (Codex-hosted)
 
 ```bash
 npx skills@latest add pmatos/skills/pm-plan
 ```
 
-Performs thorough, multi-phase implementation planning with parallel agent exploration before any code is written. Produces a battle-tested, file-path-grounded plan at `.ultraplan/<plan-name>.md` (name generated from the task description).
+Performs thorough, multi-phase implementation planning with parallel subagent exploration before any code is written. The orchestrator running this skill is **OpenAI Codex CLI**; whenever it needs another harness/model — for the parallel Explore agents, the Haiku-based plan namer, or the adversarial reviewer — it shells out to `claude -p`. Produces a battle-tested, file-path-grounded plan at `.ultraplan/<plan-name>.md` (name generated from the task description).
 
 What it does:
 - Assesses task complexity and scales exploration depth accordingly (Small/Medium/Large).
-- Dispatches parallel Explore agents to systematically map affected code areas.
+- Dispatches parallel `claude -p` Explore subagents (backgrounded with `&` + `wait`) to systematically map affected code areas.
 - Drafts a structured plan with exact `file:line` references, ordered steps, and verification criteria.
-- Validates all file references exist and runs adversarial review to catch issues.
-- Operates in strict read-only mode — only the plan file is written.
+- Validates all file references exist and dispatches a `claude -p` adversarial reviewer to catch issues.
+- Operates in strict read-only mode for the source tree — only `.ultraplan/<plan-name>.md` and a `/tmp/pm-plan-*` staging directory are written.
 
 Trigger phrases: `plan this`, `make a plan`, `implementation plan`, `deep plan`, `thorough plan`.
 
-No external dependencies.
+**Requires**: `codex` CLI invoked with `--sandbox workspace-write` (or higher), `claude` CLI authenticated and on `$PATH`.
 
 ### `/fork` — Dual-Model Implementation
 

@@ -1,47 +1,60 @@
 # Planning Patterns Reference
 
+All "agent" dispatches in this document are **`claude -p` CLI subagents** spawned by the Codex-hosted pm-plan workflow. Each subagent runs in its own headless Claude Code process, has zero inherited context, and must receive a fully self-contained prompt. The standard invocation is:
+
+```bash
+claude -p --dangerously-skip-permissions --verbose \
+       < "$PLAN_TMP/<role>.prompt" \
+       > "$PLAN_TMP/<role>.out" 2>&1
+```
+
+Run multiple subagents concurrently by backgrounding each call (`&`) and `wait`ing in a single Bash command — this is how parallelism is achieved here, not via any in-process agent tool.
+
 ## Exploration Strategies
 
 ### Three-Concern Decomposition (Large tasks — recommended)
 
-For Large tasks, always dispatch exactly three parallel Explore agents with these fixed, non-overlapping missions:
+For Large tasks, always dispatch exactly three parallel `claude -p` subagents with these fixed, non-overlapping missions. Stage each prompt as a file under `$PLAN_TMP`, then start all three with `&` and `wait` so they execute concurrently.
 
-**Agent 1 — Architecture Understanding**
+**Subagent 1 — Architecture Understanding** (`$PLAN_TMP/arch.prompt`)
 
 Mission: Understand the codebase structure, patterns, and conventions in the subsystems the task touches.
 
 Prompt template:
-> "Explore the architecture of [subsystem/area]. Find: (1) directory structure and key files, (2) design patterns and conventions used (naming, error handling, dependency injection, etc.), (3) how similar features are structured — find at least one reference implementation, (4) relevant CLAUDE.md/AGENTS.md constraints. Report: file paths with line numbers, patterns observed, reference implementation paths. Do NOT look for what needs to change — only understand what exists."
+> "Task context: [task description].
+> Explore the architecture of [subsystem/area]. Find: (1) directory structure and key files, (2) design patterns and conventions used (naming, error handling, dependency injection, etc.), (3) how similar features are structured — find at least one reference implementation, (4) relevant CLAUDE.md/AGENTS.md constraints. Report: file paths with line numbers, patterns observed, reference implementation paths. Do NOT look for what needs to change — only understand what exists."
 
-**Agent 2 — Change Surface Identification**
+**Subagent 2 — Change Surface Identification** (`$PLAN_TMP/surface.prompt`)
 
 Mission: Find every file that will need modification and every existing utility that can be reused.
 
 Prompt template:
-> "Identify all files that would need to change to [task description]. Find: (1) files to modify (with specific functions/sections), (2) files to create, (3) existing utilities, helpers, or base classes to reuse (with file:line), (4) type definitions, interfaces, or schemas that need updating. Report: complete file list with roles and lines of interest. Do NOT assess risks or propose solutions — only map the change surface."
+> "Task context: [task description].
+> Identify all files that would need to change to accomplish the task above. Find: (1) files to modify (with specific functions/sections), (2) files to create, (3) existing utilities, helpers, or base classes to reuse (with file:line), (4) type definitions, interfaces, or schemas that need updating. Report: complete file list with roles and lines of interest. Do NOT assess risks or propose solutions — only map the change surface."
 
-**Agent 3 — Risks, Edge Cases & Dependencies**
+**Subagent 3 — Risks, Edge Cases & Dependencies** (`$PLAN_TMP/risks.prompt`)
 
 Mission: Identify what could go wrong, what edge cases exist, and what depends on the code being changed.
 
 Prompt template:
-> "Analyze risks for [task description]. Find: (1) callers and consumers of the code being changed (grep for imports, function calls), (2) edge cases and boundary conditions, (3) test coverage gaps — existing tests and what's missing, (4) integration points with external systems or other subsystems, (5) backward compatibility concerns. Report: risks with severity, edge cases, dependency graph, test gaps. Do NOT propose the implementation — only identify what could break."
+> "Task context: [task description].
+> Analyze risks for the task above. Find: (1) callers and consumers of the code being changed (grep for imports, function calls), (2) edge cases and boundary conditions, (3) test coverage gaps — existing tests and what's missing, (4) integration points with external systems or other subsystems, (5) backward compatibility concerns. Report: risks with severity, edge cases, dependency graph, test gaps. Do NOT propose the implementation — only identify what could break."
 
 ### Breadth-First Discovery (Medium tasks)
-Launch parallel agents, each scanning a different layer:
-- **Agent 1 — Data layer**: models, schemas, database migrations, ORM config
-- **Agent 2 — Business logic**: services, utilities, core modules, domain logic
-- **Agent 3 — Presentation**: components, routes, API endpoints, templates
+Launch parallel `claude -p` subagents, each scanning a different layer:
+- **Subagent 1 — Data layer**: models, schemas, database migrations, ORM config
+- **Subagent 2 — Business logic**: services, utilities, core modules, domain logic
+- **Subagent 3 — Presentation**: components, routes, API endpoints, templates
 
 ### Feature Trace (Medium tasks)
-Follow a feature through the entire stack:
-- **Agent 1**: Trace from UI → API → service → database, noting each touchpoint
-- **Agent 2**: Find all related tests and similar features as reference implementations
+Follow a feature through the entire stack with two parallel `claude -p` subagents:
+- **Subagent 1**: Trace from UI → API → service → database, noting each touchpoint
+- **Subagent 2**: Find all related tests and similar features as reference implementations
 
 ### Impact Analysis (Medium tasks)
-Assess blast radius of a change:
-- **Agent 1**: What directly changes (files that will be edited)
-- **Agent 2**: What indirectly depends on the changed code (imports, callers, consumers, configs)
+Assess blast radius of a change with two parallel `claude -p` subagents:
+- **Subagent 1**: What directly changes (files that will be edited)
+- **Subagent 2**: What indirectly depends on the changed code (imports, callers, consumers, configs)
 
 ## Plan Templates
 
@@ -118,25 +131,35 @@ Assess blast radius of a change:
 ### 4. Clean up compatibility layer
 ```
 
-## Parallel Agent Dispatch
+## Parallel Subagent Dispatch
 
 ### Large tasks (Three-Concern Decomposition)
 
-Dispatch all three agents in a single message (parallel). Each agent has a clear boundary — architecture agent doesn't propose changes, change surface agent doesn't assess risks, risk agent doesn't propose implementations. This prevents overlap and ensures each report is focused.
+Dispatch all three `claude -p` subagents in a single shell command using `&` + `wait` (parallel). Each subagent has a clear boundary — architecture doesn't propose changes, change surface doesn't assess risks, risks doesn't propose implementations. This prevents overlap and ensures each report is focused.
+
+Reference shell template:
+
+```bash
+claude -p --dangerously-skip-permissions --verbose < "$PLAN_TMP/arch.prompt"    > "$PLAN_TMP/arch.out"    2>&1 &
+claude -p --dangerously-skip-permissions --verbose < "$PLAN_TMP/surface.prompt" > "$PLAN_TMP/surface.out" 2>&1 &
+claude -p --dangerously-skip-permissions --verbose < "$PLAN_TMP/risks.prompt"   > "$PLAN_TMP/risks.out"   2>&1 &
+wait
+```
 
 Synthesize by:
-1. Start with Agent 1's architecture context as the foundation
-2. Overlay Agent 2's change surface to form the step list
-3. Apply Agent 3's risks to add mitigations and order dependencies
+1. Start with Subagent 1's architecture context as the foundation
+2. Overlay Subagent 2's change surface to form the step list
+3. Apply Subagent 3's risks to add mitigations and order dependencies
 
 ### Medium tasks (strategy-based)
 
-When dispatching Explore agents, structure prompts with:
+When dispatching `claude -p` Explore subagents, structure each prompt file with:
 1. **Specific mission**: "Find all files related to authentication and trace the login flow from controller to database"
 2. **What to return**: "Report: key files found with paths and line numbers, patterns observed, dependencies, potential risks"
 3. **Scope boundary**: "Only look at the auth subsystem, don't explore unrelated areas"
+4. **Self-contained context**: include the full task description and any CLAUDE.md/AGENTS.md constraints — `claude -p` has no inherited conversation state.
 
-Synthesize findings by: merging file lists, resolving conflicting observations, identifying cross-cutting concerns that appear in multiple agents' reports.
+Synthesize findings by: merging file lists, resolving conflicting observations, identifying cross-cutting concerns that appear in multiple subagents' reports.
 
 ## Step Decomposition Heuristics
 
