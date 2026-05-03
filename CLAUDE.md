@@ -28,7 +28,7 @@ Slash command `/pm-autofix-pr` that iteratively fixes CI failures and addresses 
 
 ## pm-plan
 
-Slash command `/pm-plan` that performs deep, multi-phase implementation planning with parallel agent exploration, targeted clarifying questions, and structured plan output to `.ultraplan/<plan-name>.md` — all locally, without web sessions.
+Skill `/pm-plan` (codex variant) that performs deep, multi-phase implementation planning under the OpenAI Codex CLI as the orchestrator. Parallel codebase exploration, plan-name generation, and adversarial review are all delegated to `claude -p` subagents. Produces a structured plan at `.ultraplan/<plan-name>.md`. Requires `codex --sandbox workspace-write` and `claude` CLI on `$PATH`.
 
 ## fork
 

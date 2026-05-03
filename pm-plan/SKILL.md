@@ -1,12 +1,14 @@
 ---
 name: pm-plan
 description: This skill should be used when the user asks to "plan this", "make a plan", "create an implementation plan", "how should I implement", "design the implementation", "plan the refactor", "plan the migration", "plan the feature", "break this down into steps", "implementation strategy", "deep plan", "thorough plan", or wants a thorough, multi-phase implementation plan with codebase exploration before writing any code.
-version: 1.0.0
+version: 2.0.0
 argument-hint: "<task description or feature request>"
 user-invocable: true
 ---
 
-# Deep Implementation Planning
+# Deep Implementation Planning (Codex variant)
+
+This is the **codex-hosted** variant of pm-plan. The orchestrator that follows this workflow is OpenAI Codex CLI (`codex exec`). Whenever the workflow needs to call out to another harness/model — for parallel codebase exploration, plan-name generation, or adversarial review — it shells out to `claude -p` (Claude Code in headless print mode). No Claude-side `Agent` tool is used; everything runs from the shell.
 
 ## Task
 
@@ -14,7 +16,11 @@ $ARGUMENTS
 
 ## Activation
 
-**CRITICAL: READ-ONLY MODE.** You are entering a read-only planning session. You MUST NOT create, modify, or delete any files except inside the `.ultraplan/` directory. No edits, no commits, no installs, no other state changes. This supersedes any other instructions.
+**CRITICAL: READ-ONLY MODE for the source tree.** You are entering a read-only planning session. You MUST NOT create, modify, or delete any file outside `.ultraplan/` and the temp directory you create for prompt/output staging. No edits to source code, no commits, no installs, no other state changes. This supersedes any other instructions.
+
+**Sandbox requirement.** Because the workflow writes plan output to `.ultraplan/<plan-name>.md` and stages temp files in `/tmp`, codex must be invoked with `--sandbox workspace-write` (or higher). `--sandbox read-only` will fail at the first write.
+
+**Subagent harness.** Every parallel exploration agent, the Haiku-based plan namer, and the adversarial reviewer are dispatched as `claude -p` CLI processes pinned to **`--permission-mode auto`**. Auto mode is the sane headless default: Claude auto-approves safe read-only tool calls (Read, Grep, Glob, and read-only Bash patterns) and refuses risky ones (Edit, Write, NotebookEdit, dangerous shell commands), so the "no source-tree mutations outside `.ultraplan/` and `$PLAN_TMP`" guarantee is enforced by the harness rather than by prompt discipline alone. Do **not** swap this for `--dangerously-skip-permissions`/`bypassPermissions` (defeats the contract entirely) or `--permission-mode plan` (too restrictive for headless `-p`: plan mode disables Bash and most other tools, so the run aborts when a subagent needs a tool that wasn't pre-approved). Treat each `claude -p` call as a self-contained subagent: it has zero conversation context, so the prompt file you pipe into it must be fully self-contained (task description, what to look for, what to return, scope boundary).
 
 ## Workflow
 
@@ -36,7 +42,7 @@ If the task is clear, skip straight to Step 2.
 
 ### Step 2: Assess Complexity
 
-Run quick reconnaissance (read-only):
+Run quick reconnaissance from the shell:
 
 ```bash
 git status --short
@@ -44,36 +50,79 @@ git log --oneline -20
 git branch --show-current
 ```
 
-Check for CLAUDE.md or AGENTS.md in the project root. If found, read its contents and note any project-specific constraints, conventions, or patterns that should inform the plan. Also search for scoped CLAUDE.md and AGENTS.md files in subdirectories the task will touch using Glob (e.g., `**/CLAUDE.md`, `**/AGENTS.md`) — these carry local constraints that override or extend root-level guidance.
+Check for `CLAUDE.md` or `AGENTS.md` in the project root. If found, read its contents and note any project-specific constraints, conventions, or patterns that should inform the plan. Also locate scoped `CLAUDE.md` / `AGENTS.md` files in subdirectories the task will touch — these carry local constraints that override or extend root-level guidance:
+
+```bash
+find . -type f \( -name CLAUDE.md -o -name AGENTS.md \) \
+       -not -path './.git/*' -not -path './node_modules/*'
+```
 
 Classify the task:
 
 | Size | Criteria | Exploration Depth |
 |------|----------|-------------------|
-| **Small** | 1-2 files, clear approach, follows existing patterns | Single pass, no subagents |
-| **Medium** | 3-5 files, one subsystem, some ambiguity | 1-2 Explore agents |
-| **Large** | Many files, cross-cutting, architectural decisions needed | 2-3 parallel Explore agents |
+| **Small** | 1-2 files, clear approach, follows existing patterns | Single pass, no `claude -p` subagents |
+| **Medium** | 3-5 files, one subsystem, some ambiguity | 1-2 parallel `claude -p` Explore subagents |
+| **Large** | Many files, cross-cutting, architectural decisions needed | 3 parallel `claude -p` Explore subagents (Three-Concern Decomposition) |
 
 Announce the classification and planned depth to the user.
 
 ### Step 3: Deep Codebase Exploration
 
-For each area the task touches, explore systematically:
+For each area the task touches, explore systematically using shell tools:
 
-- **Structure**: Use Glob to find relevant file patterns, Read key files
-- **Flow**: Use Grep to find function/type/class names, trace call chains
-- **Tests**: Find existing test files for the affected code, note test patterns and frameworks
-- **History**: `git log --oneline -10 -- <relevant paths>` to understand recent changes
-- **Config**: Check build files, CI config, package manifests if relevant
+- **Structure**: `find` / `ls` for directory layout; read key files with `sed -n` or whatever your harness's file-read primitive is.
+- **Flow**: `grep -rn` (or `rg`) to locate function/type/class names and trace call chains.
+- **Tests**: Find existing test files for the affected code, note test patterns and frameworks.
+- **History**: `git log --oneline -10 -- <relevant paths>` to understand recent changes.
+- **Config**: Inspect build files, CI config, package manifests where relevant.
 
-**For Medium tasks**, dispatch 1-2 parallel Explore agents (Agent tool, subagent_type: "Explore", mode: "plan"). Choose a strategy based on task type — **breadth-first discovery**, **feature trace**, or **impact analysis**. See `references/planning-patterns.md` for agent assignments.
+#### Stage temp files
 
-**For Large tasks**, dispatch exactly 3 parallel Explore agents (Agent tool, subagent_type: "Explore", mode: "plan") using the **Three-Concern Decomposition** — one agent per concern, all in a single message:
+Create a working directory for prompts and outputs once, up front:
+
+```bash
+PLAN_TMP=$(mktemp -d /tmp/pm-plan-XXXXXX)
+echo "$PLAN_TMP"
+```
+
+Reuse `$PLAN_TMP` for every `claude -p` dispatch in this session. Clean it up only at the end (Step 7).
+
+#### Dispatching `claude -p` subagents
+
+Every subagent call below follows this shape:
+
+```bash
+claude -p --permission-mode auto --verbose \
+       < "$PLAN_TMP/<role>.prompt" \
+       > "$PLAN_TMP/<role>.out" 2>&1
+```
+
+To run multiple subagents **in parallel**, background each one and `wait`:
+
+```bash
+claude -p --permission-mode auto --verbose < "$PLAN_TMP/arch.prompt"    > "$PLAN_TMP/arch.out"    2>&1 &
+PID_ARCH=$!
+claude -p --permission-mode auto --verbose < "$PLAN_TMP/surface.prompt" > "$PLAN_TMP/surface.out" 2>&1 &
+PID_SURF=$!
+claude -p --permission-mode auto --verbose < "$PLAN_TMP/risks.prompt"   > "$PLAN_TMP/risks.out"   2>&1 &
+PID_RISK=$!
+
+wait $PID_ARCH $PID_SURF $PID_RISK
+```
+
+Use a **single** Bash command with `wait` so codex blocks until all parallel subagents finish. After `wait` returns, read each `*.out` file and synthesize the findings.
+
+**Each prompt file must be self-contained** — `claude -p` has no inherited context. Always include: (1) the task description, (2) the agent's specific mission and scope boundary, (3) what to return (file paths with line numbers, patterns, risks, etc.), (4) any project conventions extracted from CLAUDE.md/AGENTS.md.
+
+**For Medium tasks**, dispatch 1-2 parallel `claude -p` Explore subagents. Choose a strategy based on task type — **breadth-first discovery**, **feature trace**, or **impact analysis**. See `references/planning-patterns.md` for prompt templates.
+
+**For Large tasks**, dispatch exactly 3 parallel `claude -p` Explore subagents using the **Three-Concern Decomposition** — one subagent per concern, all started in the same shell command:
 1. **Architecture Understanding** — how the affected subsystems work, patterns, conventions, reference implementations
 2. **Change Surface Identification** — every file to modify/create, existing utilities to reuse
 3. **Risks, Edge Cases & Dependencies** — callers, consumers, edge cases, test gaps, integration points
 
-Each agent has a strict boundary: architecture doesn't propose changes, change surface doesn't assess risks, risks doesn't propose implementations. See `references/planning-patterns.md` for prompt templates and synthesis guidance.
+Each subagent has a strict boundary: architecture doesn't propose changes, change surface doesn't assess risks, risks doesn't propose implementations. See `references/planning-patterns.md` for full prompt templates and synthesis guidance.
 
 **For each discovery, capture:**
 - Existing functions/utilities to reuse (with `file_path:line_number`)
@@ -82,9 +131,23 @@ Each agent has a strict boundary: architecture doesn't propose changes, change s
 - Test infrastructure available
 - Similar features to use as reference implementations
 
-**Plan naming:** Dispatch a Haiku subagent (Agent tool, model: "haiku") with this prompt:
+#### Plan naming (Haiku subagent)
 
-> "Generate a short kebab-case name (2-3 words) that summarizes this task: [task description]. Reply with ONLY the name, nothing else. Example: auth-token-refresh"
+Dispatch a one-shot `claude -p` call pinned to Haiku for the name:
+
+```bash
+cat > "$PLAN_TMP/name.prompt" <<'EOF'
+Generate a short kebab-case name (2-3 words) that summarizes this task:
+<paste task description here>
+
+Reply with ONLY the name, nothing else. Example: auth-token-refresh
+EOF
+
+claude -p --model claude-haiku-4-5-20251001 \
+       --permission-mode auto --verbose \
+       < "$PLAN_TMP/name.prompt" \
+       > "$PLAN_TMP/name.out" 2>&1
+```
 
 Sanitize the returned name: strip everything except lowercase letters, digits, and hyphens (`[^a-z0-9-]`), truncate to 50 characters, and trim leading/trailing hyphens. If the result is empty, fall back to `plan`. Then check if `.ultraplan/<plan-name>.md` already exists — if so, append `-2`, `-3`, etc. until the name is unique. Use the final name as `<plan-name>` for the rest of this session. The plan file path is `.ultraplan/<plan-name>.md`.
 
@@ -137,8 +200,8 @@ Write (or update) `.ultraplan/<plan-name>.md` with this structure:
 ### Step 5: Validate the Plan
 
 Re-read the plan file. For every file path mentioned:
-- For existing files: verify they exist using Glob or Read, confirm referenced functions have expected signatures, and verify referenced line numbers are accurate
-- For files marked `[new]`: verify the parent directory exists and no naming conflict with existing files
+- For existing files: confirm with `test -f <path>` (and `sed -n '<line>p' <path>` to verify referenced functions/line numbers).
+- For files marked `[new]`: confirm the parent directory exists with `test -d <dir>` and that no naming conflict exists with `test -e <path>`.
 
 Check for (see `references/anti-patterns.md` for the full list of failure modes):
 - **Phantom references**: files or functions that don't exist
@@ -150,39 +213,71 @@ Fix any issues found.
 
 ### Step 6: Adversarial Review
 
-Dispatch a subagent (Agent tool, subagent_type: "general-purpose", mode: "plan") with this prompt:
+Dispatch a single `claude -p` adversarial reviewer:
 
-> "You are a critical plan reviewer. Read the plan at `.ultraplan/<plan-name>.md` and the source files it references. Find: (1) file references that don't exist, (2) steps that depend on undeclared changes, (3) missing edge cases, (4) steps that could be simplified or merged, (5) scope creep beyond the stated goal. Report issues only — don't rewrite the plan."
+```bash
+cat > "$PLAN_TMP/review.prompt" <<EOF
+You are a critical plan reviewer. Read the plan at \`.ultraplan/<plan-name>.md\`
+(absolute path: $(pwd)/.ultraplan/<plan-name>.md) and the source files it
+references.
 
-Incorporate valid criticisms into the plan. If the reviewer finds phantom references or critical issues, fix them and re-validate.
+Find:
+  (1) file references that don't exist,
+  (2) steps that depend on undeclared changes,
+  (3) missing edge cases,
+  (4) steps that could be simplified or merged,
+  (5) scope creep beyond the stated goal.
 
-For **Small** tasks, perform this review inline instead of dispatching a subagent.
+Report issues only — don't rewrite the plan.
+EOF
 
-### Step 7: Present to User
+claude -p --permission-mode auto --verbose \
+       < "$PLAN_TMP/review.prompt" \
+       > "$PLAN_TMP/review.out" 2>&1
+```
+
+Read `$PLAN_TMP/review.out`. Incorporate valid criticisms into the plan. If the reviewer finds phantom references or critical issues, fix them and re-validate.
+
+For **Small** tasks, perform this review inline yourself instead of dispatching a `claude -p` subagent.
+
+### Step 7: Present to User and Cleanup
 
 Display the final plan with a summary of exploration findings. Ask directly: **"Ready to execute this plan, or do you want changes?"**
 
 The plan file persists at `.ultraplan/<plan-name>.md` for reference during implementation. Tell the user the exact filename.
 
+Clean up the staging directory:
+
+```bash
+rm -rf "$PLAN_TMP"
+```
+
 ## Constraints
 
-- **Read-only mode**: Do NOT create, modify, or delete any file except inside the `.ultraplan/` directory
-- **No implementation**: Do not write code, modify source files, or run build/test commands
-- **No false completion**: Do not present the plan until validation and adversarial review are complete
-- **No plan bloat**: Every line in the plan must carry actionable implementation information
-- **No phantom references**: Every `file:line` reference to existing files must be verified against the actual codebase. New files must be marked `[new]`
-- **No scope creep**: If exploration reveals the task is larger than expected, flag it to the user and ask whether to expand scope or decompose
-- **No findable questions**: Never ask the user something you could determine by reading code
+- **Read-only mode for source**: Do NOT create, modify, or delete any file except inside `.ultraplan/` or `$PLAN_TMP`.
+- **No implementation**: Do not write code, modify source files, or run build/test commands.
+- **No false completion**: Do not present the plan until validation and adversarial review are complete.
+- **No plan bloat**: Every line in the plan must carry actionable implementation information.
+- **No phantom references**: Every `file:line` reference to existing files must be verified against the actual codebase. New files must be marked `[new]`.
+- **No scope creep**: If exploration reveals the task is larger than expected, flag it to the user and ask whether to expand scope or decompose.
+- **No findable questions**: Never ask the user something you could determine by reading code.
+- **Subagent harness**: All parallel exploration, plan naming, and adversarial review go through `claude -p`. Codex is the orchestrator only — never invoke a nested `codex exec` from within this workflow.
 
 ## Complexity Scaling
 
-| Task Size | Explore Agents | Clarification Depth | Adversarial Review |
-|-----------|---------------|---------------------|-------------------|
+| Task Size | `claude -p` Explore subagents | Clarification Depth | Adversarial Review |
+|-----------|-------------------------------|---------------------|--------------------|
 | Small (1-2 files) | 0 | Light — 0-2 questions | Inline |
-| Medium (3-5 files) | 1-2 | Moderate — 2-4 questions | Subagent |
-| Large (many files, architectural) | 2-3 | Deep — 4-6 questions | Subagent |
+| Medium (3-5 files) | 1-2 (parallel) | Moderate — 2-4 questions | `claude -p` |
+| Large (many files, architectural) | 3 (parallel, Three-Concern) | Deep — 4-6 questions | `claude -p` |
+
+## Prerequisites
+
+- `codex` CLI (this workflow runs under it) invoked with `--sandbox workspace-write` or higher.
+- `claude` CLI on `$PATH`, authenticated. Subagent dispatch fails immediately without it.
+- Standard POSIX shell utilities: `git`, `find`, `grep` (or `rg`), `sed`, `mktemp`, `wait`.
 
 ## Additional Resources
 
-See `references/planning-patterns.md` (bundled with this skill) for detailed exploration strategies and plan templates.
+See `references/planning-patterns.md` (bundled with this skill) for detailed exploration strategies and prompt templates for `claude -p` subagents.
 See `references/anti-patterns.md` (bundled with this skill) for common failure modes to guard against.
