@@ -10,7 +10,7 @@ Iteratively fix CI failures and address reviewer feedback on a GitHub PR until a
 
 ## Core Principle: Say NO
 
-Not every review comment deserves a code change. Before touching code, evaluate every review thread, review summary, and PR conversation comment on its merits with two independent AI reviewers (Opus 4.6 + Codex/GPT-5.4). Reject comments that are wrong, out of scope, or unrelated. Post a clear explanation on the PR when rejecting. This prevents scope creep and unnecessary churn.
+Not every review comment deserves a code change. Before touching code, evaluate every review thread, review summary, and PR conversation comment on its merits with two independent AI reviewers — the **local host model** (whichever harness you are running in) and a **cross-harness model** (Claude ↔ Codex; whichever one you are not). Reject comments that are wrong, out of scope, or unrelated. Post a clear explanation on the PR when rejecting. This prevents scope creep and unnecessary churn.
 
 ## Core Principle: Always Reply
 
@@ -18,8 +18,9 @@ Every reviewer feedback item must get an explicit reply before the skill can con
 
 ## Prerequisites
 
-- **GitHub MCP server** must be configured in the Claude Code session. The skill stops at preflight if it isn't available.
+- **GitHub MCP server** must be configured in the host session (Claude Code or Codex CLI). The skill stops at preflight if it isn't available.
 - **`gh` CLI** is still required for one thing only: fetching failed-job log tails (`gh run view --job <id> --log-failed`). The MCP has no equivalent. All other GitHub interaction goes through the MCP.
+- **Both harness CLIs** must be installed: `claude` (Claude Code, `npm install -g @anthropic-ai/claude-code`) and `codex` (Codex CLI, `npm install -g @openai/codex`). The dual-evaluator step calls whichever one is *not* the host. The skill stops at preflight if the cross-harness CLI is missing.
 
 ## Configuration
 
@@ -50,11 +51,38 @@ All GitHub interaction is direct MCP tool calls — no bundled scripts.
 
 ## Workflow
 
-### Step 0: Preflight — verify the GitHub MCP
+### Step 0a: Detect the host harness
+
+This skill runs under either Claude Code or Codex CLI. The orchestrator (you) is the **local host**; the dual-evaluator step delegates the second opinion to the **cross-harness** CLI.
+
+Self-identify before doing anything else:
+
+- If you are Claude (Opus / Sonnet / Haiku) → host is **`claude`**, cross-harness is **`codex`**.
+- If you are Codex (GPT-5.x) → host is **`codex`**, cross-harness is **`claude`**.
+
+Verify the cross-harness CLI is installed: run `command -v <cross-harness-binary>` via Bash. If it's missing, **stop immediately** with:
+
+> **`<cross-harness>` CLI not installed.** This skill needs both harnesses to run the dual-evaluator step. Install it with `npm install -g @anthropic-ai/claude-code` (Claude) or `npm install -g @openai/codex` (Codex), then re-run.
+
+Capture for use in evaluator prompts and rejection bodies:
+
+- `LOCAL_LABEL` — e.g. `"Claude Opus 4.6"` or `"Codex GPT-5.4"`. Use the most specific identifier you know about yourself; fall back to the family name (`"Claude"`, `"Codex GPT-5.x"`) if unsure.
+- `REMOTE_LABEL` — the cross-harness model label. Same precision rule.
+
+Per-host invocation table (referenced by Step 4):
+
+| Host | Local Evaluator (clean-context spawn of own model) | Cross-harness Evaluator |
+|------|---------------------------------------------------|-------------------------|
+| `claude` | Agent tool with `model="opus"` | Skill tool with `skill="codex-2nd-opinion"` |
+| `codex` | Bash: `codex exec --full-auto --sandbox read-only --ephemeral - < /tmp/eval-XXXX` (10-min timeout) | Bash: `claude -p --output-format text < /tmp/eval-XXXX` (10-min timeout) |
+
+For Bash-based evaluator spawns, write the prompt to a `mktemp /tmp/eval-XXXXXX` file, run the command with stdin redirection, capture stdout, then `rm -f` the temp file.
+
+### Step 0b: Preflight — verify the GitHub MCP
 
 Call `mcp__github__get_me`. If the tool is unavailable in the session or the call errors, **stop immediately** with this message:
 
-> **GitHub MCP not available.** This skill requires the GitHub MCP server. Enable it in your Claude Code settings (`.mcp.json` or `~/.claude/settings.json`) and re-run. See https://github.com/github/github-mcp-server for setup.
+> **GitHub MCP not available.** This skill requires the GitHub MCP server. Enable it in your host's MCP settings (`.mcp.json`, `~/.claude/settings.json`, or the Codex equivalent) and re-run. See https://github.com/github/github-mcp-server for setup.
 
 Do not fall back to `gh` for the workflow. On success, capture `login` as `GH_USER` (used to filter out self-authored comments later).
 
@@ -110,21 +138,31 @@ For each feedback item not already answered, gather context, then spawn **two su
 - Review summaries: parse the body into concrete asks; read the PR diff, PR description, and any files mentioned by the review.
 - PR conversation comments: parse the body into concrete asks; read referenced files, logs, or diff context as needed.
 
-1. **Opus Evaluator** — Agent tool with `model="opus"`. Provide the comment, code context, PR title/description, and changed files summary. Ask for a VALID/INVALID verdict with category, confidence, and reasoning. See `references/comment-evaluation.md` for the full prompt template.
+1. **Local Evaluator** — runs the host model in a clean context. Use the row from Step 0a's per-host invocation table that matches your host:
+   - **Claude host:** Agent tool with `model="opus"`.
+   - **Codex host:** Bash with `codex exec --full-auto --sandbox read-only --ephemeral - < /tmp/eval-XXXXXX` (10-minute timeout). Write the prompt via `mktemp` first; `rm -f` after.
 
-2. **Codex Evaluator** — Call the Skill tool with `skill="codex-2nd-opinion"` (the user-level skill in this repo, frontmatter `name: codex-2nd-opinion`). Pass the same evaluation prompt as the Opus Evaluator. Ask for the same verdict format.
+   Provide the comment, code context, PR title/description, and changed files summary. Ask for a VALID/INVALID verdict with category, confidence, and reasoning. See `references/comment-evaluation.md` for the full prompt template.
 
-   **DO NOT** invoke any of the following — they look superficially related but are the wrong tool and will produce different output:
+2. **Cross-harness Evaluator** — runs the *other* model. Use the matching row from Step 0a's invocation table:
+   - **Claude host:** Skill tool with `skill="codex-2nd-opinion"` (the user-level skill in this repo, frontmatter `name: codex-2nd-opinion`).
+   - **Codex host:** Bash with `claude -p --output-format text < /tmp/eval-XXXXXX` (10-minute timeout). Same `mktemp` / `rm -f` discipline as above.
+
+   Pass the same evaluation prompt as the Local Evaluator. Ask for the same verdict format.
+
+   **Claude host — DO NOT** invoke any of the following — they look superficially related but are the wrong tool and will produce different output:
    - `codex:rescue` / Skill tool with `skill="codex:rescue"` — this delegates rescue/fix work, not opinion-gathering.
    - `codex:codex-rescue` — the rescue subagent in the Agent tool, same problem.
    - `codex:setup`, `codex:codex-cli-runtime`, `codex:gpt-5-4-prompting`, `codex:codex-result-handling` — internal helpers, not user-facing review tools.
 
    The only correct invocation is the Skill tool with `skill="codex-2nd-opinion"`. If `codex-2nd-opinion` is not in the available-skills list, **stop and report** — do not substitute another skill.
 
+   **Codex host — DO NOT** call `codex exec` again as the cross-harness evaluator (that is the Local Evaluator). The cross-harness step must be `claude -p`, never another `codex exec`.
+
 **Decision logic** (from `references/comment-evaluation.md`):
 
-| Opus | Codex | Action |
-|------|-------|--------|
+| Local | Cross-harness | Action |
+|-------|---------------|--------|
 | VALID | VALID | Address it |
 | VALID | INVALID | Address it |
 | INVALID | VALID | Address it |
@@ -149,8 +187,10 @@ Rejection body format:
 ```
 {prefix} {reason}
 
-_This assessment was made by two independent AI reviewers (Claude Opus 4.6 and GPT-5.4). If you disagree, please reply and we'll re-evaluate._
+_This assessment was made by two independent AI reviewers ({LOCAL_LABEL} and {REMOTE_LABEL}). If you disagree, please reply and we'll re-evaluate._
 ```
+
+Substitute `{LOCAL_LABEL}` / `{REMOTE_LABEL}` with the values captured in Step 0a (e.g. `"Claude Opus 4.6"` and `"Codex GPT-5.4"`, in either order depending on the host).
 
 Prefixes by category:
 
