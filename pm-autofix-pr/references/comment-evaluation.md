@@ -4,10 +4,16 @@ Every unresolved reviewer feedback item must be evaluated before any action is t
 
 ## Evaluation Architecture
 
+The skill is harness-symmetric: it runs under either Claude Code or Codex CLI, and the evaluator pair is always the local host model + the *other* harness's model. SKILL.md Step 0a captures `LOCAL_LABEL` / `REMOTE_LABEL` and the per-host invocation rows used below.
+
 For each unresolved feedback item, spawn two subagents **in parallel**:
 
-1. **Opus Evaluator** — Claude Opus 4.6, model="opus", used via the Agent tool
-2. **Codex Evaluator** — invokes the user-level `codex-2nd-opinion` skill (Skill tool, `skill="codex-2nd-opinion"`). **Never** substitute `codex:rescue`, `codex:codex-rescue`, or any other `codex:*` plugin skill — those are unrelated tools.
+1. **Local Evaluator** — runs the host model in a clean context.
+   - Claude host: Agent tool with `model="opus"`.
+   - Codex host: Bash with `codex exec --full-auto --sandbox read-only --ephemeral - < /tmp/eval-XXXXXX` (10-minute timeout; write the prompt with `mktemp` and `rm -f` after).
+2. **Cross-harness Evaluator** — runs the other harness's model.
+   - Claude host: Skill tool with `skill="codex-2nd-opinion"`. **Never** substitute `codex:rescue`, `codex:codex-rescue`, or any other `codex:*` plugin skill — those are unrelated tools.
+   - Codex host: Bash with `claude -p --permission-mode auto --output-format text < /tmp/eval-XXXXXX` (10-minute timeout; same `mktemp` / `rm -f` discipline; `--permission-mode auto` keeps `claude` from prompting when run headless inside the loop). **Never** call `codex exec` again here — that would just be the Local Evaluator.
 
 Both receive identical context and return independent verdicts.
 
@@ -22,7 +28,7 @@ Each evaluator needs:
 - The PR diff summary (what files changed and why)
 - The project's CLAUDE.md pre-commit requirements (if any)
 
-## Opus Evaluator Prompt Template
+## Evaluator Prompt Template (used by both Local and Cross-harness evaluators)
 
 ```
 Evaluate this reviewer feedback item on a GitHub PR. Determine if it should be addressed.
@@ -66,27 +72,41 @@ REASONING: 2-3 sentences explaining the verdict
 REPLY_GUIDANCE: one sentence describing what the PR reply should say
 ```
 
-## Codex Evaluator Prompt
+## Cross-harness Evaluator Invocation
 
-Invoke the `codex-2nd-opinion` skill via the Skill tool — exact form: `Skill(skill="codex-2nd-opinion", args=<the evaluation prompt above>)`. The skill handles Codex CLI formatting and invocation; pass the same template you used for Opus.
+### Claude host (cross-harness = Codex)
+
+Invoke the `codex-2nd-opinion` skill via the Skill tool — exact form: `Skill(skill="codex-2nd-opinion", args=<the evaluation prompt above>)`. The skill handles Codex CLI formatting and invocation; pass the same template you used for the Local Evaluator.
 
 **Forbidden substitutes** (do not call any of these even if `codex-2nd-opinion` seems unavailable — stop and report instead):
 - `codex:rescue` (Skill tool)
 - `codex:codex-rescue` (Agent subagent)
 - `codex:setup`, `codex:codex-cli-runtime`, `codex:gpt-5-4-prompting`, `codex:codex-result-handling`
 
-These are unrelated tools from the `codex` plugin. The Codex Evaluator's purpose is to get an *independent verdict* on a review comment, not to delegate rescue work.
+These are unrelated tools from the `codex` plugin. The Cross-harness Evaluator's purpose is to get an *independent verdict* on a review comment, not to delegate rescue work.
+
+### Codex host (cross-harness = Claude)
+
+Write the prompt above to `/tmp/eval-XXXXXX` via `mktemp`, then run via Bash with a 10-minute timeout:
+
+```bash
+claude -p --permission-mode auto --output-format text < /tmp/eval-XXXXXX
+```
+
+`--permission-mode auto` is required: without it, headless `claude` will block on permission prompts inside the loop and the evaluator call will hang.
+
+Capture stdout as the evaluator's verdict, then `rm -f` the temp file. **Never** invoke `codex exec` here — that would re-run the Local Evaluator and lose the independent-verdict guarantee.
 
 ## Decision Matrix
 
-| Opus Verdict | Codex Verdict | Action |
-|-------------|---------------|--------|
+| Local Verdict | Cross-harness Verdict | Action |
+|---------------|-----------------------|--------|
 | VALID | VALID | **Address** the feedback — make the code fix |
 | VALID | INVALID | **Address** the feedback — err on the side of caution |
 | INVALID | VALID | **Address** the feedback — err on the side of caution |
 | INVALID | INVALID | **Reject** the feedback — post rejection reply |
 
-When both are INVALID, select the rejection category from the evaluator with higher confidence. If confidence is equal, use the Opus category.
+When both are INVALID, select the rejection category from the evaluator with higher confidence. If confidence is equal, use the Local Evaluator's category.
 
 ## Confidence-Based Override
 
