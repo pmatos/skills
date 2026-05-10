@@ -267,6 +267,14 @@ For each FIX item in `feedback_items` whose verdict is FIX (CI failures included
 
 After all FIX items have been processed, the worktree is clean and `COMMITTED_ITEMS` lists every successful fix with its own sha. Each entry's sha is what 5e quotes in the corresponding "Fixed in `<sha>`" reply.
 
+**Convert each blocked FIX into an `automated-fix-failed` DEFER before leaving 5b.** For every entry in `BLOCKED_ITEMS` (the items 5b reverted because pre-commit refused them), run the Step 5a' DEFER flow with `category="automated-fix-failed"`:
+
+- Title: `Auto-fix failed pre-commit: <one-line summary of the original feedback>`.
+- Issue body: include the reviewer's original feedback (quoted), the file paths the FIX touched, and the `pre_commit_error_tail` captured in 5b. Set the `**Why deferred:**` line to `automated-fix-failed — <one-line of the pre-commit error>`.
+- File the tracking issue with `mcp__github__issue_write`, post the DEFER reply on the original thread / review summary / PR conversation comment using the `automated-fix-failed` prefix from Step 5a' and ending with `Tracked as #<issue_number> (<issue_html_url>).`, then record the item in `OUTCOME_MARKERS` and append it to `DEFERRED_ITEMS` — exactly like an evaluator-driven DEFER. Apply the same retry + `TODO: file as a separate issue` fallback if `issue_write` fails.
+
+After this conversion, every blocked item has an explicit PR reply and (best-effort) a tracking issue, so the "Always Reply" core principle holds for blocked FIXes too. Clear `BLOCKED_ITEMS` for the iteration; do not include their entries in 5e (which only iterates `COMMITTED_ITEMS`).
+
 **5c. Pre-commit checks** (from Step 2) — invoked by 5b for the current in-flight item only. Run in order: format → lint → type-check → test → build. If a formatter modifies files, stage them. If a check fails, attempt one sub-fix (does not count as a loop iteration). If the sub-fix also fails, **do not ask the user** — return a hard fail to 5b, which handles the revert and continues with the next FIX item. The check is bounded to this single item because earlier successful items are already committed and out of the worktree.
 
 **5d. Push the iteration's commits.** After 5b finishes, if `git rev-list HEAD ^@{u} --count` (or, if no upstream is set yet, `git rev-list HEAD ^origin/<base-branch> --count`) is zero — no new commits — skip to 5f. Otherwise push all new commits in one operation.
@@ -309,7 +317,7 @@ Track wall-clock elapsed time since the last commit was pushed. If `CI_TIMEOUT` 
 
 → Proceed to Step 6.
 
-**Stale loop detected** if the same CI checks are failing with similar error patterns as the previous iteration → record `stale_loop` in the final summary and jump to Step 7. Do not prompt the user. The same applies if `BLOCKED_ITEMS` keeps the same entries across two consecutive iterations with no progress.
+**Stale loop detected** if the same CI checks are failing with similar error patterns as the previous iteration → record `stale_loop` in the final summary and jump to Step 7. Do not prompt the user. (`BLOCKED_ITEMS` cannot accumulate across iterations because Step 5b now converts each blocked FIX into an `automated-fix-failed` DEFER and clears the list.)
 
 **New issues found** → run Step 4 (evaluate new feedback) and continue the loop.
 
