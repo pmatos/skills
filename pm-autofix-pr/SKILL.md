@@ -251,19 +251,28 @@ Prefixes by REJECT category:
 
 **Issue-creation failure fallback.** If `mcp__github__issue_write` fails (rate limit, permissions, transient error) — retry once after 60 seconds. If the retry also fails, **do not block the loop**: post the DEFER reply with `TODO: file as a separate issue — automated issue creation failed (<error summary>).` instead of the tracked-issue link, and append `{item_key, issue_number=null, ...}` to `DEFERRED_ITEMS` so the final summary surfaces the gap. The reviewer's concern is still acknowledged in writing.
 
-**5b. FIX flow** (verdict = FIX) and CI failures. Process each FIX item individually — apply, check, commit — before moving to the next. This isolates each item in its own commit so a pre-commit failure can be reverted cleanly without touching earlier successful fixes (`git restore <files>` is safe because only the in-flight item's changes are in the worktree).
+**5b. FIX flow** (verdict = FIX) and CI failures. Process each FIX item individually — apply, check, commit — before moving to the next. This isolates each item in its own commit so a pre-commit failure can be reverted cleanly without touching earlier successful fixes (the revert combines `git restore` for tracked changes and `git clean -fd` for untracked files the FIX created — both are safe because only the in-flight item's changes are in the worktree).
 
 **Precondition** before entering 5b: the worktree must be clean (`git status --porcelain` empty). If it is not, fail loudly and jump to Step 7 with `exit reason: dirty-worktree` — there is no safe way to attribute the existing changes to a specific FIX item.
 
 For each FIX item in `feedback_items` whose verdict is FIX (CI failures included), in sequence:
 
-1. **Apply the change.** Read the relevant source/error context and edit files:
+1. **Snapshot the worktree.** Run `git status --porcelain` and record it as `pre_fix_status` — at this point it must be empty (the 5b precondition).
+2. **Apply the change.** Read the relevant source/error context and edit files:
    - CI failures: read the failed-job log tail, identify failing file/line, fix.
    - Inline review threads: read the referenced file, apply the requested change.
    - Review summaries / PR conversation comments: locate files, apply the parsed asks.
-2. **Run pre-commit checks** for this item (Step 5c).
-3. **On pre-commit success:** stage the touched files by name (never `git add -A`), commit with a descriptive message that names the feedback item (e.g. `Fix null check in extractTokens (review thread #PRRT_xxx)`), capture the resulting short-sha, and add the FIX item to `COMMITTED_ITEMS = []` with `{item_key, sha, files, validation}`.
-4. **On pre-commit failure** (5c returned a hard fail after the sub-fix attempt): revert this item with `git restore <files>` — safe because only this item's changes are in the worktree at this point, since every earlier FIX is already committed. Record the item under `BLOCKED_ITEMS = []` with `{item_key, files, pre_commit_error_tail}`. Continue with the next FIX item; blocked items will be turned into `automated-fix-failed` DEFER entries (with their own tracking issues) at the end of the loop iteration.
+3. **Categorize what this FIX touched.** Run `git status --porcelain` again. Capture:
+   - `modified_paths` — entries with status codes `M`, `A`, `D`, `R`, `T` (tracked changes/renames/deletes).
+   - `untracked_paths` — entries with status code `??` (new files this FIX created).
+4. **Run pre-commit checks** for this item (Step 5c).
+5. **On pre-commit success:** stage the touched files by name (never `git add -A`) — staging both `modified_paths` and `untracked_paths`. Commit with a descriptive message that names the feedback item (e.g. `Fix null check in extractTokens (review thread #PRRT_xxx)`), capture the resulting short-sha, and add the FIX item to `COMMITTED_ITEMS = []` with `{item_key, sha, files, validation}`.
+6. **On pre-commit failure** (5c returned a hard fail after the sub-fix attempt): revert this item completely so the next FIX starts from a clean worktree:
+   - `git restore --source=HEAD --staged --worktree -- <modified_paths>` to undo tracked modifications/renames/deletions (also unstages anything pre-commit staged).
+   - `git clean -fd -- <untracked_paths>` to delete files this FIX created (`-fd` so newly-created subdirectories are removed too).
+   - Verify with `git status --porcelain` that the worktree is once again empty; if it is not, abort the entire loop with `exit reason: dirty-worktree` rather than risk contaminating later FIXes.
+
+   Record the item under `BLOCKED_ITEMS = []` with `{item_key, files, pre_commit_error_tail}`. Continue with the next FIX item; blocked items will be turned into `automated-fix-failed` DEFER entries (with their own tracking issues) at the end of the loop iteration.
 
 After all FIX items have been processed, the worktree is clean and `COMMITTED_ITEMS` lists every successful fix with its own sha. Each entry's sha is what 5e quotes in the corresponding "Fixed in `<sha>`" reply.
 
