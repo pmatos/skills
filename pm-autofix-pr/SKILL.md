@@ -373,8 +373,8 @@ Then print:
 
 Do **not** ask the user anything at the end. The skill exits unconditionally after printing the summary:
 
-- Exit reason `fixed-point` (and CI green, all feedback answered): print **"PR is ready for re-review."**
-- Any other exit reason: print **"Autofix exited without converging — see summary above for required follow-up."** Do not loop again, do not prompt.
+- **Success exits** — `fixed-point` (CI green, all feedback answered) or `monitoring-timeout` (reached only by passing through the same green-CI / answered-feedback gate before entering Step 6, so a clean window-elapse is also success): print **"PR is ready for re-review."**
+- **Failure exits** — `stale-loop`, `ci-timeout`, `rebase-conflict`, `push-failure`, `dirty-worktree`: print **"Autofix exited without converging — see summary above for required follow-up."** Do not loop again, do not prompt.
 
 ## References
 
