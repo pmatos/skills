@@ -105,7 +105,7 @@ Do not fall back to `gh` for the workflow. On success, capture `login` as `GH_US
    - **3a. Origin lookup.** Parse `git remote get-url origin` to `{owner}/{repo}` (strip `git@github.com:`, `https://github.com/`, trailing `.git`). Call `mcp__github__list_pull_requests` with `head={owner}:{branch}`, `state=open`, `perPage=5`.
    - **3b. Upstream lookup (fork workflow).** If step 3a returned no PRs and `git remote get-url upstream` exists, parse it the same way to `{upstream_owner}/{upstream_repo}` and call `mcp__github__list_pull_requests` against that repo with `head={origin_owner}:{branch}` (PRs from a fork use the fork owner as the head prefix).
    - **3c. `gh pr view` fallback.** If both MCP lookups fail and `gh` is available, run `gh pr view --json number,headRepositoryOwner,headRepository,baseRepositoryOwner,baseRepository,url` to let `gh` resolve the base repo via `git config`. On success, treat the returned `baseRepositoryOwner.login` / `baseRepository.name` as the PR's owner/repo. If `gh` is not installed or returns nothing, stop and tell the user there is no open PR for the current branch.
-4. Validate by calling `mcp__github__pull_request_read` method=`get` on the resolved `{owner, repo, pullNumber}` to retrieve `title`, `body`, `head.ref`, `head.sha`, `url`. Confirm `head.ref` matches the local branch.
+4. Validate by calling `mcp__github__pull_request_read` method=`get` on the resolved `{owner, repo, pullNumber}` to retrieve `title`, `body`, `head.ref`, `head.sha`, `base.ref`, `url`. Confirm `head.ref` matches the local branch. Capture `base.ref` for use in Step 5d's first-push fallback.
 5. Subscribe to PR activity once: call `mcp__github__subscribe_pr_activity` with `{owner, repo, pullNumber}`. From this point on, CI completions, new reviews, and new comments will arrive as `<github-webhook-activity>` events in the conversation. The subscription is idempotent; do not call it again per iteration.
 
 ### Step 2: Read Project Pre-commit Requirements
@@ -286,7 +286,12 @@ After this conversion, every blocked item has an explicit PR reply and (best-eff
 
 **5c. Pre-commit checks** (from Step 2) — invoked by 5b for the current in-flight item only. Run in order: format → lint → type-check → test → build. If a formatter modifies files, stage them. If a check fails, attempt one sub-fix (does not count as a loop iteration). If the sub-fix also fails, **do not ask the user** — return a hard fail to 5b, which handles the revert and continues with the next FIX item. The check is bounded to this single item because earlier successful items are already committed and out of the worktree.
 
-**5d. Push the iteration's commits.** After 5b finishes, if `git rev-list HEAD ^@{u} --count` (or, if no upstream is set yet, `git rev-list HEAD ^origin/<base-branch> --count`) is zero — no new commits — skip to 5f. Otherwise push all new commits in one operation.
+**5d. Push the iteration's commits.** After 5b finishes, decide whether there is anything to push without depending on undefined refs:
+
+- If `COMMITTED_ITEMS` is empty for this iteration **and** `BLOCKED_ITEMS` is empty (so 5a' didn't post any DEFER replies that themselves landed as PR comments needing no commits), there is nothing to push — skip to 5f.
+- Otherwise, push:
+  - If the branch has an upstream (`git rev-parse --abbrev-ref --symbolic-full-name @{u}` exits 0), run `git push`.
+  - If the branch has no upstream yet (first push of this branch — common for a freshly-created PR), run `git push -u origin <head.ref>` using the branch name captured in Step 1. Do **not** consult any base-branch ref; the upstream gets set during this push.
 
 On **rejected push** (upstream has new commits), auto-recover without prompting:
 1. Run `git pull --rebase`.
