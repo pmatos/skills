@@ -251,27 +251,34 @@ Prefixes by REJECT category:
 
 **Issue-creation failure fallback.** If `mcp__github__issue_write` fails (rate limit, permissions, transient error) — retry once after 60 seconds. If the retry also fails, **do not block the loop**: post the DEFER reply with `TODO: file as a separate issue — automated issue creation failed (<error summary>).` instead of the tracked-issue link, and append `{item_key, issue_number=null, ...}` to `DEFERRED_ITEMS` so the final summary surfaces the gap. The reviewer's concern is still acknowledged in writing.
 
-**5b. FIX flow** (verdict = FIX) and CI failures. Apply fixes one issue at a time:
-- CI failures: read error logs, identify failing file/line, read source, fix.
-- Inline review threads: read the referenced file, understand context, apply the requested change.
-- Review summaries / PR conversation comments: parse for specific asks, locate files, apply changes.
+**5b. FIX flow** (verdict = FIX) and CI failures. Process each FIX item individually — apply, check, commit — before moving to the next. This isolates each item in its own commit so a pre-commit failure can be reverted cleanly without touching earlier successful fixes (`git restore <files>` is safe because only the in-flight item's changes are in the worktree).
 
-For each FIX item, record a reply plan before moving on: changed files, line/function names where useful, test/check evidence, and the commit SHA once available.
+**Precondition** before entering 5b: the worktree must be clean (`git status --porcelain` empty). If it is not, fail loudly and jump to Step 7 with `exit reason: dirty-worktree` — there is no safe way to attribute the existing changes to a specific FIX item.
 
-**5c. Run pre-commit checks** (from Step 2) in order: format → lint → type-check → test → build. If a formatter modifies files, stage them. If a check fails, attempt one sub-fix (does not count as an iteration).
+For each FIX item in `feedback_items` whose verdict is FIX (CI failures included), in sequence:
 
-If the sub-fix also fails, **do not ask the user**. Identify which FIX item the failing change belongs to, revert just that item's working-tree changes (`git checkout -- <files>` for the files the FIX touched, or `git restore <files>` — never `git reset --hard` or `git checkout .` because other FIX items in flight may share files), record the item under `BLOCKED_ITEMS = []` with the pre-commit error tail, and continue with the remaining FIX items. Blocked items get a DEFER-style reply at the end of the iteration explaining that the automated fix failed pre-commit and a tracking issue has been filed (use the DEFER flow with category `automated-fix-failed`); they do **not** block convergence beyond a single retry on the next loop.
+1. **Apply the change.** Read the relevant source/error context and edit files:
+   - CI failures: read the failed-job log tail, identify failing file/line, fix.
+   - Inline review threads: read the referenced file, apply the requested change.
+   - Review summaries / PR conversation comments: locate files, apply the parsed asks.
+2. **Run pre-commit checks** for this item (Step 5c).
+3. **On pre-commit success:** stage the touched files by name (never `git add -A`), commit with a descriptive message that names the feedback item (e.g. `Fix null check in extractTokens (review thread #PRRT_xxx)`), capture the resulting short-sha, and add the FIX item to `COMMITTED_ITEMS = []` with `{item_key, sha, files, validation}`.
+4. **On pre-commit failure** (5c returned a hard fail after the sub-fix attempt): revert this item with `git restore <files>` — safe because only this item's changes are in the worktree at this point, since every earlier FIX is already committed. Record the item under `BLOCKED_ITEMS = []` with `{item_key, files, pre_commit_error_tail}`. Continue with the next FIX item; blocked items will be turned into `automated-fix-failed` DEFER entries (with their own tracking issues) at the end of the loop iteration.
 
-**5d. Commit and push.** If `git status --porcelain` shows no changes, skip to 5f. Otherwise: stage files by name (not `git add -A`), commit with a descriptive message, push.
+After all FIX items have been processed, the worktree is clean and `COMMITTED_ITEMS` lists every successful fix with its own sha. Each entry's sha is what 5e quotes in the corresponding "Fixed in `<sha>`" reply.
+
+**5c. Pre-commit checks** (from Step 2) — invoked by 5b for the current in-flight item only. Run in order: format → lint → type-check → test → build. If a formatter modifies files, stage them. If a check fails, attempt one sub-fix (does not count as a loop iteration). If the sub-fix also fails, **do not ask the user** — return a hard fail to 5b, which handles the revert and continues with the next FIX item. The check is bounded to this single item because earlier successful items are already committed and out of the worktree.
+
+**5d. Push the iteration's commits.** After 5b finishes, if `git rev-list HEAD ^@{u} --count` (or, if no upstream is set yet, `git rev-list HEAD ^origin/<base-branch> --count`) is zero — no new commits — skip to 5f. Otherwise push all new commits in one operation.
 
 On **rejected push** (upstream has new commits), auto-recover without prompting:
 1. Run `git pull --rebase`.
-2. If the rebase succeeds, re-run pre-commit checks (Step 5c) on the rebased tree, then push again.
+2. If the rebase succeeds, re-run pre-commit checks for each rebased commit (using `git rebase --exec` is acceptable, or by replaying 5b's checks on the rebased tree), then push again.
 3. If the rebase fails (conflicts), run `git rebase --abort` to leave the worktree clean, record the abort in the final summary, jump straight to Step 7. Exit with summary; the user must resolve the divergence manually.
 
 On **network error** during push, retry with exponential backoff (2s, 4s, 8s, 16s). After the fourth failure, jump to Step 7 with the failure recorded — do not prompt.
 
-**5e. Reply to every addressed feedback item.** For each FIX item committed in this iteration, post an outcome reply before it can count as addressed.
+**5e. Reply to every addressed feedback item.** For each entry in `COMMITTED_ITEMS` (the per-item commits 5b/5d produced this iteration), post an outcome reply that quotes that item's own short-sha — never a different item's sha, since each FIX has its own commit. An item only counts as addressed once its reply is posted.
 
 Reply body format:
 
@@ -316,7 +323,7 @@ Wait for `<github-webhook-activity>` events from the still-active subscription. 
 
 ### Step 7: Final Summary and Cleanup
 
-Call `mcp__github__unsubscribe_pr_activity` with `{owner, repo, pullNumber}` to clean up the subscription, regardless of how the loop exited (fixed point, stale loop, CI timeout, rebase abort, push failure, monitoring timeout).
+Call `mcp__github__unsubscribe_pr_activity` with `{owner, repo, pullNumber}` to clean up the subscription, regardless of how the loop exited (fixed point, stale loop, CI timeout, rebase abort, push failure, dirty worktree, monitoring timeout).
 
 Then print:
 
@@ -325,7 +332,7 @@ Then print:
 
 ### PR: #<number> — <title>
 ### Iterations: N
-### Exit reason: fixed-point | stale-loop | ci-timeout | rebase-conflict | push-failure | monitoring-timeout
+### Exit reason: fixed-point | stale-loop | ci-timeout | rebase-conflict | push-failure | dirty-worktree | monitoring-timeout
 
 ### Changes Made (FIX outcomes)
 | Iteration | Commit | Fixes Applied | Replies Posted |
