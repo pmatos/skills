@@ -136,9 +136,9 @@ Paginate via `perPage` and `after` until exhausted.
 Derived state:
 - `unresolved_threads = [t for t in threads if not t.isResolved]`
 - `resolved_thread_ids = [t.id for t in threads if t.isResolved]`
-- `latestReviewerComment(thread)` = last non-self element of `thread.comments` (sort by `createdAt` if order is not guaranteed and ignore `author.login == GH_USER`). Use this for evaluation, reply anchoring, and `REJECTED_ITEMS` re-evaluation tracking.
+- `latestReviewerComment(thread)` = last non-self element of `thread.comments` (sort by `createdAt` if order is not guaranteed and ignore `author.login == GH_USER`). Use this for evaluation, reply anchoring, and `OUTCOME_MARKERS` re-evaluation tracking.
 - `actionable_threads = [t for t in unresolved_threads if latestReviewerComment(t) != null]`. Drop unresolved self-only threads from feedback items; otherwise later reply code would dereference a missing `latestReviewerComment.databaseId`.
-- `rejection_marker(thread)` = `<latestReviewerComment.databaseId>:<latestReviewerComment.updatedAt || latestReviewerComment.updated_at || latestReviewerComment.createdAt>`, so edited reviewer comments re-enter evaluation.
+- `outcome_marker(thread)` = `<latestReviewerComment.databaseId>:<latestReviewerComment.updatedAt || latestReviewerComment.updated_at || latestReviewerComment.createdAt>`, so edited reviewer comments re-enter evaluation. The same marker scheme is used for both REJECT and DEFER outcomes — both are recorded in `OUTCOME_MARKERS`.
 
 ## Review summaries
 
@@ -149,7 +149,7 @@ mcp__github__pull_request_read(
 )
 ```
 
-Returns reviews with `id`, `body`, `state` (`APPROVED`, `CHANGES_REQUESTED`, `COMMENTED`, `DISMISSED`), `user.login`, `submitted_at`, and `updated_at` when available. Track rejected review summaries with a mutable marker such as `<review.id>:<review.updated_at>`; if the API does not expose an update timestamp, use `<review.id>:<hash(review.body)>` so edited review bodies re-enter evaluation.
+Returns reviews with `id`, `body`, `state` (`APPROVED`, `CHANGES_REQUESTED`, `COMMENTED`, `DISMISSED`), `user.login`, `submitted_at`, and `updated_at` when available. Track REJECT/DEFER review summaries in `OUTCOME_MARKERS` with a mutable marker such as `<review.id>:<review.updated_at>`; if the API does not expose an update timestamp, use `<review.id>:<hash(review.body)>` so edited review bodies re-enter evaluation.
 
 ### Supersession algorithm
 
@@ -170,7 +170,7 @@ mcp__github__pull_request_read(
 )
 ```
 
-Returns issue-level comments on the PR. Filter out entries where `user.login == GH_USER` to avoid acting on the skill's own posts. Track rejected PR conversation comments with a mutable marker such as `<comment.id>:<comment.updated_at>`; comment edits keep the same ID and must re-enter evaluation.
+Returns issue-level comments on the PR. Filter out entries where `user.login == GH_USER` to avoid acting on the skill's own posts. Track REJECT/DEFER PR conversation comments in `OUTCOME_MARKERS` with a mutable marker such as `<comment.id>:<comment.updated_at>`; comment edits keep the same ID and must re-enter evaluation.
 
 ## Replying to review summaries and PR conversation comments
 
@@ -214,7 +214,7 @@ mcp__github__pull_request_review_write(
 
 On success, add the thread to `ADDRESSED_THREAD_IDS`. On failure, leave it off `ADDRESSED_THREAD_IDS` so the next re-fetch re-surfaces it for retry.
 
-## Rejecting feedback
+## Rejecting feedback (REJECT outcome)
 
 Use the same reply channel as the feedback source:
 - Inline review thread: `add_reply_to_pull_request_comment` with a categorized prefix and disclaimer body (see SKILL.md Step 5a for the prefix table).
@@ -222,14 +222,51 @@ Use the same reply channel as the feedback source:
 
 Do **not** resolve rejected inline threads: rejected threads stay open so the reviewer can push back.
 
+## Deferring feedback (DEFER outcome)
+
+DEFER is "correct, but not in this PR" — the skill files a tracking issue and replies with a link. Two API calls per item:
+
+### 1. File the tracking issue
+
+```
+mcp__github__issue_write(
+  method="create",
+  owner=<owner>, repo=<repo>,
+  title="<short imperative phrase from feedback>",
+  body="Deferred from #<pullNumber>: <one-line summary>.\n\nOriginal feedback by @<reviewer> on PR #<pullNumber> (<pr_url>):\n\n> <quoted feedback>\n\n**Context:** <file:line or short note>.\n\n**Why deferred:** <scope-creep | diminishing-returns | ambiguous> — <one-sentence rationale>.\n\n_Filed automatically by `pm-autofix-pr` after dual-evaluator triage by <LOCAL_LABEL> and <REMOTE_LABEL>._",
+  labels=["deferred-from-pr"]   # optional, only if the repo has the label
+)
+```
+
+Capture the returned issue `number` and `html_url`. Use them in the PR reply.
+
+If `mcp__github__issue_write` errors with `403` or `429`, wait 60 seconds and retry once. After a single failed retry, post the DEFER reply with `TODO: file as a separate issue — automated issue creation failed (<error summary>).` instead of the issue link, and record the item in `DEFERRED_ITEMS` with `issue_number=null` so the Step 7 summary surfaces the gap.
+
+If the repo doesn't have the `deferred-from-pr` label, the call may fail with a 422 — drop the `labels` field and retry once. Do not pre-create labels.
+
+### 2. Reply on the PR with a link
+
+Use the same reply channel as the feedback source — inline thread → `add_reply_to_pull_request_comment`; review summary / PR conversation comment → `add_issue_comment` — with body:
+
+```
+{prefix} {one-sentence rationale}. Tracked as #<issue_number> (<issue_html_url>).
+
+_This assessment was made by two independent AI reviewers (<LOCAL_LABEL> and <REMOTE_LABEL>). If you disagree, please reply and we'll re-evaluate._
+```
+
+Prefix from SKILL.md Step 5a' (e.g. `**Out of scope for this PR** —`, `**Deferred (diminishing returns)** —`, `**Deferred for separate discussion** —`).
+
+Do **not** resolve deferred inline threads: like rejected threads, they stay open so the reviewer can push back if the deferral is wrong.
+
 ## Rate limiting
 
 If any MCP call errors with `403` or `429`, wait 60 seconds and retry once. After a single failed retry:
 - Reply failures (`add_reply_to_pull_request_comment` or `add_issue_comment`) are not code-fatal, but they block convergence. Leave the item off `ADDRESSED_THREAD_IDS` / `REPLIED_ITEM_KEYS` so it re-surfaces for another reply attempt.
 - Resolve failures (`pull_request_review_write` with `method="resolve_thread"`) are non-fatal but the thread stays off `ADDRESSED_THREAD_IDS` so it re-surfaces.
+- Issue-create failures (`issue_write` with `method="create"`) trigger the DEFER fallback: post the DEFER reply with `TODO: file as a separate issue — automated issue creation failed (<error>).` and record `issue_number=null` in `DEFERRED_ITEMS`. Do not block convergence.
 - State-fetch failures get added to the `errors` list and prevent the fixed-point declaration in Step 5g.
 
-## Push handling (unchanged — still local `git`)
+## Push handling (local `git`, fully automatic)
 
 ```bash
 git rev-parse --abbrev-ref <branch>@{upstream}   # check upstream exists
@@ -237,6 +274,12 @@ git push                                          # if upstream exists
 git push -u origin <branch>                       # if not
 ```
 
-On rejected push (upstream has new commits): stop and tell the user to `git pull --rebase` and re-invoke.
+The skill never prompts the user during push. Two failure modes have automatic recovery:
 
-On network error: retry up to 4 times with exponential backoff (2s, 4s, 8s, 16s).
+**Rejected push (upstream has new commits):**
+
+1. Run `git pull --rebase`.
+2. If the rebase succeeds, re-run pre-commit checks on the rebased tree, then `git push` again.
+3. If the rebase reports conflicts, run `git rebase --abort` to leave the worktree clean and exit through Step 7 with `exit reason: rebase-conflict`. Do not attempt to resolve conflicts automatically and do not prompt the user.
+
+**Network error:** retry up to 4 times with exponential backoff (2s, 4s, 8s, 16s). After the fourth failure, exit through Step 7 with `exit reason: push-failure`. Do not prompt the user.
