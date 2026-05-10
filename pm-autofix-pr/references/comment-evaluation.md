@@ -1,6 +1,8 @@
 # Dual-Agent Reviewer Feedback Evaluation
 
-Every unresolved reviewer feedback item must be evaluated before any action is taken. This includes inline review threads, review summary bodies, and PR conversation comments. This prevents wasting effort on invalid, out-of-scope, or irrelevant feedback. Two independent evaluators assess each item in parallel, and their combined verdict determines the action.
+Every unresolved reviewer feedback item must be evaluated before any action is taken. This includes inline review threads, review summary bodies, and PR conversation comments. This prevents wasting effort on invalid, out-of-scope, or low-value feedback. Two independent evaluators assess each item in parallel, and their combined verdict picks one of three outcomes: **FIX** (apply in this PR), **DEFER** (file a tracking issue), or **REJECT** (reply with rationale, no code change).
+
+The skill is fully automatic. Evaluators must never produce an "ask the user" verdict — uncertain or ambiguous items are auto-classified as DEFER (see "Handling Ambiguous Feedback" below).
 
 ## Evaluation Architecture
 
@@ -31,7 +33,7 @@ Each evaluator needs:
 ## Evaluator Prompt Template (used by both Local and Cross-harness evaluators)
 
 ```
-Evaluate this reviewer feedback item on a GitHub PR. Determine if it should be addressed.
+Evaluate this reviewer feedback item on a GitHub PR. Pick exactly one of three outcomes: FIX, DEFER, or REJECT.
 
 ## PR Context
 - Title: {pr_title}
@@ -47,29 +49,36 @@ Evaluate this reviewer feedback item on a GitHub PR. Determine if it should be a
 ## Context
 {code_or_diff_context}
 
-## Evaluation Criteria
+## Verdicts
 
-Rate this feedback as VALID or INVALID:
+FIX — Apply the change in this PR if ALL of the following hold:
+- The reviewer is correct (it is a real bug, correctness issue, security concern, missing test/error-check/edge case, project-standard violation, or genuine readability problem on changed code).
+- The change belongs in THIS PR's stated scope (it touches the same feature/area or fixes a regression introduced by the PR).
+- The cost of the change is proportional to the value (not a sweeping refactor for a one-line nit).
 
-VALID — Address it if:
-- Points to a real bug, correctness issue, or security concern
-- Identifies a violation of the project's documented standards
-- Requests a necessary test, error check, or edge case
-- Highlights a genuine readability/maintainability issue in changed code
+DEFER — File a tracking issue and reply with a link if any of:
+- SCOPE CREEP: The concern is correct but lives outside this PR's stated scope.
+- DIMINISHING RETURNS: The concern is correct but minor — naming pickiness on reasonable names, micro-optimizations, refactor requests for working code, doc requests for internal helpers, "consider X" suggestions where the current code is fine. Fixing it in this PR adds churn without proportional value.
+- AMBIGUOUS: The feedback is an open question, proposes multiple alternatives, or depends on context not in the PR. File the issue so a human can resolve it; do not block the loop.
+- AUTOMATED-FIX-FAILED: (Used by the skill, not the evaluator.) A FIX was attempted but pre-commit blocked it. Recorded by Step 5c.
 
-INVALID — Reject if:
-- NOT AN ISSUE: The reviewer is mistaken — the code is correct as-is
-- SCOPE CREEP: Requests changes beyond what this PR set out to do
-- UNRELATED: Concerns code not touched by this PR
-- NOT RELEVANT: Stylistic preference not backed by project standards
-- ALREADY HANDLED: The issue is already addressed elsewhere in the PR
+REJECT — Reply with a rationale, no code change, no issue, if any of:
+- NOT AN ISSUE: The reviewer is factually mistaken — the code is correct as-is.
+- UNRELATED: Concerns code not touched by this PR and is not a regression caused by it.
+- NOT RELEVANT: Stylistic preference with no backing in CLAUDE.md, linter config, or established repo convention; current code is fine.
+- STYLE PREFERENCE: Both styles are equally valid; the current style matches the surrounding code.
+- ALREADY HANDLED: The requested behavior is already present in the PR.
 
 ## Output Format
-VERDICT: VALID or INVALID
-CATEGORY: (if INVALID) not-an-issue | scope-creep | unrelated | not-relevant | style-preference | already-handled
+VERDICT: FIX | DEFER | REJECT
+CATEGORY:
+  - if FIX: bug | correctness | security | missing-test | edge-case | standards | readability
+  - if DEFER: scope-creep | diminishing-returns | ambiguous
+  - if REJECT: not-an-issue | unrelated | not-relevant | style-preference | already-handled
 CONFIDENCE: HIGH | MEDIUM | LOW
 REASONING: 2-3 sentences explaining the verdict
 REPLY_GUIDANCE: one sentence describing what the PR reply should say
+ISSUE_TITLE: (only if VERDICT=DEFER) short imperative title for the tracking issue
 ```
 
 ## Cross-harness Evaluator Invocation
@@ -99,44 +108,63 @@ Capture stdout as the evaluator's verdict, then `rm -f` the temp file. **Never**
 
 ## Decision Matrix
 
-| Local Verdict | Cross-harness Verdict | Action |
-|---------------|-----------------------|--------|
-| VALID | VALID | **Address** the feedback — make the code fix |
-| VALID | INVALID | **Address** the feedback — err on the side of caution |
-| INVALID | VALID | **Address** the feedback — err on the side of caution |
-| INVALID | INVALID | **Reject** the feedback — post rejection reply |
+The combined verdict picks the most conservative outcome that both evaluators can support. Concretely: only FIX when both vote FIX; only REJECT when both vote REJECT; everything else becomes DEFER (file an issue so nothing is silently dropped).
 
-When both are INVALID, select the rejection category from the evaluator with higher confidence. If confidence is equal, use the Local Evaluator's category.
+| Local Verdict | Cross-harness Verdict | Combined Action |
+|---------------|-----------------------|-----------------|
+| FIX | FIX | **FIX** — apply code change in this PR |
+| REJECT | REJECT | **REJECT** — reply with rationale, no code change, no issue |
+| DEFER | DEFER | **DEFER** — file tracking issue, reply with link |
+| FIX | DEFER | **DEFER** — file tracking issue, reply with link |
+| DEFER | FIX | **DEFER** — file tracking issue, reply with link |
+| FIX | REJECT | **DEFER** — file tracking issue, reply with link |
+| REJECT | FIX | **DEFER** — file tracking issue, reply with link |
+| DEFER | REJECT | **DEFER** — file tracking issue, reply with link |
+| REJECT | DEFER | **DEFER** — file tracking issue, reply with link |
 
-## Confidence-Based Override
+This rule is intentionally churn-averse: a single dissenting vote is enough to keep the change out of this PR, and a single concern vote is enough to put it on the tracker. Use the category from the evaluator whose verdict matched the combined action; on ties, use the higher-confidence evaluator; on full ties, use the Local Evaluator's category.
 
-If one evaluator says INVALID with HIGH confidence and the other says VALID with LOW confidence, treat as **INVALID** — the high-confidence evaluator's reasoning takes precedence.
+For DEFER outcomes whose evaluators disagreed (e.g. FIX/REJECT), use category `ambiguous` so the filed issue carries a clear "humans need to break the tie" signal.
 
-## Rejection Taxonomy
+## Confidence Note
 
-When rejecting feedback, use one of these categories:
+Confidence (HIGH | MEDIUM | LOW) is metadata for the rejection-category selection and the issue body, **not** an override knob. The decision matrix above is the only thing that picks the action — high confidence on one side does not flip a DEFER into a FIX or REJECT.
 
-| Category | When to use | Example rejection message |
+## DEFER Taxonomy and Tracking Issue
+
+When the combined action is DEFER, the skill files an issue and posts a reply with a link. Categories and example replies:
+
+| Category | When to use | Example reply (issue link appended) |
+|---------|-------------|-------------------------------------|
+| `scope-creep` | Valid concern, but outside the PR's stated scope | "Adding retry logic to the HTTP client is a good idea but is outside this PR, which only fixes the auth token refresh. Tracked as #123." |
+| `diminishing-returns` | Correct but a low-value nit; fixing here adds churn without proportional value | "Renaming `extractTokens` → `parseTokens` is reasonable but a churn-only change. Tracked as #124 for a follow-up sweep." |
+| `ambiguous` | Open question, multiple alternatives, or evaluator disagreement | "This raises a design question that's worth its own thread. Tracked as #125 so we can resolve it without blocking this PR." |
+| `automated-fix-failed` | Skill-internal: a FIX was attempted but pre-commit blocked the change (Step 5c) | "Auto-fix failed pre-commit (`tsc TS2322`). Reverted the change and tracked as #126 for manual follow-up." |
+
+## REJECT Taxonomy
+
+When the combined action is REJECT, the skill replies with a rationale and **does not** file an issue. Categories:
+
+| Category | When to use | Example rejection reply |
 |---------|-------------|--------------------------|
 | `not-an-issue` | Reviewer is factually wrong | "The null check is unnecessary here — `fetchUser()` is guaranteed to return a non-null value by the API contract (see UserService.ts:42)." |
-| `scope-creep` | Valid concern but not for this PR | "Adding retry logic to the HTTP client is a good idea but is outside the scope of this PR, which only fixes the auth token refresh. Filed as #123." |
-| `unrelated` | Concerns untouched code | "This function was not modified in this PR. The existing behavior is unchanged." |
-| `not-relevant` | Style preference without backing | "This is a stylistic preference. The project has no documented convention for this pattern (checked CLAUDE.md, .eslintrc, .prettierrc)." |
+| `unrelated` | Concerns untouched code that is not a regression caused by this PR | "This function was not modified in this PR. The existing behavior is unchanged." |
+| `not-relevant` | Style preference with no backing in repo conventions | "This is a stylistic preference. The project has no documented convention for this pattern (checked CLAUDE.md, .eslintrc, .prettierrc)." |
 | `style-preference` | Alternate style, equally valid | "Both approaches are valid here. The current style is consistent with the rest of the codebase (see similar patterns in utils/auth.ts and lib/api.ts)." |
 | `already-handled` | The requested behavior is already present in the PR | "This is already handled by `validateConfig()` and covered by `config.test.ts`; no code change was needed." |
 
 ## Reply Requirements
 
 Every feedback item needs a reply after evaluation:
-- VALID and fixed: say `Fixed in <sha>`, identify the changed file/function/behavior, and mention validation.
-- INVALID and rejected: say no change was made, give the rejection category, and explain why.
-- Ambiguous and user-decided: state the user-selected decision and either the fix location or the no-change rationale.
+- **FIX**: say `Fixed in <sha>`, identify the changed file/function/behavior, and mention validation.
+- **DEFER**: state the deferral category and rationale, then `Tracked as #<issue_number> (<issue_url>).` If issue creation failed, end with `TODO: file as a separate issue — automated issue creation failed (<error summary>).` instead of the link.
+- **REJECT**: say no change was made, give the rejection category, and explain why.
 
 Reply before counting the item as addressed. If posting the reply fails, retry later and keep the item open in the loop.
 
 ## Handling Ambiguous Feedback
 
-If a feedback item asks an open question, proposes multiple alternatives, or suggests an architectural change, classify it as **ambiguous** regardless of evaluator verdicts. Present it to the user with both evaluators' reasoning and ask for guidance.
+If a feedback item asks an open question, proposes multiple alternatives, or suggests an architectural change, classify it as **DEFER / ambiguous** regardless of the matrix vote. The filed issue is the durable place for that conversation; the PR reply tells the reviewer where the discussion has moved. **Never** stop the loop to ask the user — this skill is fully automatic.
 
 ## Thread Context
 

@@ -6,15 +6,25 @@ user-invocable: true
 
 # Autofix PR
 
-Iteratively fix CI failures and address reviewer feedback on a GitHub PR until a true fixed point is reached — all CI green, all valid feedback fixed, all invalid feedback rejected with reasons, and every feedback item has a reply documenting the outcome. A single invocation handles everything.
+Iteratively fix CI failures and address reviewer feedback on a GitHub PR until a true fixed point is reached — all CI green, every feedback item triaged into one of three outcomes (FIX, DEFER, REJECT), and every feedback item has a reply documenting the outcome. A single invocation handles everything end-to-end without user input.
 
-## Core Principle: Say NO
+## Core Principle: Three Outcomes per Feedback Item
 
-Not every review comment deserves a code change. Before touching code, evaluate every review thread, review summary, and PR conversation comment on its merits with two independent AI reviewers — the **local host model** (whichever harness you are running in) and a **cross-harness model** (Claude ↔ Codex; whichever one you are not). Reject comments that are wrong, out of scope, or unrelated. Post a clear explanation on the PR when rejecting. This prevents scope creep and unnecessary churn.
+Not every review comment deserves a code change in this PR, and not every rejected comment is worthless. Before touching code, evaluate every review thread, review summary, and PR conversation comment on its merits with two independent AI reviewers — the **local host model** (whichever harness you are running in) and a **cross-harness model** (Claude ↔ Codex; whichever one you are not). Each item is triaged into exactly one of:
+
+- **FIX** — correct **and** in scope for this PR → change the code in this PR, reply with the commit.
+- **DEFER** — correct but out of scope, or a minor/diminishing-returns nit not worth churn in this PR → file a tracking issue, reply on the PR with a link to the new issue.
+- **REJECT** — wrong, unrelated, already-handled, or pure style preference with no project backing → reply with a rationale, no code change, no issue.
+
+DEFER is the safety valve that lets the skill say "not now" to legitimate-but-low-value feedback without losing it. Use it for: pickiness on naming/style where the current code is reasonable, micro-optimizations, refactor requests for working code, doc requests for internal helpers, and anything correct but outside the PR's stated scope.
 
 ## Core Principle: Always Reply
 
-Every reviewer feedback item must get an explicit reply before the skill can converge. Valid feedback gets a reply that says what was fixed, where it was fixed, and the commit that contains it. Invalid or out-of-scope feedback gets a reply that says no code change was made and why. Ambiguous feedback gets a reply after the user chooses the path. A missing reply is still unfinished work, even if the code and CI are already green.
+Every reviewer feedback item must get an explicit reply before the skill can converge. FIX gets a reply that says what was fixed, where it was fixed, and the commit that contains it. DEFER gets a reply with the rejection rationale plus a link to the filed tracking issue. REJECT gets a reply that says no code change was made and why. A missing reply is still unfinished work, even if the code and CI are already green.
+
+## Core Principle: Never Prompt the User
+
+This skill runs end-to-end without asking the user anything once invoked. There is no "begin fixing?" confirmation, no "ambiguous feedback, how should I handle it?", no "pre-commit failed, retry?", no "stale loop, continue?", no "CI timeout, keep waiting?". Every decision point has a deterministic auto-action defined below; uncertain feedback defaults to DEFER (file an issue and let humans resolve later); unrecoverable conditions exit cleanly with a final summary. The only way the skill stops mid-flight is by reaching the fixed point, hitting a hard precondition failure (missing MCP, missing cross-harness CLI, no PR for the branch), or hitting an unrecoverable error (rebase conflict, persistent push failure). Each exit goes through Step 7's summary.
 
 ## Prerequisites
 
@@ -29,10 +39,10 @@ Override via prompt arguments (e.g., `/pm-autofix-pr 10 --ci-timeout 30 --monito
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `MONITOR_DURATION` | 10 | Minutes to watch for new issues after convergence. 0 to skip. |
-| `CI_TIMEOUT` | 20 | Minutes to wait for CI before prompting user. |
+| `CI_TIMEOUT` | 20 | Minutes to wait for CI before aborting (no user prompt — exits through Step 7 with `ci-timeout`). |
 | `LOG_TAIL_LINES` | 500 | Lines of CI failure log to inspect. |
 
-There is no iteration limit. The loop runs until a fixed point or until a stale-loop is detected.
+There is no iteration limit. The loop runs until one of: fixed point reached, stale loop detected, CI timeout, rebase conflict, persistent push failure, or monitoring window elapsed. Every exit goes through Step 7. The skill never prompts the user.
 
 ## MCP Tools Used
 
@@ -45,9 +55,10 @@ All GitHub interaction is direct MCP tool calls — no bundled scripts.
 | `mcp__github__pull_request_read` | Fetch PR details, check runs, review comments/threads, reviews, conversation comments, status. |
 | `mcp__github__subscribe_pr_activity` | One-time subscription so CI/review/comment events arrive as `<github-webhook-activity>` messages. |
 | `mcp__github__unsubscribe_pr_activity` | Cleanup on exit. |
-| `mcp__github__add_reply_to_pull_request_comment` | Post replies on inline review threads (both "fixed" replies and rejection replies). |
+| `mcp__github__add_reply_to_pull_request_comment` | Post replies on inline review threads (FIX, DEFER, and REJECT replies). |
 | `mcp__github__add_issue_comment` | Post PR-level replies for review summaries and PR conversation comments. |
 | `mcp__github__pull_request_review_write` (`method="resolve_thread"`) | Resolve threads after a fix is pushed. |
+| `mcp__github__issue_write` (`method="create"`) | File a tracking issue for each DEFER outcome (out-of-scope, diminishing-returns, ambiguous, or automated-fix-failed). |
 
 ## Workflow
 
@@ -122,9 +133,9 @@ Build `feedback_items` from:
 - `review_summaries`, keyed as `review:<review.id>`
 - `pr_comments`, keyed as `comment:<comment.id>`
 
-Initialize `ADDRESSED_THREAD_IDS` with `resolved_thread_ids`. Initialize `REPLIED_ITEM_KEYS = {}` for review summaries and PR conversation comments that already received an outcome reply during this invocation. Initialize `REJECTED_ITEMS = {}` (`item_key → latest_reviewer_marker_at_outcome`) for rejected feedback.
+Initialize `ADDRESSED_THREAD_IDS` with `resolved_thread_ids`. Initialize `REPLIED_ITEM_KEYS = {}` for review summaries and PR conversation comments that already received an outcome reply during this invocation. Initialize `OUTCOME_MARKERS = {}` (`item_key → latest_reviewer_marker_at_outcome`) covering both REJECTED and DEFERRED items so a later reviewer edit re-enters evaluation. Initialize `DEFERRED_ITEMS = []` (one entry per filed tracking issue, used by Step 7's summary).
 
-Present the initial assessment and ask: **"Found N CI failures and M reviewer feedback items. Begin fixing?"**
+Print the initial assessment as a status line — `Found N CI failures and M reviewer feedback items. Begin processing.` — and proceed unconditionally. **Never** wait for a confirmation: the skill is fully automatic from this point on.
 
 If nothing to fix, report the PR is clean and proceed to Step 6 (monitoring).
 
@@ -132,7 +143,7 @@ If nothing to fix, report the PR is clean and proceed to Step 6 (monitoring).
 
 **This is the most important step.** Every time PR state is fetched, evaluate reviewer feedback before waiting on CI. Do not defer review handling until checks finish.
 
-For each feedback item not already answered, gather context, then spawn **two subagents in parallel**. Inline threads are already answered when `thread.id ∈ ADDRESSED_THREAD_IDS`; review summaries and PR conversation comments are already answered when `item_key ∈ REPLIED_ITEM_KEYS`; rejected feedback is already answered when `item_key ∈ REJECTED_ITEMS` and its reviewer marker has not changed.
+For each feedback item not already answered, gather context, then spawn **two subagents in parallel**. Inline threads are already answered when `thread.id ∈ ADDRESSED_THREAD_IDS`; review summaries and PR conversation comments are already answered when `item_key ∈ REPLIED_ITEM_KEYS`; previously rejected or deferred feedback is already answered when `item_key ∈ OUTCOME_MARKERS` and its reviewer marker has not changed.
 
 - Inline review threads: use `latestReviewerComment`, then read the referenced file and code context.
 - Review summaries: parse the body into concrete asks; read the PR diff, PR description, and any files mentioned by the review.
@@ -142,7 +153,7 @@ For each feedback item not already answered, gather context, then spawn **two su
    - **Claude host:** Agent tool with `model="opus"`.
    - **Codex host:** Bash with `codex exec --full-auto --sandbox read-only --ephemeral - < /tmp/eval-XXXXXX` (10-minute timeout). Write the prompt via `mktemp` first; `rm -f` after.
 
-   Provide the comment, code context, PR title/description, and changed files summary. Ask for a VALID/INVALID verdict with category, confidence, and reasoning. See `references/comment-evaluation.md` for the full prompt template.
+   Provide the comment, code context, PR title/description, and changed files summary. Ask for a **FIX / DEFER / REJECT** verdict with category, confidence, and reasoning. See `references/comment-evaluation.md` for the full prompt template.
 
 2. **Cross-harness Evaluator** — runs the *other* model. Use the matching row from Step 0a's invocation table:
    - **Claude host:** Skill tool with `skill="codex-2nd-opinion"` (the user-level skill in this repo, frontmatter `name: codex-2nd-opinion`).
@@ -163,24 +174,24 @@ For each feedback item not already answered, gather context, then spawn **two su
 
 | Local | Cross-harness | Action |
 |-------|---------------|--------|
-| VALID | VALID | Address it |
-| VALID | INVALID | Address it |
-| INVALID | VALID | Address it |
-| INVALID | INVALID | **Reject it** |
+| FIX | FIX | **FIX** — apply code change in this PR |
+| REJECT | REJECT | **REJECT** — reply with rationale, no code change, no issue |
+| DEFER | DEFER | **DEFER** — file tracking issue, reply with link |
+| any other combination | | **DEFER** — file tracking issue (any disagreement defaults to DEFER) |
 
-Exception: if one says INVALID with HIGH confidence and the other says VALID with LOW confidence, treat as INVALID.
+The rule is conservative on purpose: only fix when both evaluators agree the change belongs in this PR; only reject when both agree there is no concern worth tracking; otherwise file an issue so nothing is silently dropped. This matches the "Three Outcomes" core principle.
 
-For ambiguous feedback (open questions, architectural suggestions, multiple alternatives), present to the user with both evaluators' reasoning and wait for guidance. After the user decides, treat it as either VALID or INVALID and reply with that decision and rationale.
+**Ambiguous feedback** (open questions, architectural suggestions with multiple alternatives, requests that depend on undocumented context) is auto-classified as **DEFER** without consulting the user. The filed issue is the durable artifact a human can resolve later; the PR reply tells the reviewer where the discussion has moved. Do not block the loop on user input.
 
-### Step 5: The Fix Loop
+### Step 5: The Triage and Fix Loop
 
-Loop until fixed point:
+Loop until fixed point or unrecoverable abort. Process each feedback item exactly once per fetch cycle through the outcome flow that matches its Step 4 verdict.
 
-**5a. Reject invalid feedback.** For each feedback item evaluated as INVALID, compose a rejection body using the prefix table below, then reply through the right channel:
+**5a. REJECT flow** (verdict = REJECT). Compose a rejection body using the prefix table below and reply through the right channel:
 - Inline review thread: call `mcp__github__add_reply_to_pull_request_comment` with `commentId = latestReviewerComment.databaseId`.
 - Review summary or PR conversation comment: call `mcp__github__add_issue_comment` with `issue_number = pullNumber`. Start the body with `@reviewer Regarding your <review/comment> (<short identifier>):` and quote or summarize the specific ask being rejected.
 
-Do **not** resolve rejected inline threads — they stay unresolved so the reviewer can push back. Record the item in `REJECTED_ITEMS` as `item_key → latest_reviewer_marker_at_outcome` using a mutable marker: `latestReviewerComment.databaseId + updatedAt` for inline threads, `review.id + updated_at` for review summaries when available, `review.id + body_hash(body)` for review summaries when no update timestamp exists, and `comment.id + updated_at` for PR conversation comments. Do **not** add it to `ADDRESSED_THREAD_IDS`; suppression depends on the recorded reviewer marker staying current.
+Do **not** resolve rejected inline threads — they stay unresolved so the reviewer can push back. Record the item in `OUTCOME_MARKERS` as `item_key → latest_reviewer_marker_at_outcome` using a mutable marker: `latestReviewerComment.databaseId + updatedAt` for inline threads, `review.id + updated_at` for review summaries when available, `review.id + body_hash(body)` for review summaries when no update timestamp exists, and `comment.id + updated_at` for PR conversation comments. Do **not** add it to `ADDRESSED_THREAD_IDS`; suppression depends on the recorded reviewer marker staying current.
 
 Rejection body format:
 
@@ -192,30 +203,75 @@ _This assessment was made by two independent AI reviewers ({LOCAL_LABEL} and {RE
 
 Substitute `{LOCAL_LABEL}` / `{REMOTE_LABEL}` with the values captured in Step 0a (e.g. `"Claude Opus 4.6"` and `"Codex GPT-5.4"`, in either order depending on the host).
 
-Prefixes by category:
+Prefixes by REJECT category:
 
 | Category | Prefix |
 |---|---|
 | `not-an-issue` | `**Not an issue** —` |
-| `scope-creep` | `**Out of scope for this PR** —` |
 | `unrelated` | `**Unrelated to this PR** —` |
 | `not-relevant` | `**Not applicable** —` |
 | `style-preference` | `**Style preference (no change)** —` |
 | `already-handled` | `**Already handled (no change)** —` |
 | (default) | `**No action taken** —` |
 
-**5b. Fix valid feedback and CI failures.** Apply fixes one issue at a time:
+**5a'. DEFER flow** (verdict = DEFER). The feedback is legitimate but does not belong in this PR — file a tracking issue, then reply with a link.
+
+1. Build the issue title from the feedback's primary ask: a short imperative phrase, e.g. `Refactor extractTokens() to share parser state` or `Add retry logic to HTTP client`.
+2. Build the issue body:
+
+   ```
+   Deferred from #{pullNumber}: {one-line summary}.
+
+   Original feedback by @{reviewer} on PR #{pullNumber} ({pr_url}):
+
+   > {quoted feedback, blockquoted}
+
+   **Context:** {file path:line, or short note on where this applies}.
+
+   **Why deferred:** {scope-creep | diminishing-returns | ambiguous} — {one-sentence rationale from the evaluators}.
+
+   _Filed automatically by `pm-autofix-pr` after dual-evaluator triage by {LOCAL_LABEL} and {REMOTE_LABEL}._
+   ```
+
+3. Call `mcp__github__issue_write` with `method="create"`, `owner`, `repo`, `title`, `body`, and (if applicable) `labels=["deferred-from-pr"]`. Capture the returned `number` and `html_url`.
+4. Compose the PR reply with the matching prefix below, ending with `Tracked as #{new_issue_number} ({issue_html_url}).`
+
+   Prefixes by DEFER category:
+
+   | Category | Prefix |
+   |---|---|
+   | `scope-creep` | `**Out of scope for this PR** —` |
+   | `diminishing-returns` | `**Deferred (diminishing returns)** —` |
+   | `ambiguous` | `**Deferred for separate discussion** —` |
+   | `automated-fix-failed` | `**Deferred (automated fix failed pre-commit)** —` |
+   | (default) | `**Deferred** —` |
+
+5. Reply through the same channel as REJECT (inline thread → `add_reply_to_pull_request_comment`; review summary / PR comment → `add_issue_comment`). Do **not** resolve inline threads — the reviewer can push back if the deferral is wrong.
+6. Record the item in `OUTCOME_MARKERS` (same marker scheme as REJECT). Append `{item_key, issue_number, issue_url, category, title}` to `DEFERRED_ITEMS` for the Step 7 summary.
+
+**Issue-creation failure fallback.** If `mcp__github__issue_write` fails (rate limit, permissions, transient error) — retry once after 60 seconds. If the retry also fails, **do not block the loop**: post the DEFER reply with `TODO: file as a separate issue — automated issue creation failed (<error summary>).` instead of the tracked-issue link, and append `{item_key, issue_number=null, ...}` to `DEFERRED_ITEMS` so the final summary surfaces the gap. The reviewer's concern is still acknowledged in writing.
+
+**5b. FIX flow** (verdict = FIX) and CI failures. Apply fixes one issue at a time:
 - CI failures: read error logs, identify failing file/line, read source, fix.
 - Inline review threads: read the referenced file, understand context, apply the requested change.
 - Review summaries / PR conversation comments: parse for specific asks, locate files, apply changes.
 
-For each valid feedback item, record a reply plan before moving on: changed files, line/function names where useful, test/check evidence, and the commit SHA once available.
+For each FIX item, record a reply plan before moving on: changed files, line/function names where useful, test/check evidence, and the commit SHA once available.
 
-**5c. Run pre-commit checks** (from Step 2) in order: format → lint → type-check → test → build. If a formatter modifies files, stage them. If a check fails, attempt one sub-fix (does not count as an iteration). If the sub-fix also fails, ask the user.
+**5c. Run pre-commit checks** (from Step 2) in order: format → lint → type-check → test → build. If a formatter modifies files, stage them. If a check fails, attempt one sub-fix (does not count as an iteration).
 
-**5d. Commit and push.** If `git status --porcelain` shows no changes, skip to 5f. Otherwise: stage files by name (not `git add -A`), commit with a descriptive message, push. On rejected push, stop and tell user to `git pull --rebase`. On network error, retry with exponential backoff (2s, 4s, 8s, 16s).
+If the sub-fix also fails, **do not ask the user**. Identify which FIX item the failing change belongs to, revert just that item's working-tree changes (`git checkout -- <files>` for the files the FIX touched, or `git restore <files>` — never `git reset --hard` or `git checkout .` because other FIX items in flight may share files), record the item under `BLOCKED_ITEMS = []` with the pre-commit error tail, and continue with the remaining FIX items. Blocked items get a DEFER-style reply at the end of the iteration explaining that the automated fix failed pre-commit and a tracking issue has been filed (use the DEFER flow with category `automated-fix-failed`); they do **not** block convergence beyond a single retry on the next loop.
 
-**5e. Reply to every addressed feedback item.** For each valid feedback item fixed in this iteration, post an outcome reply before it can count as addressed.
+**5d. Commit and push.** If `git status --porcelain` shows no changes, skip to 5f. Otherwise: stage files by name (not `git add -A`), commit with a descriptive message, push.
+
+On **rejected push** (upstream has new commits), auto-recover without prompting:
+1. Run `git pull --rebase`.
+2. If the rebase succeeds, re-run pre-commit checks (Step 5c) on the rebased tree, then push again.
+3. If the rebase fails (conflicts), run `git rebase --abort` to leave the worktree clean, record the abort in the final summary, jump straight to Step 7. Exit with summary; the user must resolve the divergence manually.
+
+On **network error** during push, retry with exponential backoff (2s, 4s, 8s, 16s). After the fourth failure, jump to Step 7 with the failure recorded — do not prompt.
+
+**5e. Reply to every addressed feedback item.** For each FIX item committed in this iteration, post an outcome reply before it can count as addressed.
 
 Reply body format:
 
@@ -236,9 +292,9 @@ This step is **mandatory** — never skip it. If a reply or resolve call fails w
 - `check_run.completed` / `workflow_run.completed` — CI finished, re-fetch immediately.
 - `pull_request_review.submitted` / `pull_request_review.edited` / `pull_request_review_comment.created` / `pull_request_review_comment.edited` / `issue_comment.created` / `issue_comment.edited` — new or edited feedback, re-fetch immediately and process it before waiting for more CI events.
 
-Track wall-clock elapsed time since the last commit was pushed. If `CI_TIMEOUT` minutes elapse with no terminal CI event, ask the user whether to keep waiting or abort. If the subscription appears dropped (no events for an extended period), re-call `mcp__github__subscribe_pr_activity` (idempotent) and continue.
+Track wall-clock elapsed time since the last commit was pushed. If `CI_TIMEOUT` minutes elapse with no terminal CI event, **abort the loop** — record `ci_timeout` in the final summary and jump to Step 7. Do not prompt the user. If the subscription appears dropped (no events for an extended period but `CI_TIMEOUT` has not elapsed), re-call `mcp__github__subscribe_pr_activity` (idempotent) and continue.
 
-**5g. Re-fetch state and check for fixed point.** Re-run Step 3's MCP calls. Filter out threads whose ID is in `ADDRESSED_THREAD_IDS` and PR-level feedback whose key is in `REPLIED_ITEM_KEYS`. For each item in `REJECTED_ITEMS`, suppress it **only if** its latest reviewer marker still matches the value recorded at rejection; if a later reviewer reply exists, remove the item from `REJECTED_ITEMS` and treat it as fresh feedback to re-evaluate in Step 4. If the merged state has a non-empty `errors` list, do **not** declare a fixed point — report the fetch failures and retry after 30 seconds.
+**5g. Re-fetch state and check for fixed point.** Re-run Step 3's MCP calls. Filter out threads whose ID is in `ADDRESSED_THREAD_IDS` and PR-level feedback whose key is in `REPLIED_ITEM_KEYS`. For each item in `OUTCOME_MARKERS`, suppress it **only if** its latest reviewer marker still matches the value recorded at the prior REJECT/DEFER outcome; if a later reviewer reply exists, remove the item from `OUTCOME_MARKERS` and treat it as fresh feedback to re-evaluate in Step 4. If the merged state has a non-empty `errors` list, do **not** declare a fixed point — report the fetch failures and retry after 30 seconds.
 
 **Fixed point reached** if:
 - `ci_failures` is empty after filtering out `cancelled` (the only non-success conclusion treated as informational). Any remaining entry — including `timed_out`, `startup_failure`, `action_required`, and non-`github-actions` `failure` — blocks convergence and is reported to the user.
@@ -246,7 +302,7 @@ Track wall-clock elapsed time since the last commit was pushed. If `CI_TIMEOUT` 
 
 → Proceed to Step 6.
 
-**Stale loop detected** if the same CI checks are failing with similar error patterns as the previous iteration → report to user, ask whether to continue or stop.
+**Stale loop detected** if the same CI checks are failing with similar error patterns as the previous iteration → record `stale_loop` in the final summary and jump to Step 7. Do not prompt the user. The same applies if `BLOCKED_ITEMS` keeps the same entries across two consecutive iterations with no progress.
 
 **New issues found** → run Step 4 (evaluate new feedback) and continue the loop.
 
@@ -260,7 +316,7 @@ Wait for `<github-webhook-activity>` events from the still-active subscription. 
 
 ### Step 7: Final Summary and Cleanup
 
-Call `mcp__github__unsubscribe_pr_activity` with `{owner, repo, pullNumber}` to clean up the subscription, regardless of how the loop exited (fixed point, stale loop, user abort, monitoring timeout).
+Call `mcp__github__unsubscribe_pr_activity` with `{owner, repo, pullNumber}` to clean up the subscription, regardless of how the loop exited (fixed point, stale loop, CI timeout, rebase abort, push failure, monitoring timeout).
 
 Then print:
 
@@ -269,26 +325,43 @@ Then print:
 
 ### PR: #<number> — <title>
 ### Iterations: N
+### Exit reason: fixed-point | stale-loop | ci-timeout | rebase-conflict | push-failure | monitoring-timeout
 
-### Changes Made
+### Changes Made (FIX outcomes)
 | Iteration | Commit | Fixes Applied | Replies Posted |
 |-----------|--------|---------------|----------------|
 | 1 | abc123 | Fixed lint error in foo.ts, addressed review on bar.ts | @reviewer fixed thread in bar.ts via abc123 |
 | 2 | def456 | Fixed test failure in baz_test.py | n/a |
 
-### Rejected Feedback
+### Deferred Feedback (DEFER outcomes — issue filed)
+| Feedback | Category | Tracking Issue | Reply |
+|----------|----------|----------------|-------|
+| @reviewer on file.ts:42 | scope-creep | #123 | Posted DEFER reply with link |
+| @reviewer (review summary) | diminishing-returns | #124 | Posted DEFER reply with link |
+| @reviewer on util.ts:88 | scope-creep | _none — issue creation failed_ | Posted DEFER reply with TODO note |
+
+### Rejected Feedback (REJECT outcomes — no change, no issue)
 | Feedback | Category | Reason | Reply |
 |----------|----------|--------|-------|
-| @reviewer on file.ts:42 | scope-creep | Retry logic is valid but out of scope | Posted no-change rationale |
+| @reviewer on file.ts:42 | not-an-issue | Code is correct as-is | Posted no-change rationale |
+
+### Blocked Items (FIX attempted but pre-commit failed)
+| Item | Pre-commit failure | Tracking Issue |
+|------|--------------------|----------------|
+| @reviewer on parser.ts:201 | type-check: tsc TS2322 | #125 |
 
 ### Current Status
-- CI: All passing / N failures remaining
-- Reviewer feedback: All answered / M items still missing replies
+- CI: All passing / N failures remaining (list each: name, conclusion, log link)
+- Reviewer feedback: All answered / M items still missing replies (list each)
+- Issue creation failures: 0 / K (each requires manual filing — see Deferred table)
 ```
 
-If CI failures or unanswered feedback remain, ask if the user wants further attempts. If everything is resolved: **"PR is ready for re-review."**
+Do **not** ask the user anything at the end. The skill exits unconditionally after printing the summary:
+
+- Exit reason `fixed-point` (and CI green, all feedback answered): print **"PR is ready for re-review."**
+- Any other exit reason: print **"Autofix exited without converging — see summary above for required follow-up."** Do not loop again, do not prompt.
 
 ## References
 
-- **`references/api-patterns.md`** — MCP tool signatures, expected response shapes, supersession algorithm, push handling, log-fetching gap
-- **`references/comment-evaluation.md`** — Full evaluation prompt templates, decision matrix, rejection taxonomy, ambiguity handling
+- **`references/api-patterns.md`** — MCP tool signatures, expected response shapes, supersession algorithm, push and rebase handling, issue-creation flow, log-fetching gap
+- **`references/comment-evaluation.md`** — Full evaluation prompt templates, FIX/DEFER/REJECT decision matrix, DEFER and REJECT taxonomies, ambiguity-to-DEFER policy
