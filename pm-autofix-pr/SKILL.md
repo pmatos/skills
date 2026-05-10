@@ -288,7 +288,7 @@ After this conversion, every blocked item has an explicit PR reply and (best-eff
 
 **5d. Push the iteration's commits.** After 5b finishes, decide whether there is anything to push without depending on undefined refs:
 
-- If `COMMITTED_ITEMS` is empty for this iteration **and** `BLOCKED_ITEMS` is empty (so 5a' didn't post any DEFER replies that themselves landed as PR comments needing no commits), there is nothing to push — skip to 5f.
+- If `COMMITTED_ITEMS` is empty for this iteration (no FIX produced a commit), there is nothing to push — **skip directly to Step 5g** (re-fetch and check fixed point), **not** 5f. An iteration that only emits REJECT replies, DEFER replies, or `automated-fix-failed` DEFER conversions creates no new commits and therefore no new CI events, so waiting for CI in 5f would just spin until `CI_TIMEOUT` and exit as a failure even when we have actually reached the fixed point.
 - Otherwise, push:
   - If the branch has an upstream (`git rev-parse --abbrev-ref --symbolic-full-name @{u}` exits 0), run `git push`.
   - If the branch has no upstream yet (first push of this branch — common for a freshly-created PR), run `git push -u origin <head.ref>` using the branch name captured in Step 1. Do **not** consult any base-branch ref; the upstream gets set during this push.
