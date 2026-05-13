@@ -20,14 +20,16 @@ Treat "Can I reach the user right now?" as the deciding factor. If you cannot, y
 
 ## Phase 1 — Resolve the Issue Number
 
-Set `$ARGUMENTS` from the invocation. Strip an optional leading `#` (the description advertises triggers like `investigate #N`, so users may pass `#123` as well as `123`). If the result parses as a positive integer, that is the issue number:
+Set `$ARGUMENTS` from the invocation. Strip an optional leading `#` (the description advertises triggers like `investigate #N`, so users may pass `#123` as well as `123`). If the result parses as a positive integer, that is the issue number — and **remember that it came from explicit user input** (used later to decide whether a `gh issue view` failure should abort vs. retry):
 
 ```bash
 ARG="${ARGUMENTS:-}"
 ARG="${ARG#\#}"   # accept "#123" as well as "123"
 ISSUE=""
+ISSUE_SOURCE=""   # "argument" | "branch" | "" (none)
 if [[ "$ARG" =~ ^[0-9]+$ ]]; then
   ISSUE="$ARG"
+  ISSUE_SOURCE="argument"
 fi
 ```
 
@@ -60,23 +62,47 @@ if [[ -z "$ISSUE" ]]; then
   # `fix` alternative inside the word and silently extract a version digit.
   if [[ "$LBRANCH" =~ (^|[-/_])(issue|gh|fix|bugfix|bug|feature|feat)[-/_]?([0-9]+) ]]; then
     ISSUE="${BASH_REMATCH[3]}"
+    ISSUE_SOURCE="branch"
   else
     # Rule 2: fall back only if the branch contains exactly one integer.
     NUMS="$(printf '%s' "$BRANCH" | grep -oE '[0-9]+')"
     if [[ "$(printf '%s\n' "$NUMS" | grep -c .)" == "1" ]]; then
       ISSUE="$NUMS"
+      ISSUE_SOURCE="branch"
     fi
   fi
 fi
 ```
 
-Then verify the candidate exists as an open issue before committing to it — a number that happens to be a valid issue is still safer than one that isn't, but the named-slot rule should already have anchored the choice:
+Then verify the candidate exists as a real issue before committing to it. Be careful here: `gh issue view` exits nonzero for **two very different** reasons — "issue does not exist" and "I could not reach GitHub" (missing auth, network failure, rate limit, API error). Treating both the same way silently nukes an explicitly-passed `/investigate 123` and surfaces a misleading "no issue number" message when the real blocker is `gh`. Distinguish them:
 
 ```bash
-if [[ -n "$ISSUE" ]] && ! gh issue view "$ISSUE" --json number >/dev/null 2>&1; then
-  ISSUE=""
+if [[ -n "$ISSUE" ]]; then
+  GH_ERR="$(gh issue view "$ISSUE" --json number 2>&1 >/dev/null)"
+  GH_EXIT=$?
+  if (( GH_EXIT != 0 )); then
+    if printf '%s' "$GH_ERR" | grep -qE 'Could not resolve|Not Found|HTTP 404'; then
+      # Truly does not exist.
+      if [[ "$ISSUE_SOURCE" == "argument" ]]; then
+        echo "investigate: issue #$ISSUE does not exist in this repo." >&2
+        exit 1
+      else
+        ISSUE=""           # only ever silently clear a branch-inferred guess
+        ISSUE_SOURCE=""
+      fi
+    else
+      # Auth / network / API failure — surface and abort regardless of source.
+      echo "investigate: 'gh issue view $ISSUE' failed: $GH_ERR" >&2
+      exit 1
+    fi
+  fi
 fi
 ```
+
+Two invariants this enforces:
+
+- An explicit `/investigate <N>` is never silently discarded. If GitHub disagrees (issue doesn't exist), the skill says so directly; if the disagreement is `gh`'s fault (auth/network/etc.), the skill surfaces that error.
+- A branch-inferred guess is only cleared on a confirmed "not found"; any other failure aborts so the user sees the real problem.
 
 Branches with ambiguous numbering (e.g. `release/2.0-issue-123`) hit rule 1 via the `issue` keyword (preceded by `-`) and resolve to `123`. Branches like `dependabot/npm/foo-1.2.3` match no named slot and contain three integers, so rule 2 also fails — the skill falls through to AskUserQuestion (interactive) or the non-interactive failure message. The leading `(^|[-/_])` boundary also keeps names like `hotfix-1.2.3` from matching `fix` inside the keyword `hotfix` and silently extracting `1`. This is the documented "single obvious integer" guarantee.
 
