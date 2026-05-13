@@ -274,13 +274,23 @@ Same as 4A.6 — run the discovered format / lint / type-check / test / build co
 
 ### Step 5.0 — Branch safety guard
 
-**Before any `git add`, `git commit`, or `git push`,** verify the worktree is on a topic branch — never on the repo's default branch (whatever its name) and never in detached HEAD. Resolve the actual default branch from `origin/HEAD` instead of hardcoding `main`/`master`, so repos that use `trunk`, `develop`, or any other default are still protected. Mirror the guard used by the `/cp` skill, extended with the default-branch resolver shared with `/wigo`:
+**Before any `git add`, `git commit`, or `git push`,** verify the worktree is on a topic branch — never on the repo's default branch (whatever its name) and never in detached HEAD. Resolve the actual default branch from **whichever remote the branch will eventually push to** — `origin/HEAD` is *not* enough on fork-only checkouts where the only remote is `upstream`. Use the same remote-resolution logic Phase 6 uses, so the guard and the push agree on which remote is canonical:
 
 ```bash
 BRANCH="$(git branch --show-current)"
 
-# Resolve the repo's actual default branch.
-DEFAULT_BRANCH=$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's|refs/remotes/origin/||')
+# Pick the remote whose HEAD defines the default branch.
+# 1. Prefer the branch's configured push remote (set by `git push -u` or branch.<name>.remote).
+# 2. Otherwise fall back to the first configured remote (often the only one — `origin` or `upstream`).
+REMOTE=$(git config --get "branch.$BRANCH.remote" 2>/dev/null)
+if [[ -z "$REMOTE" ]]; then
+  REMOTE=$(git remote | head -1)
+fi
+: "${REMOTE:=origin}"   # tolerate `git remote` returning nothing
+
+# Resolve the default branch on that remote.
+DEFAULT_BRANCH=$(git symbolic-ref "refs/remotes/$REMOTE/HEAD" 2>/dev/null \
+  | sed "s|refs/remotes/$REMOTE/||")
 if [[ -z "$DEFAULT_BRANCH" ]]; then
   if git show-ref --verify --quiet refs/heads/main 2>/dev/null; then
     DEFAULT_BRANCH=main
@@ -295,7 +305,7 @@ if [[ -z "$BRANCH" || ( -n "$DEFAULT_BRANCH" && "$BRANCH" == "$DEFAULT_BRANCH" )
 fi
 ```
 
-If `$DEFAULT_BRANCH` cannot be resolved (no `origin/HEAD`, no `main`, no `master`), still refuse detached HEAD but allow other branches through — there is no reliable default to compare against.
+If `$DEFAULT_BRANCH` cannot be resolved (no `<remote>/HEAD`, no `main`, no `master`), still refuse detached HEAD but allow other branches through — there is no reliable default to compare against.
 
 Action:
 
@@ -443,5 +453,5 @@ After the PR is open:
 | Bug cannot be reproduced                                                   | Interactive: ask. Non-interactive: comment on the issue with what was tried and exit.                   |
 | Feature is ambiguous, non-interactive                                      | Exit: `investigate: feature request #<N> is ambiguous and cannot be designed non-interactively. Provide more details or run interactively.` |
 | Pre-commit hook fails                                                      | Fix the underlying issue; create a new commit. Never `--no-verify`.                                     |
-| On the repo's default branch (resolved from `origin/HEAD`) or detached HEAD at Phase 5 | Interactive: ask which topic branch to switch to. Non-interactive: exit with `investigate: refusing to commit/push from '<BRANCH-or-detached>'. Re-run on a topic branch (e.g. issue<N>) or pass the branch explicitly.` |
+| On the repo's default branch (resolved from the branch's tracking remote or the first configured remote) or detached HEAD at Phase 5 | Interactive: ask which topic branch to switch to. Non-interactive: exit with `investigate: refusing to commit/push from '<BRANCH-or-detached>'. Re-run on a topic branch (e.g. issue<N>) or pass the branch explicitly.` |
 | Validation (tests/lint/etc.) cannot be made green within reasonable effort | Surface to user (interactive) or comment on the issue + exit (non-interactive). Do not open the PR.     |
