@@ -332,7 +332,22 @@ REMOTE="$(resolve_push_remote "$BRANCH")"
 DEFAULT_BRANCH=$(git symbolic-ref "refs/remotes/$REMOTE/HEAD" 2>/dev/null \
   | sed "s|refs/remotes/$REMOTE/||")
 if [[ -z "$DEFAULT_BRANCH" ]]; then
-  DEFAULT_BRANCH=$(gh repo view --json defaultBranchRef -q .defaultBranchRef.name 2>/dev/null)
+  # gh repo view with no argument resolves to the current directory's repo
+  # (typically origin), which may not match $REMOTE in fork-style checkouts.
+  # Derive owner/repo from $REMOTE's URL so gh queries the same repo Phase 6
+  # will push to. Handles the common URL forms:
+  #   git@github.com:OWNER/REPO[.git]
+  #   https://github.com/OWNER/REPO[.git]
+  #   ssh://git@github.com/OWNER/REPO[.git]
+  REMOTE_URL=$(git remote get-url "$REMOTE" 2>/dev/null)
+  if [[ -n "$REMOTE_URL" ]]; then
+    REMOTE_REPO=$(printf '%s' "$REMOTE_URL" | sed -E \
+      -e 's|^git@[^:]+:||' \
+      -e 's|^ssh://[^@]+@[^/]+/||' \
+      -e 's|^https?://[^/]+/||' \
+      -e 's|\.git/*$||')
+    DEFAULT_BRANCH=$(gh repo view "$REMOTE_REPO" --json defaultBranchRef -q .defaultBranchRef.name 2>/dev/null)
+  fi
 fi
 if [[ -z "$DEFAULT_BRANCH" ]]; then
   if git show-ref --verify --quiet refs/heads/main 2>/dev/null; then
