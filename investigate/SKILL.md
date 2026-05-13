@@ -274,19 +274,34 @@ Same as 4A.6 — run the discovered format / lint / type-check / test / build co
 
 ### Step 5.0 — Branch safety guard
 
-**Before any `git add`, `git commit`, or `git push`,** verify the worktree is on a topic branch — never on the repo's default branch (whatever its name) and never in detached HEAD. Resolve the actual default branch from **whichever remote the branch will eventually push to** — `origin/HEAD` is *not* enough on fork-only checkouts where the only remote is `upstream`. Use the same remote-resolution logic Phase 6 uses, so the guard and the push agree on which remote is canonical:
+**Before any `git add`, `git commit`, or `git push`,** verify the worktree is on a topic branch — never on the repo's default branch (whatever its name) and never in detached HEAD. The guard and Phase 6's push **must** agree on which remote is canonical — otherwise the guard can pass on local `main` against remote A's default while Phase 6 then pushes to remote B, defeating the protection. Define the resolver once here and reuse it verbatim in Phase 6:
 
 ```bash
 BRANCH="$(git branch --show-current)"
 
-# Pick the remote whose HEAD defines the default branch.
-# 1. Prefer the branch's configured push remote (set by `git push -u` or branch.<name>.remote).
-# 2. Otherwise fall back to the first configured remote (often the only one — `origin` or `upstream`).
-REMOTE=$(git config --get "branch.$BRANCH.remote" 2>/dev/null)
-if [[ -z "$REMOTE" ]]; then
-  REMOTE=$(git remote | head -1)
-fi
-: "${REMOTE:=origin}"   # tolerate `git remote` returning nothing
+# resolve_push_remote: pick the remote Phase 6 will push to.
+# Tried in order; first non-empty wins:
+#   1. the branch's existing upstream (set by a prior `git push -u`)
+#   2. branch.<name>.remote in git config
+#   3. the first configured remote (handles fork-only checkouts where
+#      origin doesn't exist — e.g. only `upstream`)
+#   4. literal "origin" (final fallback when `git remote` is empty)
+resolve_push_remote() {
+  local branch="$1" upstream remote
+  if upstream=$(git rev-parse --abbrev-ref --symbolic-full-name "$branch"@{u} 2>/dev/null) \
+       && [[ -n "$upstream" ]]; then
+    printf '%s' "${upstream%%/*}"; return
+  fi
+  if remote=$(git config --get "branch.$branch.remote" 2>/dev/null) && [[ -n "$remote" ]]; then
+    printf '%s' "$remote"; return
+  fi
+  if remote=$(git remote | head -1) && [[ -n "$remote" ]]; then
+    printf '%s' "$remote"; return
+  fi
+  printf '%s' "origin"
+}
+
+REMOTE="$(resolve_push_remote "$BRANCH")"
 
 # Resolve the default branch on that remote.
 DEFAULT_BRANCH=$(git symbolic-ref "refs/remotes/$REMOTE/HEAD" 2>/dev/null \
@@ -354,21 +369,21 @@ If a pre-commit hook fails, fix the underlying issue and create a **new** commit
 
 ## Phase 6 — Push and Open the PR
 
-Push the branch — respect the branch's existing upstream / configured push remote rather than hardcoding `origin`. This matters for fork workflows (where the branch may already track `upstream` or a fork-named remote) and for repos whose only remote isn't `origin`. Mirror the resolver in `/cp`:
+Push the branch — respect the branch's existing upstream / configured push remote rather than hardcoding `origin`. This matters for fork workflows (where the branch may already track `upstream` or a fork-named remote) and for repos whose only remote isn't `origin`. **Use the same `resolve_push_remote` from Step 5.0** so the guard and the push always pick the same remote:
 
 ```bash
-# Use the existing upstream if the branch has one — no -u, no remote rewrite.
-if UPSTREAM=$(git rev-parse --abbrev-ref --symbolic-full-name "$BRANCH"@{u} 2>/dev/null) && [[ -n "$UPSTREAM" ]]; then
+# If the branch already has an upstream, just push — git uses the existing tracking
+# config, no -u, no remote rewrite. Otherwise resolve the remote with the same chain
+# Step 5.0 used and pass it explicitly with -u so future pushes are bare.
+if git rev-parse --abbrev-ref --symbolic-full-name "$BRANCH"@{u} >/dev/null 2>&1; then
   git push
 else
-  # No upstream yet. Prefer the configured branch.<name>.remote, fall back to origin.
-  REMOTE=$(git config --get "branch.$BRANCH.remote" 2>/dev/null)
-  : "${REMOTE:=origin}"
+  REMOTE="$(resolve_push_remote "$BRANCH")"
   git push -u "$REMOTE" "$BRANCH"
 fi
 ```
 
-Never hardcode `git push -u origin HEAD` — `-u` overrides any existing upstream, so if the branch already tracks a different remote the push silently moves the upstream pointer to `origin`.
+Never hardcode `git push -u origin HEAD` — `-u` overrides any existing upstream, so if the branch already tracks a different remote the push silently moves the upstream pointer to `origin`. And never use a different resolver from Step 5.0; the two must stay in lockstep so the default-branch guard cannot pass against remote A while the push lands on remote B.
 
 Open a PR with `gh pr create`. The PR body **must** contain a closing keyword so GitHub auto-closes the issue when the PR merges — use one of:
 
