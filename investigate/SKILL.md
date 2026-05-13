@@ -31,32 +31,51 @@ if [[ "$ARG" =~ ^[0-9]+$ ]]; then
 fi
 ```
 
-If `$ISSUE` is empty, **try to infer** from the current branch name. Match against common patterns (case-insensitive):
+If `$ISSUE` is empty, **try to infer** from the current branch name. Match against common patterns (case-insensitive) — but only if the integer is **unambiguously** the issue number. Branches like `release/2.0-issue-123` or `dependabot/npm/foo-1.2.3` contain version numbers that must not be misread as issue references.
 
-| Branch pattern                | Extracted integer |
-|-------------------------------|-------------------|
-| `issue123`, `issue-123`, `issue/123` | `123` |
-| `gh-123`, `gh/123`            | `123` |
-| `fix-123`, `fix/123`, `bug-123`, `bugfix-123` | `123` |
-| `feature-123`, `feat-123`, `feature/123` | `123` |
-| `<anything>-123`, `123-<anything>` (single obvious integer) | `123` |
+Rule (apply in order, stop at the first match):
+
+1. **Named-slot match** — the branch contains an explicit issue keyword followed by an integer. Recognised keywords: `issue`, `gh`, `fix`, `bugfix`, `bug`, `feature`, `feat`, with an optional `-`, `_`, or `/` separator. Examples:
+
+   | Branch pattern                              | Extracted integer |
+   |---------------------------------------------|-------------------|
+   | `issue123`, `issue-123`, `issue/123`        | `123` |
+   | `gh-123`, `gh/123`                          | `123` |
+   | `fix-123`, `fix/123`, `bug-123`, `bugfix-123` | `123` |
+   | `feature-123`, `feat-123`, `feature/123`    | `123` |
+
+   The named keyword anchors the extraction so other integers in the branch (semver components, dates, dependency versions) are ignored.
+
+2. **Single-obvious-integer fallback** — only if rule 1 found nothing. Accept the integer **only when exactly one integer is present in the entire branch name**. If the branch contains zero or more than one integer, this rule does not match and `$ISSUE` stays empty.
 
 Implementation:
 
 ```bash
 BRANCH="$(git branch --show-current)"
 if [[ -z "$ISSUE" ]]; then
-  ISSUE="$(printf '%s' "$BRANCH" | grep -oE '[0-9]+' | head -1)"
+  LBRANCH="$(printf '%s' "$BRANCH" | tr '[:upper:]' '[:lower:]')"
+  # Rule 1: named-slot keyword followed by an integer.
+  if [[ "$LBRANCH" =~ (issue|gh|fix|bugfix|bug|feature|feat)[-/_]?([0-9]+) ]]; then
+    ISSUE="${BASH_REMATCH[2]}"
+  else
+    # Rule 2: fall back only if the branch contains exactly one integer.
+    NUMS="$(printf '%s' "$BRANCH" | grep -oE '[0-9]+')"
+    if [[ "$(printf '%s\n' "$NUMS" | grep -c .)" == "1" ]]; then
+      ISSUE="$NUMS"
+    fi
+  fi
 fi
 ```
 
-Use the *first* integer found as a best-effort guess, but verify it exists as an issue before committing to it:
+Then verify the candidate exists as an open issue before committing to it — a number that happens to be a valid issue is still safer than one that isn't, but the named-slot rule should already have anchored the choice:
 
 ```bash
 if [[ -n "$ISSUE" ]] && ! gh issue view "$ISSUE" --json number >/dev/null 2>&1; then
   ISSUE=""
 fi
 ```
+
+Branches with ambiguous numbering (e.g. `release/2.0-issue-123`) hit rule 1 via the `issue` keyword and resolve to `123`. Branches like `dependabot/npm/foo-1.2.3` match no named slot and contain three integers, so rule 2 also fails — the skill falls through to AskUserQuestion (interactive) or the non-interactive failure message. This is the documented "single obvious integer" guarantee.
 
 If `$ISSUE` is still empty:
 
