@@ -20,10 +20,11 @@ Treat "Can I reach the user right now?" as the deciding factor. If you cannot, y
 
 ## Phase 1 — Resolve the Issue Number
 
-Set `$ARGUMENTS` from the invocation. If it parses as a positive integer, that is the issue number:
+Set `$ARGUMENTS` from the invocation. Strip an optional leading `#` (the description advertises triggers like `investigate #N`, so users may pass `#123` as well as `123`). If the result parses as a positive integer, that is the issue number:
 
 ```bash
 ARG="${ARGUMENTS:-}"
+ARG="${ARG#\#}"   # accept "#123" as well as "123"
 ISSUE=""
 if [[ "$ARG" =~ ^[0-9]+$ ]]; then
   ISSUE="$ARG"
