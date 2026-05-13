@@ -318,8 +318,22 @@ resolve_push_remote() {
 REMOTE="$(resolve_push_remote "$BRANCH")"
 
 # Resolve the default branch on that remote.
+# 1. Local symref: refs/remotes/<remote>/HEAD — present after `git clone`, but
+#    *missing* after `git remote add` + manual fetch unless the user ran
+#    `git remote set-head` afterwards.
+# 2. Remote-aware: `gh repo view --json defaultBranchRef`. This is the
+#    authoritative source for a GitHub repo and handles the `trunk`/`develop`
+#    case when the local symref is absent. Tolerates `gh` not being
+#    authenticated by quietly returning empty.
+# 3. Local heuristic: `main` or `master` if they exist as heads. This is
+#    a last resort and intentionally does NOT include `trunk`/`develop` —
+#    if the user has those locally but no remote signal, treat the default
+#    as unresolved rather than guess.
 DEFAULT_BRANCH=$(git symbolic-ref "refs/remotes/$REMOTE/HEAD" 2>/dev/null \
   | sed "s|refs/remotes/$REMOTE/||")
+if [[ -z "$DEFAULT_BRANCH" ]]; then
+  DEFAULT_BRANCH=$(gh repo view --json defaultBranchRef -q .defaultBranchRef.name 2>/dev/null)
+fi
 if [[ -z "$DEFAULT_BRANCH" ]]; then
   if git show-ref --verify --quiet refs/heads/main 2>/dev/null; then
     DEFAULT_BRANCH=main
@@ -334,7 +348,7 @@ if [[ -z "$BRANCH" || ( -n "$DEFAULT_BRANCH" && "$BRANCH" == "$DEFAULT_BRANCH" )
 fi
 ```
 
-If `$DEFAULT_BRANCH` cannot be resolved (no `<remote>/HEAD`, no `main`, no `master`), still refuse detached HEAD but allow other branches through — there is no reliable default to compare against.
+If `$DEFAULT_BRANCH` cannot be resolved at all (no `<remote>/HEAD`, no `gh` answer, no local `main`/`master`), still refuse detached HEAD but allow other branches through — there is no reliable default to compare against, and forcing the user to set one would block legitimate first-commit scenarios.
 
 Action:
 
@@ -486,5 +500,5 @@ After the PR is open:
 | Bug cannot be reproduced                                                   | Interactive: ask. Non-interactive: comment on the issue with what was tried and exit.                   |
 | Feature is ambiguous, non-interactive                                      | Exit: `investigate: feature request #<N> is ambiguous and cannot be designed non-interactively. Provide more details or run interactively.` |
 | Pre-commit hook fails                                                      | Fix the underlying issue; create a new commit. Never `--no-verify`.                                     |
-| On the repo's default branch (resolved by `resolve_push_remote`: branch upstream → `branch.<name>.remote` → first configured remote → `origin`) or detached HEAD at Phase 5 | Interactive: ask which topic branch to switch to. Non-interactive: exit with `investigate: refusing to commit/push from '<BRANCH-or-detached>'. Re-run on a topic branch (e.g. issue<N>) or pass the branch explicitly.` |
+| On the repo's default branch (resolved by `<remote>/HEAD` → `gh repo view` → local `main`/`master`; remote chosen by `resolve_push_remote`: upstream → `branch.<name>.remote` → first remote → `origin`) or detached HEAD at Phase 5 | Interactive: ask which topic branch to switch to. Non-interactive: exit with `investigate: refusing to commit/push from '<BRANCH-or-detached>'. Re-run on a topic branch (e.g. issue<N>) or pass the branch explicitly.` |
 | Validation (tests/lint/etc.) cannot be made green within reasonable effort | Surface to user (interactive) or comment on the issue + exit (non-interactive). Do not open the PR.     |
