@@ -55,8 +55,11 @@ BRANCH="$(git branch --show-current)"
 if [[ -z "$ISSUE" ]]; then
   LBRANCH="$(printf '%s' "$BRANCH" | tr '[:upper:]' '[:lower:]')"
   # Rule 1: named-slot keyword followed by an integer.
-  if [[ "$LBRANCH" =~ (issue|gh|fix|bugfix|bug|feature|feat)[-/_]?([0-9]+) ]]; then
-    ISSUE="${BASH_REMATCH[2]}"
+  # Anchor the keyword to the start of the branch or to a path separator
+  # (-, _, /) so names like `hotfix-1.2.3` or `prefix-123` cannot match the
+  # `fix` alternative inside the word and silently extract a version digit.
+  if [[ "$LBRANCH" =~ (^|[-/_])(issue|gh|fix|bugfix|bug|feature|feat)[-/_]?([0-9]+) ]]; then
+    ISSUE="${BASH_REMATCH[3]}"
   else
     # Rule 2: fall back only if the branch contains exactly one integer.
     NUMS="$(printf '%s' "$BRANCH" | grep -oE '[0-9]+')"
@@ -75,7 +78,7 @@ if [[ -n "$ISSUE" ]] && ! gh issue view "$ISSUE" --json number >/dev/null 2>&1; 
 fi
 ```
 
-Branches with ambiguous numbering (e.g. `release/2.0-issue-123`) hit rule 1 via the `issue` keyword and resolve to `123`. Branches like `dependabot/npm/foo-1.2.3` match no named slot and contain three integers, so rule 2 also fails — the skill falls through to AskUserQuestion (interactive) or the non-interactive failure message. This is the documented "single obvious integer" guarantee.
+Branches with ambiguous numbering (e.g. `release/2.0-issue-123`) hit rule 1 via the `issue` keyword (preceded by `-`) and resolve to `123`. Branches like `dependabot/npm/foo-1.2.3` match no named slot and contain three integers, so rule 2 also fails — the skill falls through to AskUserQuestion (interactive) or the non-interactive failure message. The leading `(^|[-/_])` boundary also keeps names like `hotfix-1.2.3` from matching `fix` inside the keyword `hotfix` and silently extracting `1`. This is the documented "single obvious integer" guarantee.
 
 If `$ISSUE` is still empty:
 
