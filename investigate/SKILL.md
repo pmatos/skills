@@ -344,11 +344,21 @@ If a pre-commit hook fails, fix the underlying issue and create a **new** commit
 
 ## Phase 6 — Push and Open the PR
 
-Push the branch (set upstream on first push):
+Push the branch — respect the branch's existing upstream / configured push remote rather than hardcoding `origin`. This matters for fork workflows (where the branch may already track `upstream` or a fork-named remote) and for repos whose only remote isn't `origin`. Mirror the resolver in `/cp`:
 
 ```bash
-git push -u origin HEAD
+# Use the existing upstream if the branch has one — no -u, no remote rewrite.
+if UPSTREAM=$(git rev-parse --abbrev-ref --symbolic-full-name "$BRANCH"@{u} 2>/dev/null) && [[ -n "$UPSTREAM" ]]; then
+  git push
+else
+  # No upstream yet. Prefer the configured branch.<name>.remote, fall back to origin.
+  REMOTE=$(git config --get "branch.$BRANCH.remote" 2>/dev/null)
+  : "${REMOTE:=origin}"
+  git push -u "$REMOTE" "$BRANCH"
+fi
 ```
+
+Never hardcode `git push -u origin HEAD` — `-u` overrides any existing upstream, so if the branch already tracks a different remote the push silently moves the upstream pointer to `origin`.
 
 Open a PR with `gh pr create`. The PR body **must** contain a closing keyword so GitHub auto-closes the issue when the PR merges — use one of:
 
