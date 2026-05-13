@@ -48,7 +48,12 @@ Rule (apply in order, stop at the first match):
 
    The named keyword anchors the extraction so other integers in the branch (semver components, dates, dependency versions) are ignored.
 
-2. **Single-obvious-integer fallback** — only if rule 1 found nothing. Accept the integer **only when exactly one integer is present in the entire branch name**. If the branch contains zero or more than one integer, this rule does not match and `$ISSUE` stays empty.
+2. **Single-obvious-integer fallback** — only if rule 1 found nothing. Accept the integer **only when both** of these hold:
+
+   - exactly one integer is present in the entire branch name, and
+   - that integer sits on a path-segment boundary (start of branch, or after `-` / `_` / `/`, and either at end of branch or before `-` / `_` / `/`).
+
+   The boundary requirement rejects branches like `pr2024`, where the integer is glued to leading letters — without it, a coincidentally-real issue #2024 would be picked up silently because `gh issue view` only validates existence, not provenance. If the branch contains zero or more than one integer, or the lone integer is not boundary-anchored, this rule does not match and `$ISSUE` stays empty.
 
 Implementation:
 
@@ -64,9 +69,15 @@ if [[ -z "$ISSUE" ]]; then
     ISSUE="${BASH_REMATCH[3]}"
     ISSUE_SOURCE="branch"
   else
-    # Rule 2: fall back only if the branch contains exactly one integer.
+    # Rule 2: fall back only if the branch contains exactly one integer AND
+    # that integer sits on a path-segment boundary (start of branch, after
+    # `-` / `_` / `/`, and either at end or before `-` / `_` / `/`).
+    # The boundary check rejects branches like `pr2024` where the integer
+    # is glued to leading/trailing letters — otherwise `gh issue view`
+    # would accept any coincidentally-real issue number with that value.
     NUMS="$(printf '%s' "$BRANCH" | grep -oE '[0-9]+')"
-    if [[ "$(printf '%s\n' "$NUMS" | grep -c .)" == "1" ]]; then
+    if [[ "$(printf '%s\n' "$NUMS" | grep -c .)" == "1" ]] \
+        && [[ "$BRANCH" =~ (^|[-/_])"$NUMS"([-/_]|$) ]]; then
       ISSUE="$NUMS"
       ISSUE_SOURCE="branch"
     fi
@@ -104,7 +115,7 @@ Two invariants this enforces:
 - An explicit `/investigate <N>` is never silently discarded. If GitHub disagrees (issue doesn't exist), the skill says so directly; if the disagreement is `gh`'s fault (auth/network/etc.), the skill surfaces that error.
 - A branch-inferred guess is only cleared on a confirmed "not found"; any other failure aborts so the user sees the real problem.
 
-Branches with ambiguous numbering (e.g. `release/2.0-issue-123`) hit rule 1 via the `issue` keyword (preceded by `-`) and resolve to `123`. Branches like `dependabot/npm/foo-1.2.3` match no named slot and contain three integers, so rule 2 also fails — the skill falls through to AskUserQuestion (interactive) or the non-interactive failure message. The leading `(^|[-/_])` boundary also keeps names like `hotfix-1.2.3` from matching `fix` inside the keyword `hotfix` and silently extracting `1`. This is the documented "single obvious integer" guarantee.
+Branches with ambiguous numbering (e.g. `release/2.0-issue-123`) hit rule 1 via the `issue` keyword (preceded by `-`) and resolve to `123`. Branches like `dependabot/npm/foo-1.2.3` match no named slot and contain three integers, so rule 2 also fails — the skill falls through to AskUserQuestion (interactive) or the non-interactive failure message. The leading `(^|[-/_])` boundary on rule 1 also keeps names like `hotfix-1.2.3` from matching `fix` inside the keyword `hotfix` and silently extracting `1`. And the path-segment boundary requirement on rule 2 keeps names like `pr2024` from being misread as issue `2024` just because `gh issue view` happens to find a real issue with that number. This is the documented "single obvious integer" guarantee.
 
 If `$ISSUE` is still empty:
 
@@ -283,8 +294,11 @@ BRANCH="$(git branch --show-current)"
 # Tried in order; first non-empty wins:
 #   1. the branch's existing upstream (set by a prior `git push -u`)
 #   2. branch.<name>.remote in git config
-#   3. the first configured remote (handles fork-only checkouts where
-#      origin doesn't exist — e.g. only `upstream`)
+#   3. `git remote | head -1` — the alphabetically-first configured remote.
+#      Deterministic only when there is exactly one remote (the common
+#      fork-only case, e.g. only `upstream`); on multi-remote checkouts it
+#      picks whatever sorts first, which may or may not be the one the user
+#      intends. We use it as a best-effort guess.
 #   4. literal "origin" (final fallback when `git remote` is empty)
 resolve_push_remote() {
   local branch="$1" upstream remote
@@ -372,13 +386,17 @@ If a pre-commit hook fails, fix the underlying issue and create a **new** commit
 Push the branch — respect the branch's existing upstream / configured push remote rather than hardcoding `origin`. This matters for fork workflows (where the branch may already track `upstream` or a fork-named remote) and for repos whose only remote isn't `origin`. **Use the same `resolve_push_remote` from Step 5.0** so the guard and the push always pick the same remote:
 
 ```bash
-# If the branch already has an upstream, just push — git uses the existing tracking
-# config, no -u, no remote rewrite. Otherwise resolve the remote with the same chain
-# Step 5.0 used and pass it explicitly with -u so future pushes are bare.
-if git rev-parse --abbrev-ref --symbolic-full-name "$BRANCH"@{u} >/dev/null 2>&1; then
+# Resolver returns the right remote in both cases (existing upstream OR first
+# push). We only need a second piece of info: is the branch's upstream already
+# configured? `branch.<name>.merge` is set iff the branch has an upstream, so
+# checking that config key is a cheap, parse-free proxy and avoids re-running
+# the same `@{u}` lookup the resolver already did internally.
+REMOTE="$(resolve_push_remote "$BRANCH")"
+if git config --get "branch.$BRANCH.merge" >/dev/null 2>&1; then
+  # Upstream already configured — bare push uses the existing tracking, no -u.
   git push
 else
-  REMOTE="$(resolve_push_remote "$BRANCH")"
+  # First push of this branch — set the upstream explicitly via -u.
   git push -u "$REMOTE" "$BRANCH"
 fi
 ```
@@ -468,5 +486,5 @@ After the PR is open:
 | Bug cannot be reproduced                                                   | Interactive: ask. Non-interactive: comment on the issue with what was tried and exit.                   |
 | Feature is ambiguous, non-interactive                                      | Exit: `investigate: feature request #<N> is ambiguous and cannot be designed non-interactively. Provide more details or run interactively.` |
 | Pre-commit hook fails                                                      | Fix the underlying issue; create a new commit. Never `--no-verify`.                                     |
-| On the repo's default branch (resolved from the branch's tracking remote or the first configured remote) or detached HEAD at Phase 5 | Interactive: ask which topic branch to switch to. Non-interactive: exit with `investigate: refusing to commit/push from '<BRANCH-or-detached>'. Re-run on a topic branch (e.g. issue<N>) or pass the branch explicitly.` |
+| On the repo's default branch (resolved by `resolve_push_remote`: branch upstream → `branch.<name>.remote` → first configured remote → `origin`) or detached HEAD at Phase 5 | Interactive: ask which topic branch to switch to. Non-interactive: exit with `investigate: refusing to commit/push from '<BRANCH-or-detached>'. Re-run on a topic branch (e.g. issue<N>) or pass the branch explicitly.` |
 | Validation (tests/lint/etc.) cannot be made green within reasonable effort | Surface to user (interactive) or comment on the issue + exit (non-interactive). Do not open the PR.     |
