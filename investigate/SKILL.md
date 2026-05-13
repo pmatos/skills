@@ -243,6 +243,30 @@ Same as 4A.6 — run the discovered format / lint / type-check / test / build co
 
 ## Phase 5 — Commit
 
+### Step 5.0 — Branch safety guard
+
+**Before any `git add`, `git commit`, or `git push`,** verify the worktree is on a topic branch — never on the repo's default branch and never in detached HEAD. Mirror the guard used by the `/cp` skill:
+
+```bash
+BRANCH="$(git branch --show-current)"
+if [[ -z "$BRANCH" || "$BRANCH" == "main" || "$BRANCH" == "master" ]]; then
+  # Refuse to commit/push from the default branch or detached HEAD.
+  : # see action table below
+fi
+```
+
+Action:
+
+- **Interactive**: ask the user (AskUserQuestion) which topic branch to use. If they name an existing branch, `git switch <name>`; if they name a new one, `git switch -c <name>`. Then re-enter Phase 5 on the new branch.
+- **Non-interactive**: fail with exactly this message and exit without committing or pushing:
+  ```
+  investigate: refusing to commit/push from '<BRANCH-or-detached>'. Re-run on a topic branch (e.g. issue<N>) or pass the branch explicitly.
+  ```
+
+This guard protects against the common case of `/investigate` being invoked while the user is still on `main` after the last PR merged — without it, Phases 5 and 6 would commit and push straight to the default branch.
+
+### Step 5.1 — Commit
+
 Study the repo's existing commit style:
 
 ```bash
@@ -367,4 +391,5 @@ After the PR is open:
 | Bug cannot be reproduced                                                   | Interactive: ask. Non-interactive: comment on the issue with what was tried and exit.                   |
 | Feature is ambiguous, non-interactive                                      | Exit: `investigate: feature request #<N> is ambiguous and cannot be designed non-interactively. Provide more details or run interactively.` |
 | Pre-commit hook fails                                                      | Fix the underlying issue; create a new commit. Never `--no-verify`.                                     |
+| On `main`/`master` or detached HEAD at Phase 5                             | Interactive: ask which topic branch to switch to. Non-interactive: exit with `investigate: refusing to commit/push from '<BRANCH-or-detached>'. Re-run on a topic branch (e.g. issue<N>) or pass the branch explicitly.` |
 | Validation (tests/lint/etc.) cannot be made green within reasonable effort | Surface to user (interactive) or comment on the issue + exit (non-interactive). Do not open the PR.     |
