@@ -213,14 +213,14 @@ For non-trivial features (touches multiple modules, introduces new abstractions,
 
 A feature request often leaves design space open. For any genuinely ambiguous decision (data model, API shape, UX, where the feature lives):
 
-- **Interactive**: run `/grill-with-docs` to stress-test the design against the project's existing language, ADRs, and docs. Update the plan with the answers.
+- **Interactive**: stress-test the design with the user. Use `/grill-with-docs` (or the simpler `/grill-me`) if either skill is available in the active session — it walks through ADRs, the project's existing vocabulary, and the decision branches. If neither sibling skill is available (e.g. the skill is installed standalone), fall back to a short interactive design pass: list the open questions, then use AskUserQuestion to resolve each one with the user before writing code. Update the plan with the answers either way.
 - **Non-interactive**: if the design is ambiguous, fail with exactly this message:
   ```
   investigate: feature request #<N> is ambiguous and cannot be designed non-interactively. Provide more details or run interactively.
   ```
   Replace `<N>` with the issue number. Do not guess.
 
-If the request is concrete enough that no design choices remain open (e.g. "add a `--quiet` flag that suppresses progress output"), proceed without grilling.
+If the request is concrete enough that no design choices remain open (e.g. "add a `--quiet` flag that suppresses progress output"), proceed without a design pass.
 
 #### Step 4B.3 — Plan
 
@@ -380,10 +380,10 @@ After the PR is open:
 - **Closing keyword**: every PR body has `Fixes #N` / `Closes #N`.
 - **Authorship**: under `pmatos@igalia.com`, no mention of Claude/AI in commits or PR bodies.
 - **Pre-commit hooks**: fix the underlying issue and create a new commit; never `--no-verify`.
-- **Supporting skills**:
-  - `/pm-plan` — deep, multi-phase planning for non-trivial bugs or features.
-  - `/grill-with-docs` — interactive design stress-test for ambiguous feature decisions.
-  - `/tdd` — red-green-refactor loop when tests are the right vehicle.
+- **Supporting skills** (use if available in the active session; otherwise fall back to the per-step alternative):
+  - `/pm-plan` — deep, multi-phase planning for non-trivial bugs or features. Fallback: write the plan yourself with TaskCreate.
+  - `/grill-with-docs` (or `/grill-me`) — interactive design stress-test for ambiguous feature decisions. Fallback: short AskUserQuestion-driven design pass before implementation.
+  - `/tdd` — red-green-refactor loop when tests are the right vehicle. Fallback: write the test, then the implementation, manually.
 
 ## Failure Modes (Quick Reference)
 
