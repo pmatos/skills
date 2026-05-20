@@ -24,7 +24,7 @@ Every reviewer feedback item must get an explicit reply before the skill can con
 
 ## Core Principle: Never Prompt the User
 
-This skill runs end-to-end without asking the user anything once invoked. There is no "begin fixing?" confirmation, no "ambiguous feedback, how should I handle it?", no "pre-commit failed, retry?", no "stale loop, continue?", no "CI timeout, keep waiting?". Every decision point has a deterministic auto-action defined below; uncertain feedback defaults to DEFER (file an issue and let humans resolve later); unrecoverable conditions exit cleanly with a final summary. The only way the skill stops mid-flight is by reaching the fixed point, hitting a hard precondition failure (missing MCP, missing cross-harness CLI, no PR for the branch), or hitting an unrecoverable error (rebase conflict, persistent push failure). Each exit goes through Step 7's summary.
+This skill runs end-to-end without asking the user anything once invoked. There is no "begin fixing?" confirmation, no "ambiguous feedback, how should I handle it?", no "pre-commit failed, retry?", no "stale loop, continue?", no "CI timeout, keep waiting?". Every decision point has a deterministic auto-action defined below; uncertain feedback defaults to DEFER (file an issue and let humans resolve later); unrecoverable conditions exit cleanly with a final summary. The only way the skill stops mid-flight is by reaching the fixed point, hitting a hard precondition failure (missing GitHub MCP, missing cross-harness CLI, no PR for the branch), or hitting an unrecoverable error (rebase conflict, persistent push failure). Each exit goes through Step 7's summary.
 
 ## Prerequisites
 
@@ -40,6 +40,7 @@ Override via prompt arguments (e.g., `/pm-autofix-pr 10 --ci-timeout 30 --monito
 |-----------|---------|-------------|
 | `MONITOR_DURATION` | 10 | Minutes to watch for new issues after convergence. 0 to skip. |
 | `CI_TIMEOUT` | 20 | Minutes to wait for CI before aborting (no user prompt — exits through Step 7 with `ci-timeout`). |
+| `POLL_INTERVAL` | 30 | Seconds between PR-state re-fetches while waiting for CI or monitoring. |
 | `LOG_TAIL_LINES` | 500 | Lines of CI failure log to inspect. |
 
 There is no iteration limit. The loop runs until one of: fixed point reached, stale loop detected, CI timeout, rebase conflict, persistent push failure, or monitoring window elapsed. Every exit goes through Step 7. The skill never prompts the user.
@@ -52,9 +53,7 @@ All GitHub interaction is direct MCP tool calls — no bundled scripts.
 |------|---------|
 | `mcp__github__get_me` | Preflight gate; also returns the current user's `login` for self-comment filtering. |
 | `mcp__github__list_pull_requests` | Auto-detect the PR for the current branch. |
-| `mcp__github__pull_request_read` | Fetch PR details, check runs, review comments/threads, reviews, conversation comments, status. |
-| `mcp__github__subscribe_pr_activity` | One-time subscription so CI/review/comment events arrive as `<github-webhook-activity>` messages. |
-| `mcp__github__unsubscribe_pr_activity` | Cleanup on exit. |
+| `mcp__github__pull_request_read` | Fetch PR details, check runs, review comments/threads, reviews, conversation comments, status. Polled every `POLL_INTERVAL` seconds while waiting on CI or in the monitoring window. |
 | `mcp__github__add_reply_to_pull_request_comment` | Post replies on inline review threads (FIX, DEFER, and REJECT replies). |
 | `mcp__github__add_issue_comment` | Post PR-level replies for review summaries and PR conversation comments. |
 | `mcp__github__pull_request_review_write` (`method="resolve_thread"`) | Resolve threads after a fix is pushed. |
@@ -106,7 +105,6 @@ Do not fall back to `gh` for the workflow. On success, capture `login` as `GH_US
    - **3b. Upstream lookup (fork workflow).** If step 3a returned no PRs and `git remote get-url upstream` exists, parse it the same way to `{upstream_owner}/{upstream_repo}` and call `mcp__github__list_pull_requests` against that repo with `head={origin_owner}:{branch}` (PRs from a fork use the fork owner as the head prefix).
    - **3c. `gh pr view` fallback.** If both MCP lookups fail and `gh` is available, run `gh pr view --json number,headRepositoryOwner,headRepository,baseRepositoryOwner,baseRepository,url` to let `gh` resolve the base repo via `git config`. On success, treat the returned `baseRepositoryOwner.login` / `baseRepository.name` as the PR's owner/repo. If `gh` is not installed or returns nothing, stop and tell the user there is no open PR for the current branch.
 4. Validate by calling `mcp__github__pull_request_read` method=`get` on the resolved `{owner, repo, pullNumber}` to retrieve `title`, `body`, `head.ref`, `head.sha`, `base.ref`, `url`. Confirm `head.ref` matches the local branch. Capture `base.ref` for use in Step 5d's first-push fallback.
-5. Subscribe to PR activity once: call `mcp__github__subscribe_pr_activity` with `{owner, repo, pullNumber}`. From this point on, CI completions, new reviews, and new comments will arrive as `<github-webhook-activity>` events in the conversation. The subscription is idempotent; do not call it again per iteration.
 
 ### Step 2: Read Project Pre-commit Requirements
 
@@ -317,11 +315,19 @@ Use the right channel:
 
 This step is **mandatory** — never skip it. If a reply or resolve call fails with 403/429, wait 60s and retry once. After a failed retry, continue the code loop if needed, but do not count that feedback item as addressed and do not declare convergence; it must reappear on the next fetch/retry cycle until a reply is posted.
 
-**5f. Wait for CI only after feedback is answered.** If any fetched feedback item still lacks an evaluation decision and an outcome reply, re-enter Step 4 immediately instead of waiting for CI. Once feedback is answered, wait passively for `<github-webhook-activity>` events from the active subscription. Treat these as the trigger to re-fetch:
-- `check_run.completed` / `workflow_run.completed` — CI finished, re-fetch immediately.
-- `pull_request_review.submitted` / `pull_request_review.edited` / `pull_request_review_comment.created` / `pull_request_review_comment.edited` / `issue_comment.created` / `issue_comment.edited` — new or edited feedback, re-fetch immediately and process it before waiting for more CI events.
+**5f. Wait for CI only after feedback is answered.** If any fetched feedback item still lacks an evaluation decision and an outcome reply, re-enter Step 4 immediately instead of polling. Once feedback is answered, poll for change:
 
-Track wall-clock elapsed time since the last commit was pushed. If `CI_TIMEOUT` minutes elapse with no terminal CI event, **abort the loop** — record `ci_timeout` in the final summary and jump to Step 7. Do not prompt the user. If the subscription appears dropped (no events for an extended period but `CI_TIMEOUT` has not elapsed), re-call `mcp__github__subscribe_pr_activity` (idempotent) and continue.
+1. Sleep `POLL_INTERVAL` seconds (via `Bash` with `sleep <n>`).
+2. Re-run Step 3's MCP calls to rebuild PR state.
+3. Compare against the previous snapshot. Treat any of the following as a "change event" worth re-entering Step 4 / Step 5:
+   - `head_sha` changed (new push from another contributor).
+   - Any check run's `conclusion` transitioned from null/`in_progress` to a terminal value, or any check run was added/removed.
+   - Review thread count, review summary count, or PR conversation comment count changed, **or** any of their `updated_at` (or per-comment `updatedAt`) timestamps advanced past the previous snapshot. This catches new comments, edited comments, and new reviews uniformly.
+4. If nothing changed and CI is still in flight, loop back to step 1.
+
+Track wall-clock elapsed time since the last commit was pushed. If `CI_TIMEOUT` minutes elapse with no terminal CI conclusion for at least one previously-pending check, **abort the loop** — record `ci_timeout` in the final summary and jump to Step 7. Do not prompt the user.
+
+This polling path is the only mechanism the skill uses to detect new state. It does not depend on `<github-webhook-activity>` envelopes or any subscription tool; those are not available in the standard Claude Code CLI or Codex CLI sessions this skill targets.
 
 **5g. Re-fetch state and check for fixed point.** Re-run Step 3's MCP calls. Filter out threads whose ID is in `ADDRESSED_THREAD_IDS` and PR-level feedback whose key is in `REPLIED_ITEM_KEYS`. For each item in `OUTCOME_MARKERS`, suppress it **only if** its latest reviewer marker still matches the value recorded at the prior REJECT/DEFER outcome; if a later reviewer reply exists, remove the item from `OUTCOME_MARKERS` and treat it as fresh feedback to re-evaluate in Step 4. If the merged state has a non-empty `errors` list, do **not** declare a fixed point — report the fetch failures and retry after 30 seconds.
 
@@ -341,13 +347,11 @@ Skip if `MONITOR_DURATION` is 0 or if there are CI failures or unanswered feedba
 
 Report: **"All issues resolved. Monitoring for {MONITOR_DURATION} minutes..."**
 
-Wait for `<github-webhook-activity>` events from the still-active subscription. If a relevant event arrives within the window, re-fetch state and re-enter the evaluate + fix loop (Step 4 → Step 5) with a fresh sub-loop. After fixing, resume monitoring with the remaining time. If the window elapses with no events, proceed to Step 7.
+Poll for change for up to `MONITOR_DURATION` minutes using the same loop as Step 5f: sleep `POLL_INTERVAL` seconds, re-run Step 3's MCP calls, compare counts and `updated_at` markers (and `head_sha`) against the previous snapshot. If a change is detected within the window, re-enter the evaluate + fix loop (Step 4 → Step 5) with a fresh sub-loop. After fixing, resume monitoring with the remaining time. If the window elapses without a change, proceed to Step 7.
 
-### Step 7: Final Summary and Cleanup
+### Step 7: Final Summary
 
-Call `mcp__github__unsubscribe_pr_activity` with `{owner, repo, pullNumber}` to clean up the subscription, regardless of how the loop exited (fixed point, stale loop, CI timeout, rebase abort, push failure, dirty worktree, monitoring timeout).
-
-Then print:
+Print:
 
 ```
 ## Autofix PR Summary
@@ -392,5 +396,5 @@ Do **not** ask the user anything at the end. The skill exits unconditionally aft
 
 ## References
 
-- **`references/api-patterns.md`** — MCP tool signatures, expected response shapes, supersession algorithm, push and rebase handling, issue-creation flow, log-fetching gap
+- **`references/api-patterns.md`** — MCP tool signatures, expected response shapes, polling-loop semantics, supersession algorithm, push and rebase handling, issue-creation flow, log-fetching gap
 - **`references/comment-evaluation.md`** — Full evaluation prompt templates, FIX/DEFER/REJECT decision matrix, DEFER and REJECT taxonomies, ambiguity-to-DEFER policy
