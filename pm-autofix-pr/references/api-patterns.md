@@ -75,12 +75,20 @@ Both use the same shape:
 ```text
 loop:
   sleep POLL_INTERVAL          # default 30s, via Bash `sleep <n>`
-  re-fetch PR state            # the four Step 3 MCP calls
+  re-fetch PR state            # the five Step 3 MCP calls (see below)
   if state changed:            # compare against previous snapshot
     break and re-enter Step 4 / Step 5
   if wall-clock budget exceeded:
     abort with the appropriate exit reason
 ```
+
+The "five Step 3 MCP calls" are exactly the sources Step 3 uses to build the state object — omit any one of them and the loop can declare a false fixed point because the missing channel will never report new feedback:
+
+1. `pull_request_read method=get` — for `head.sha`.
+2. `pull_request_read method=get_check_runs` — for CI conclusions.
+3. `pull_request_read method=get_review_comments` — for inline review threads.
+4. `pull_request_read method=get_reviews` — for review summaries.
+5. `pull_request_read method=get_comments` — for PR conversation comments. **Do not skip this one** — it is the only channel that surfaces top-level PR comments, and missing it would violate the "Always Reply" core principle.
 
 ### What counts as a state change
 
