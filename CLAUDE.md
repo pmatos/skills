@@ -41,3 +41,7 @@ Slash command `/best-of` that compares code across two git worktrees against 15 
 ## is-skill
 
 Slash command `/is-skill` that analyzes the current session's conversation, context, and work patterns to determine whether the knowledge or workflow used could be extracted into a reusable Claude Code skill. Classifies proposals as user-level (cross-project, issue filed in `pmatos/skills`) or project-specific (issue filed in the current project's repo), then creates a GitHub issue with a structured skill proposal after user approval.
+
+## upscale
+
+Skill that upscales raster images with a local OpenCV EDSR super-resolution model, writes an exact requested pixel size, and verifies the final dimensions.
