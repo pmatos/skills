@@ -233,6 +233,26 @@ Trigger phrases: `extract design system`, `steal a design`, `pull fonts and colo
 
 **Requires**: [`uv`](https://github.com/astral-sh/uv) for the extraction script; [Playwright](https://playwright.dev/) and `node` only if the target page is JS-rendered.
 
+### `upscale` — Local Super-Resolution Image Upscaling
+
+```bash
+npx skills@latest add pmatos/skills/upscale
+```
+
+Upscales an existing raster image with a local OpenCV EDSR model, then writes and verifies an exact requested pixel size.
+
+What it does:
+- Uses OpenCV `dnn_superres` with EDSR models (`x2`, `x3`, or `x4`) rather than plain interpolation.
+- Downloads models into `~/.cache/codex-upscale/models/` on first use.
+- Processes large images in overlapping tiles to reduce memory spikes and avoid visible seams.
+- Supports exact output dimensions with `stretch`, `cover`, or `contain` fitting.
+- Can preserve the raw EDSR output before final resizing for inspection.
+- Verifies the written file dimensions after generation.
+
+Trigger phrases: `upscale image`, `enlarge this image`, `super-resolve`, `make this higher resolution`, `make a 5120x2160 version`.
+
+**Requires**: [`uv`](https://github.com/astral-sh/uv) for the bundled script, plus network access on first use to download the EDSR model.
+
 ## License
 
 MIT
