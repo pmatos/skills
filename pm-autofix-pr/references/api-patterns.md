@@ -61,31 +61,53 @@ mcp__github__pull_request_read(
 
 Returns full PR details including `title`, `body`, `head.ref`, `head.sha`, `url`. Validate `head.ref` matches the local branch.
 
-## Subscription (event-driven CI/comment monitoring)
+## Polling (CI / review / comment monitoring)
 
-Subscribe **once** after PR identification:
+The GitHub MCP server exposes no event-stream tool the skill can rely on across harnesses, so all waiting is done by polling the same `pull_request_read` methods used in Step 3 of `SKILL.md`. There is no subscription to set up and nothing to tear down on exit.
 
+The poll loop runs in two places:
+
+- **Step 5f** — after every push, while waiting for CI to terminate or for new reviewer feedback to arrive.
+- **Step 6** — after convergence, throughout the `MONITOR_DURATION` window.
+
+Both use the same shape:
+
+```text
+loop:
+  sleep POLL_INTERVAL          # default 30s, via Bash `sleep <n>`
+  re-fetch PR state            # the five Step 3 MCP calls (see below)
+  if state changed:            # compare against previous snapshot
+    break and re-enter Step 4 / Step 5
+  if wall-clock budget exceeded:
+    abort with the appropriate exit reason
 ```
-mcp__github__subscribe_pr_activity(
-  owner=<owner>, repo=<repo>, pullNumber=<num>
-)
-```
 
-The call is idempotent. Once subscribed, GitHub events arrive in the conversation as `<github-webhook-activity>` messages covering:
+The "five Step 3 MCP calls" are exactly the sources Step 3 uses to build the state object — omit any one of them and the loop can declare a false fixed point because the missing channel will never report new feedback:
 
-- CI: `check_run.completed`, `workflow_run.completed`
-- Reviews: `pull_request_review.submitted`, `pull_request_review.edited`
-- Comments: `pull_request_review_comment.created`, `pull_request_review_comment.edited`, `issue_comment.created`, `issue_comment.edited`
+1. `pull_request_read method=get` — for `head.sha`.
+2. `pull_request_read method=get_check_runs` — for CI conclusions.
+3. `pull_request_read method=get_review_comments` — for inline review threads.
+4. `pull_request_read method=get_reviews` — for review summaries.
+5. `pull_request_read method=get_comments` — for PR conversation comments. **Do not skip this one** — it is the only channel that surfaces top-level PR comments, and missing it would violate the "Always Reply" core principle.
 
-These events replace the old `gh pr checks --watch` polling loop. Treat the arrival of a relevant event as a trigger to re-fetch state. Honour `CI_TIMEOUT` via wall-clock so the loop doesn't wait forever if a webhook is dropped.
+### What counts as a state change
 
-Always unsubscribe on exit:
+A snapshot is considered changed (and the loop wakes the evaluator) if any of these differ from the previous iteration:
 
-```
-mcp__github__unsubscribe_pr_activity(
-  owner=<owner>, repo=<repo>, pullNumber=<num>
-)
-```
+- `head.sha` from `pull_request_read method=get` — a new push from another contributor.
+- Any check run from `get_check_runs` transitioned from null/`in_progress` to a terminal `conclusion`, or any check run was added or removed.
+- Review-thread count, review-summary count, or PR conversation comment count from `get_review_comments` / `get_reviews` / `get_comments` changed.
+- Any review thread's latest comment `updatedAt`/`updated_at`, any review's `updated_at`, or any PR conversation comment's `updated_at` advanced past the value recorded in the previous snapshot. This catches edits as well as new items uniformly.
+
+### Cadence and bounds
+
+- `POLL_INTERVAL` defaults to 30s. At that cadence, an hour of waiting costs ≈120 reads per loop instance — well below GitHub's REST rate limits for a single authenticated user on a single PR.
+- `CI_TIMEOUT` is the wall-clock budget for Step 5f. Measure from the moment the loop's most recent push completed; abort when the budget is exceeded with **no** previously-pending check having reached a terminal `conclusion`.
+- `MONITOR_DURATION` is the wall-clock budget for Step 6. Measure from entry to monitoring; exit cleanly when it elapses.
+
+### Why polling, not webhook subscription
+
+Earlier drafts of this skill referenced a `subscribe_pr_activity` / `unsubscribe_pr_activity` pair and consumed `<github-webhook-activity>` envelopes. Those tools are Claude Code coordinator-mode built-ins exposed only by certain long-running harnesses (e.g. Claude Code Web); they are not part of the upstream `github-mcp-server` toolset and are not available in the interactive Claude Code CLI or in Codex CLI sessions. Polling works uniformly across every harness this skill supports, at the cost of ~`POLL_INTERVAL/2` average latency between an external event and the loop reacting to it. For a fix loop bottlenecked on CI runs measured in minutes, that latency is invisible.
 
 ## CI check runs
 
