@@ -146,6 +146,11 @@ def output_default(src: Path, target: tuple[int, int] | None, factor: int) -> Pa
     return src.with_name(f"{src.stem}-upscaled-{suffix}.png")
 
 
+def reject_if_source(path: Path, src: Path, flag: str) -> None:
+    if path == src:
+        raise SystemExit(f"{flag} resolves to the source image ({src}); refusing to overwrite")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("input", type=Path, help="source raster image")
@@ -193,17 +198,21 @@ def main() -> int:
         log(f"warning: stretching aspect ratio by {aspect_delta:.1%}; use --fit cover or --fit contain to preserve aspect")
 
     output = args.output.expanduser().resolve() if args.output else output_default(src, args.size, args.factor)
+    reject_if_source(output, src, "--output")
     output.parent.mkdir(parents=True, exist_ok=True)
+
+    raw_output = args.raw_output
+    if raw_output is None and args.keep_raw:
+        raw_output = output.with_name(f"{output.stem}-edsr-x{scale}-raw.png")
+    raw_path = raw_output.expanduser().resolve() if raw_output is not None else None
+    if raw_path is not None:
+        reject_if_source(raw_path, src, "--raw-output")
 
     model_path = download_model(scale, args.cache_dir.expanduser())
     log(f"source {src_width}x{src_height}; EDSR_x{scale}; final {target[0]}x{target[1]}; fit={args.fit}")
     raw = edsr_upscale(img, model_path, scale, args.tile_size, args.overlap)
 
-    raw_output = args.raw_output
-    if raw_output is None and args.keep_raw:
-        raw_output = output.with_name(f"{output.stem}-edsr-x{scale}-raw.png")
-    if raw_output is not None:
-        raw_path = raw_output.expanduser().resolve()
+    if raw_path is not None:
         raw_path.parent.mkdir(parents=True, exist_ok=True)
         cv2.imwrite(str(raw_path), raw)
         log(f"raw {raw.shape[1]}x{raw.shape[0]} -> {raw_path}")
