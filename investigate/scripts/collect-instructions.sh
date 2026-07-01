@@ -49,7 +49,6 @@ root="$(cd "$root" && pwd -P)"     # canonical, symlink-resolved repo root
 
 declare -a found_abs=()            # absolute paths already emitted (for -ef dedup)
 declare -a out_lines=()            # "<depth>\t<repo-relative path>" pending sort
-declare -A visited_dir=()          # directories already scanned
 
 # Record a found instruction file unless an alias of it (same inode, e.g. an
 # AGENTS.md symlinked to CLAUDE.md) was already recorded.
@@ -68,8 +67,6 @@ record() {
 # the two are the same file).
 scan_dir() {
   local d="$1"
-  [[ -n "${visited_dir[$d]:-}" ]] && return 0
-  visited_dir[$d]=1
   [[ -f "$d/CLAUDE.md" ]] && record "$d/CLAUDE.md"
   [[ -f "$d/AGENTS.md" ]] && record "$d/AGENTS.md"
 }
