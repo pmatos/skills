@@ -1,22 +1,19 @@
 # Planning Patterns Reference
 
-All "agent" dispatches in this document are **`claude -p` CLI subagents** spawned by the Codex-hosted pm-plan workflow. Each subagent runs in its own headless Claude Code process, has zero inherited context, and must receive a fully self-contained prompt. The standard invocation is:
+All "subagent" dispatches in this document are **harness-agnostic missions**, not invocations. Bind each to your selected dispatch path:
 
-```bash
-claude -p --allowed-tools "Read,Grep,Glob" --verbose \
-       < "$PLAN_TMP/<role>.prompt" \
-       > "$PLAN_TMP/<role>.out" 2>&1
-```
+- **Native path** — `Agent` calls with `subagent_type: "Explore"` (parallel = multiple calls in one message). See `dispatch-claude.md`.
+- **Shell path** — `claude -p` headless processes staged under `$PLAN_TMP`, backgrounded and `wait`ed. See `dispatch-codex.md`.
 
-Run multiple subagents concurrently by backgrounding each call (`&`) and `wait`ing in a single Bash command — this is how parallelism is achieved here, not via any in-process agent tool.
+Every subagent runs read-only, has zero inherited context, and must receive a fully self-contained prompt. This document specifies *what each subagent's mission is*; the dispatch reference specifies *how to launch it and achieve parallelism*.
 
 ## Exploration Strategies
 
 ### Three-Concern Decomposition (Large tasks — recommended)
 
-For Large tasks, always dispatch exactly three parallel `claude -p` subagents with these fixed, non-overlapping missions. Stage each prompt as a file under `$PLAN_TMP`, then start all three with `&` and `wait` so they execute concurrently.
+For Large tasks, always dispatch exactly three parallel subagents with these fixed, non-overlapping missions, launched together so they execute concurrently.
 
-**Subagent 1 — Architecture Understanding** (`$PLAN_TMP/arch.prompt`)
+**Subagent 1 — Architecture Understanding**
 
 Mission: Understand the codebase structure, patterns, and conventions in the subsystems the task touches.
 
@@ -24,7 +21,7 @@ Prompt template:
 > "Task context: [task description].
 > Explore the architecture of [subsystem/area]. Find: (1) directory structure and key files, (2) design patterns and conventions used (naming, error handling, dependency injection, etc.), (3) how similar features are structured — find at least one reference implementation, (4) relevant CLAUDE.md/AGENTS.md constraints. Report: file paths with line numbers, patterns observed, reference implementation paths. Do NOT look for what needs to change — only understand what exists."
 
-**Subagent 2 — Change Surface Identification** (`$PLAN_TMP/surface.prompt`)
+**Subagent 2 — Change Surface Identification**
 
 Mission: Find every file that will need modification and every existing utility that can be reused.
 
@@ -32,7 +29,7 @@ Prompt template:
 > "Task context: [task description].
 > Identify all files that would need to change to accomplish the task above. Find: (1) files to modify (with specific functions/sections), (2) files to create, (3) existing utilities, helpers, or base classes to reuse (with file:line), (4) type definitions, interfaces, or schemas that need updating. Report: complete file list with roles and lines of interest. Do NOT assess risks or propose solutions — only map the change surface."
 
-**Subagent 3 — Risks, Edge Cases & Dependencies** (`$PLAN_TMP/risks.prompt`)
+**Subagent 3 — Risks, Edge Cases & Dependencies**
 
 Mission: Identify what could go wrong, what edge cases exist, and what depends on the code being changed.
 
@@ -41,18 +38,18 @@ Prompt template:
 > Analyze risks for the task above. Find: (1) callers and consumers of the code being changed (grep for imports, function calls), (2) edge cases and boundary conditions, (3) test coverage gaps — existing tests and what's missing, (4) integration points with external systems or other subsystems, (5) backward compatibility concerns. Report: risks with severity, edge cases, dependency graph, test gaps. Do NOT propose the implementation — only identify what could break."
 
 ### Breadth-First Discovery (Medium tasks)
-Launch parallel `claude -p` subagents, each scanning a different layer:
+Launch parallel subagents, each scanning a different layer:
 - **Subagent 1 — Data layer**: models, schemas, database migrations, ORM config
 - **Subagent 2 — Business logic**: services, utilities, core modules, domain logic
 - **Subagent 3 — Presentation**: components, routes, API endpoints, templates
 
 ### Feature Trace (Medium tasks)
-Follow a feature through the entire stack with two parallel `claude -p` subagents:
+Follow a feature through the entire stack with two parallel subagents:
 - **Subagent 1**: Trace from UI → API → service → database, noting each touchpoint
 - **Subagent 2**: Find all related tests and similar features as reference implementations
 
 ### Impact Analysis (Medium tasks)
-Assess blast radius of a change with two parallel `claude -p` subagents:
+Assess blast radius of a change with two parallel subagents:
 - **Subagent 1**: What directly changes (files that will be edited)
 - **Subagent 2**: What indirectly depends on the changed code (imports, callers, consumers, configs)
 
@@ -135,16 +132,7 @@ Assess blast radius of a change with two parallel `claude -p` subagents:
 
 ### Large tasks (Three-Concern Decomposition)
 
-Dispatch all three `claude -p` subagents in a single shell command using `&` + `wait` (parallel). Each subagent has a clear boundary — architecture doesn't propose changes, change surface doesn't assess risks, risks doesn't propose implementations. This prevents overlap and ensures each report is focused.
-
-Reference shell template:
-
-```bash
-claude -p --allowed-tools "Read,Grep,Glob" --verbose < "$PLAN_TMP/arch.prompt"    > "$PLAN_TMP/arch.out"    2>&1 &
-claude -p --allowed-tools "Read,Grep,Glob" --verbose < "$PLAN_TMP/surface.prompt" > "$PLAN_TMP/surface.out" 2>&1 &
-claude -p --allowed-tools "Read,Grep,Glob" --verbose < "$PLAN_TMP/risks.prompt"   > "$PLAN_TMP/risks.out"   2>&1 &
-wait
-```
+Dispatch all three subagents **in parallel** (native: three `Agent` calls in one message; shell: three backgrounded `claude -p` calls + `wait` — see your dispatch reference). Each subagent has a clear boundary — architecture doesn't propose changes, change surface doesn't assess risks, risks doesn't propose implementations. This prevents overlap and ensures each report is focused.
 
 Synthesize by:
 1. Start with Subagent 1's architecture context as the foundation
@@ -153,11 +141,11 @@ Synthesize by:
 
 ### Medium tasks (strategy-based)
 
-When dispatching `claude -p` Explore subagents, structure each prompt file with:
+When dispatching Explore subagents, structure each mission with:
 1. **Specific mission**: "Find all files related to authentication and trace the login flow from controller to database"
 2. **What to return**: "Report: key files found with paths and line numbers, patterns observed, dependencies, potential risks"
 3. **Scope boundary**: "Only look at the auth subsystem, don't explore unrelated areas"
-4. **Self-contained context**: include the full task description and any CLAUDE.md/AGENTS.md constraints — `claude -p` has no inherited conversation state.
+4. **Self-contained context**: include the full task description and any CLAUDE.md/AGENTS.md constraints — subagents have no inherited conversation state.
 
 Synthesize findings by: merging file lists, resolving conflicting observations, identifying cross-cutting concerns that appear in multiple subagents' reports.
 
