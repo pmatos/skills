@@ -31,12 +31,16 @@ relative to this SKILL.md. The examples below abbreviate the prefix as
 `scripts/`.
 
 - **`scripts/resolve-issue.sh`** — Phase 1 issue-number resolution.
+- **`scripts/collect-instructions.sh`** — Phase 3.2 scoped-instruction walk over
+  the changed paths' ancestors.
 - **`scripts/git-safety-lib.sh`** — shared remote/default-branch resolvers
   (sourced by the two scripts below; never run directly).
 - **`scripts/check-branch.sh`** — Phase 5.0 branch-safety guard.
 - **`scripts/push-branch.sh`** — Phase 6 upstream-aware push.
 - **`references/issue-number-resolution.md`** — Phase 1 rules, edge cases, and
   the two invariants the resolver enforces.
+- **`references/scoped-instructions.md`** — Phase 3.2 precedence and merge rules,
+  and why the walk is deferred until the plan's paths are known.
 - **`references/git-safety.md`** — how the guard and push resolve the same
   remote and the repo's default branch, and why.
 
@@ -96,6 +100,8 @@ Record the classification and proceed to the matching workflow.
 
 ## Phase 3 — Discover project conventions
 
+### 3.1 Baseline (top-level) conventions
+
 Read the project's own instructions for how to build, test, lint, and commit:
 
 ```bash
@@ -113,9 +119,37 @@ Also infer the toolchain from manifests:
 - `Makefile` → `test`, `lint`, `check`, `ci` targets.
 - `pom.xml` / `build.gradle` → `mvn test` / `./gradlew test`.
 
-Record the discovered test, lint/format-check, type-check, and build commands for
-the validation phase. Prefer a project's own canonical command sequence (from
+Record the discovered test, lint/format-check, type-check, and build commands as
+the *baseline* check set. Prefer a project's own canonical command sequence (from
 `CLAUDE.md` / `AGENTS.md`) over the inferred defaults.
+
+### 3.2 Scoped conventions along the changed paths
+
+Repos with per-package or nested instructions (e.g. `frontend/AGENTS.md`) apply
+extra or overriding rules to the files beneath them, so the top-level baseline
+alone can miss the checks and commit rules that actually govern a change. This
+step needs to know which files you will touch, so it runs **after Phase 4's plan
+settles the target paths** (see 4A.4 / 4B.3), not now.
+
+Once those paths are known, collect the instruction files along their ancestors:
+
+```bash
+scripts/collect-instructions.sh <changed-path> [<changed-path> ...]
+```
+
+It walks each path's directory up to the repo root and prints every
+`CLAUDE.md` / `AGENTS.md` it finds — deduplicated (symlink-aware) and ordered
+baseline (repo root) → closest (deepest). Read each file and merge with
+**closest-wins** precedence: the top-level file is the baseline; a nearer file
+overrides it on conflict and may add checks the baseline omits. When a scoped
+file changes or adds a command relative to the baseline, surface a one-line
+divergence note — which file, which command — so the validation command set is
+auditable rather than silently flattened. Feed the merged command set into the
+validation step (4A.6 / 4B.5).
+
+Empty output (or exit 0 with nothing printed) means no scoped file governs the
+change — fall back to the 3.1 baseline alone. See
+`references/scoped-instructions.md` for the precedence rationale.
 
 ## Phase 4 — Workflow dispatch
 
@@ -141,6 +175,8 @@ describing the bug, the repro, and the symptom.
 **4A.4 Plan the fix.** Write a concise numbered plan, each step citing `file:line`
 targets and the change to make (or use the `/pm-plan` output). Convert the plan to
 a task list with **TaskCreate** before executing — one task per reviewable unit.
+Once the target paths are settled, run Phase 3.2 (`scripts/collect-instructions.sh`)
+over them and fold the merged, closest-wins check set into the plan.
 
 **4A.5 Fix (best effort).** Apply the changes. When tests are the right vehicle,
 prefer `/tdd`: write a failing test seeded from the 4A.2 reproducer, make it pass
@@ -150,9 +186,10 @@ hitting a wall (mismatched assumptions, scope explosion, blocked by another bug)
 surface it: interactive — ask how to proceed; non-interactive — comment on the
 issue, leave the partial branch, exit. **Do not** open a half-finished PR.
 
-**4A.6 Validate.** Run the discovered checks in order — format/format-check, lint,
-type-check, tests, build — stopping and iterating on any failure. Loop until all
-are green, then proceed to Phase 5.
+**4A.6 Validate.** Run the merged check set from Phase 3 (the 3.1 baseline plus
+any 3.2 scoped instructions) in order — format/format-check, lint, type-check,
+tests, build — stopping and iterating on any failure. Loop until all are green,
+then proceed to Phase 5.
 
 ### 4B. Feature workflow
 
@@ -186,8 +223,8 @@ for testable behaviour. Mark tasks `in_progress`/`completed` as work progresses.
 Same blocker rules as 4A.5 — surface (interactive) or comment and exit
 (non-interactive); no half-finished PRs.
 
-**4B.5 Validate.** As in 4A.6 — run the discovered checks in order; loop until
-green.
+**4B.5 Validate.** As in 4A.6 — run the merged check set (Phase 3.1 baseline plus
+3.2 scoped) in order; loop until green.
 
 ## Phase 5 — Commit
 
