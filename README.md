@@ -53,6 +53,10 @@ Trigger phrases: `get a second opinion`, `ask codex`, `what does GPT think`, `co
 
 **Requires**: [OpenAI Codex CLI](https://github.com/openai/codex) installed and `OPENAI_API_KEY` set.
 
+> **Scope — general-purpose, not just review.** This skill is deliberately broad: use it on any discussion, plan, code, or *thought*, not only on diffs. It assembles a self-contained prompt (Codex has no access to your conversation), respects the model and reasoning effort from your own Codex config rather than hardcoding them, and frames Claude's and Codex's views fairly against each other.
+>
+> For a *dedicated code-review* second opinion over git diffs, look at Trail of Bits' [`second-opinion` plugin](https://github.com/trailofbits/skills/tree/main/plugins/second-opinion). It is narrower but stronger for that one job: multi-model triangulation (OpenAI Codex **and** Google Gemini, run in parallel), diff-scope selection (uncommitted changes / branch diff / specific commit), and input guards (diff-size warnings, empty-diff detection).
+
 ### `/auto-merge-dependabot` — Auto-Merge Dependabot PRs
 
 ```bash
