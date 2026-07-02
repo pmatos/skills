@@ -1,0 +1,33 @@
+// markdownlint-cli2 configuration.
+//
+// The repo's product is prose (skill definitions), so the gate is deliberately
+// lenient: it enforces the ~40 structural rules the content already satisfies
+// (heading increments, trailing whitespace, hard tabs, single H1, file-final
+// newline, list-indent consistency, table pipe/column integrity, …) and relaxes
+// the purely stylistic rules below that fight the existing writing style. The
+// relaxed rules can be tightened later with a one-off normalization pass.
+{
+  "config": {
+    "default": true,
+
+    // Prose is intentionally long-form; line width is not enforced.
+    "MD013": false,
+    // Cosmetic table cell padding ("compact" vs "padded") — not worth enforcing.
+    "MD060": false,
+    // SKILL.md files legitimately embed inline HTML (e.g. <example> blocks).
+    "MD033": false,
+    // Bold "labels" (e.g. **Agent 1 — …**) are used as lightweight sub-headings.
+    "MD036": false,
+    // Ordered lists intentionally mix 1. and n. prefixes across the docs.
+    "MD029": false,
+
+    // Blank-line-around-block rules: relaxed to keep prose churn at zero.
+    "MD022": false, // headings surrounded by blank lines
+    "MD031": false, // fenced code surrounded by blank lines
+    "MD032": false, // lists surrounded by blank lines
+    // Many fenced blocks are plain output/text with no meaningful language tag.
+    "MD040": false
+  },
+  "globs": ["**/*.md"],
+  "ignores": ["node_modules", ".git"]
+}

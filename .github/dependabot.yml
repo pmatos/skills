@@ -1,0 +1,15 @@
+version: 2
+updates:
+  # Keep the SHA-pinned actions in claude.yml / claude-code-review.yml / lint.yml
+  # fresh. Batched into a single weekly PR so the repo's own auto-merge-dependabot
+  # skill can review and merge them in one pass.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      github-actions:
+        patterns:
+          - "*"
+    commit-message:
+      prefix: "ci"

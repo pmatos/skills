@@ -1,0 +1,4 @@
+# Ruff config for the repo's two PEP-723 helper scripts.
+# line-length is relaxed to 100 to match the existing style; the inline
+# `uv run --script` metadata blocks are unaffected by this file.
+line-length = 100

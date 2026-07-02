@@ -20,6 +20,7 @@
 # See ../references/git-safety.md for the rationale.
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source-path=SCRIPTDIR
 # shellcheck source=git-safety-lib.sh
 . "$here/git-safety-lib.sh"
 

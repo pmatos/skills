@@ -92,7 +92,7 @@ For Bash-based evaluator spawns, write the prompt to a `mktemp /tmp/eval-XXXXXX`
 
 Call `mcp__github__get_me`. If the tool is unavailable in the session or the call errors, **stop immediately** with this message:
 
-> **GitHub MCP not available.** This skill requires the GitHub MCP server. Enable it in your host's MCP settings (`.mcp.json`, `~/.claude/settings.json`, or the Codex equivalent) and re-run. See https://github.com/github/github-mcp-server for setup.
+> **GitHub MCP not available.** This skill requires the GitHub MCP server. Enable it in your host's MCP settings (`.mcp.json`, `~/.claude/settings.json`, or the Codex equivalent) and re-run. See <https://github.com/github/github-mcp-server> for setup.
 
 Do not fall back to `gh` for the workflow. On success, capture `login` as `GH_USER` (used to filter out self-authored comments later).
 
@@ -117,7 +117,7 @@ Issue these MCP calls (paginate where applicable) and merge into a single state 
 | State field | Source |
 |---|---|
 | `head_sha` | `pull_request_read method=get` → `head.sha` |
-| `ci_failures` | `pull_request_read method=get_check_runs` → keep entries whose `conclusion ∈ {failure, timed_out, cancelled, startup_failure, action_required}`. For each `failure` whose `app.slug == "github-actions"`, mark `fixable=true` and fetch the log tail via `Bash`: `gh run view --job <check_run.id> --log-failed 2>&1 | tail -<LOG_TAIL_LINES>`. Other failure types are non-fixable — report them. |
+| `ci_failures` | `pull_request_read method=get_check_runs` → keep entries whose `conclusion ∈ {failure, timed_out, cancelled, startup_failure, action_required}`. For each `failure` whose `app.slug == "github-actions"`, mark `fixable=true` and fetch the log tail via `Bash`: `gh run view --job <check_run.id> --log-failed 2>&1 \| tail -<LOG_TAIL_LINES>`. Other failure types are non-fixable — report them. |
 | `review_threads` | `pull_request_read method=get_review_comments` (paginate via `perPage=100`, `after`). Split into `unresolved = [t for t in threads if not t.isResolved]` and `resolved_thread_ids = [t.id for t in threads if t.isResolved]`. For each unresolved thread, take the last non-self element of `comments` (sorted by `createdAt` if order is not guaranteed and `author.login != GH_USER`) as `latestReviewerComment`. Drop self-only threads whose `latestReviewerComment` is absent from `feedback_items`; they are author notes, not reviewer feedback, and must not be dereferenced later. |
 | `review_summaries` | `pull_request_read method=get_reviews`. Apply supersession (see below). |
 | `pr_comments` | `pull_request_read method=get_comments`. Drop entries where `user.login == GH_USER`. |

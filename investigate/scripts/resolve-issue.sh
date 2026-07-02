@@ -21,9 +21,9 @@
 # See ../references/issue-number-resolution.md for the rules and rationale.
 
 arg="${1-}"
-arg="${arg#\#}"          # accept "#123" as well as "123"
+arg="${arg#\#}" # accept "#123" as well as "123"
 issue=""
-issue_source=""          # "argument" | "branch" | ""
+issue_source="" # "argument" | "branch" | ""
 
 if [[ "$arg" =~ ^[0-9]+$ ]]; then
   issue="$arg"
@@ -45,8 +45,8 @@ if [[ -z "$issue" ]]; then
     # that integer sits on a path-segment boundary. The boundary check rejects
     # names like `pr2024` (digits glued to letters) and any multi-number branch.
     nums="$(printf '%s' "$branch" | grep -oE '[0-9]+')"
-    if [[ "$(printf '%s\n' "$nums" | grep -c .)" == "1" ]] \
-        && [[ "$branch" =~ (^|[-/_])"$nums"([-/_]|$) ]]; then
+    if [[ "$(printf '%s\n' "$nums" | grep -c .)" == "1" ]] &&
+      [[ "$branch" =~ (^|[-/_])"$nums"([-/_]|$) ]]; then
       issue="$nums"
       issue_source="branch"
     fi
@@ -59,14 +59,14 @@ if [[ -n "$issue" ]]; then
   # /dev/null) and distinguish them.
   gh_err="$(gh issue view "$issue" --json number 2>&1 >/dev/null)"
   gh_exit=$?
-  if (( gh_exit != 0 )); then
+  if ((gh_exit != 0)); then
     if printf '%s' "$gh_err" | grep -qE 'Could not resolve|Not Found|HTTP 404'; then
       # Truly does not exist.
       if [[ "$issue_source" == "argument" ]]; then
         printf 'investigate: issue #%s does not exist in this repo.\n' "$issue" >&2
         exit 1
       fi
-      issue=""          # only ever silently clear a branch-inferred guess
+      issue="" # only ever silently clear a branch-inferred guess
     else
       # Auth / network / API failure — surface and abort regardless of source.
       printf "investigate: 'gh issue view %s' failed: %s\n" "$issue" "$gh_err" >&2
@@ -76,7 +76,7 @@ if [[ -n "$issue" ]]; then
 fi
 
 if [[ -z "$issue" ]]; then
-  printf '%s\n' "$branch"     # branch context for the caller's message
+  printf '%s\n' "$branch" # branch context for the caller's message
   exit 2
 fi
 
