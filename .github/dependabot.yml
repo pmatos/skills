@@ -1,12 +1,15 @@
 version: 2
 updates:
-  # Keep the SHA-pinned actions in claude.yml / claude-code-review.yml / lint.yml
+  # Keep the tag-pinned actions in claude.yml / claude-code-review.yml / lint.yml
   # fresh. Batched into a single weekly PR so the repo's own auto-merge-dependabot
   # skill can review and merge them in one pass.
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
       interval: "weekly"
+    # Wait a week before proposing a brand-new release (supply-chain hardening).
+    cooldown:
+      default-days: 7
     groups:
       github-actions:
         patterns:
