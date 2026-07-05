@@ -117,10 +117,19 @@ Issue these MCP calls (paginate where applicable) and merge into a single state 
 | State field | Source |
 |---|---|
 | `head_sha` | `pull_request_read method=get` → `head.sha` |
-| `ci_failures` | `pull_request_read method=get_check_runs` → keep entries whose `conclusion ∈ {failure, timed_out, cancelled, startup_failure, action_required}`. For each `failure` whose `app.slug == "github-actions"`, mark `fixable=true` and fetch the log tail via `Bash`: `gh run view --job <check_run.id> --log-failed 2>&1 \| tail -<LOG_TAIL_LINES>`. Other failure types are non-fixable — report them. |
+| `ci_failures` | `pull_request_read method=get_check_runs` → keep entries whose `conclusion ∈ {failure, timed_out, cancelled, startup_failure, action_required}`. For each `failure` whose `app.slug == "github-actions"`, mark `fixable=true` and fetch the log tail with the `Bash` command shown just below this table (kept out of the cell so the shell pipe stays a real pipe). Other failure types are non-fixable — report them. |
 | `review_threads` | `pull_request_read method=get_review_comments` (paginate via `perPage=100`, `after`). Split into `unresolved = [t for t in threads if not t.isResolved]` and `resolved_thread_ids = [t.id for t in threads if t.isResolved]`. For each unresolved thread, take the last non-self element of `comments` (sorted by `createdAt` if order is not guaranteed and `author.login != GH_USER`) as `latestReviewerComment`. Drop self-only threads whose `latestReviewerComment` is absent from `feedback_items`; they are author notes, not reviewer feedback, and must not be dereferenced later. |
 | `review_summaries` | `pull_request_read method=get_reviews`. Apply supersession (see below). |
 | `pr_comments` | `pull_request_read method=get_comments`. Drop entries where `user.login == GH_USER`. |
+
+The `ci_failures` log-tail fetch lives here rather than inside the table cell
+above: an escaped `\|` renders correctly on GitHub but is a literal argument, not
+a pipe operator, when this raw Markdown is executed — so the command is kept in a
+fenced block where the pipe stays a real shell pipe.
+
+```bash
+gh run view --job <check_run.id> --log-failed 2>&1 | tail -<LOG_TAIL_LINES>
+```
 
 **Supersession algorithm for reviews:** group reviews by `user.login`. Within each group, sort by `submitted_at` ascending. Find the index of the latest `APPROVED` or `DISMISSED` review (or -1 if none). Discard everything at or before that index. From the remainder, keep only `CHANGES_REQUESTED` or `COMMENTED` reviews with non-empty `body` and `user.login != GH_USER`. The result is the actionable summary list.
 
