@@ -101,7 +101,7 @@ Trigger phrases: `what's going on`, `wigo`, `status`, `where was I`, `what were 
 npx skills@latest add pmatos/skills/pm-autofix-pr
 ```
 
-Iteratively fixes CI failures and addresses reviewer feedback on a GitHub PR, working entirely in the local CLI. Monitors check results and reviewer feedback, evaluates each review on its merits, makes code changes only when warranted, runs local validation, commits, pushes, and repeats until CI is green and every feedback item has an outcome reply.
+Iteratively fixes CI failures and addresses reviewer feedback on a GitHub PR, working entirely in the local CLI. Monitors check results and reviewer feedback, evaluates each review on its merits, makes code changes only when warranted, runs local validation, commits, pushes, and repeats until CI is green, the PR has no merge conflicts with its base branch, and every feedback item has an outcome reply.
 
 What it does:
 - Detects the PR from the current branch (or accepts a PR number).
@@ -111,7 +111,8 @@ What it does:
 - Commits and pushes fixes, then replies with what changed, where, and how it was validated.
 - Replies to rejected feedback explaining why no code change was made.
 - Processes new reviews as soon as they arrive instead of waiting for CI to finish first.
-- Loops until fixed point: all CI green and all reviewer feedback answered one way or another.
+- Auto-resolves merge conflicts with the base branch by merging the base in, resolving conflicts, and re-running validation; exits with a clear `merge-conflict` failure only if a conflict genuinely can't be resolved automatically.
+- Loops until fixed point: all CI green, no merge conflicts with the base branch, and all reviewer feedback answered one way or another.
 - Presents a full summary of all changes for human review.
 
 Trigger phrases: `autofix pr`, `fix pr locally`, `fix ci failures`, `fix review comments`, `iterate on pr`, `fix failing checks`, `fix pr comments`, `make ci green`, `fix the build`, `address reviewer feedback`.

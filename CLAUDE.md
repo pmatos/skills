@@ -24,7 +24,7 @@ Slash command `/wigo` (What Is Going On?) that gives a comprehensive situational
 
 ## pm-autofix-pr
 
-Slash command `/pm-autofix-pr` that iteratively fixes CI failures and addresses reviewer feedback on a GitHub PR from the local CLI. Fetches CI and review state, evaluates each feedback item on its merits, fixes valid issues, replies with no-change rationale for invalid or out-of-scope feedback, runs local pre-commit checks, commits, pushes, and loops until CI is green and all feedback has an outcome reply.
+Slash command `/pm-autofix-pr` that iteratively fixes CI failures and addresses reviewer feedback on a GitHub PR from the local CLI. Fetches CI and review state, evaluates each feedback item on its merits, fixes valid issues, replies with no-change rationale for invalid or out-of-scope feedback, auto-resolves merge conflicts with the base branch, runs local pre-commit checks, commits, pushes, and loops until CI is green, the PR has no merge conflicts, and all feedback has an outcome reply.
 
 ## pm-plan
 
