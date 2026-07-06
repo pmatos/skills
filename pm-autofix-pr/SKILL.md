@@ -136,7 +136,7 @@ Initialize `ADDRESSED_THREAD_IDS` with `resolved_thread_ids`. Initialize `REPLIE
 
 Print the initial assessment as a status line — `Found N CI failures, M reviewer feedback items, and merge conflicts: yes/no. Begin processing.` — and proceed unconditionally. **Never** wait for a confirmation: the skill is fully automatic from this point on.
 
-If there is nothing to fix (no CI failures, no unanswered feedback) **and** `has_merge_conflict` is false, report the PR is clean and proceed to Step 6 (monitoring). If `has_merge_conflict` is true, go to Step 5h even when there is no other work.
+If there is nothing to fix (no CI failures, no unanswered feedback), `has_merge_conflict` is false, **and the `errors` list is empty**, report the PR is clean and proceed to Step 6 (monitoring). If `has_merge_conflict` is true, go to Step 5h even when there is no other work. If `errors` is non-empty — including an indeterminate `mergeable == null` recorded in Step 3, or any failed Step 3 MCP fetch — do **not** declare the PR clean and do **not** enter monitoring; fall through to Step 5g's retry path (report the fetch failures and retry after 30 seconds) so the ambiguous state resolves before any success exit. A false "clean" here would otherwise skip Step 5g's error gate entirely under `--monitor 0`.
 
 ### Step 4: Evaluate Every Feedback Item
 
