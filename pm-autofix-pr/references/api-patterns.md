@@ -317,7 +317,7 @@ git fetch <BASE_REMOTE> <base.ref>    # BASE_REMOTE = base repo remote/URL (orig
 git merge --no-edit FETCH_HEAD        # merges exactly what was just fetched — works for a named remote or a URL
 ```
 
-- **Clean merge (exit 0):** run pre-commit checks; on success `git push`; on an unfixable pre-commit failure undo with `git reset --hard ORIG_HEAD` (set by `git merge` to the pre-merge commit) and exit `merge-conflict`.
+- **Clean merge (exit 0):** the merge commit already exists; run pre-commit checks; on success fold any formatter/sub-fix edits into it (`git add` + `git commit --amend --no-edit`) so the pushed tree matches what passed validation and the worktree is clean, then `git push`; on an unfixable pre-commit failure undo with `git reset --hard ORIG_HEAD` (set by `git merge` to the pre-merge commit) and exit `merge-conflict`.
 - **Conflicted merge (non-zero exit):** `git diff --name-only --diff-filter=U` lists the conflicted files. Resolve each by hand (keep both the PR's change and the base's independent change; leave no `<<<<<<<`/`=======`/`>>>>>>>` marker), `git add` them, run pre-commit, then `git commit --no-edit`. If resolution can't be done confidently or pre-commit still fails after one sub-fix, `git merge --abort` and exit `merge-conflict`.
 
 Push the resulting merge commit with the same handling as the section below, then continue the loop so the fresh CI run is awaited and mergeability is re-checked.
