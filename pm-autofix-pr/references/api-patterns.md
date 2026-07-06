@@ -310,11 +310,11 @@ Derive `has_merge_conflict = (mergeable == false) || (mergeable_state == "dirty"
 
 ### Resolving a conflict (Step 5h)
 
-The skill merges the base **into** the PR branch — never rebases — so an already-published branch is not force-pushed and the reviewer's commit history is preserved:
+The skill merges the base **into** the PR branch — never rebases — so an already-published branch is not force-pushed and the reviewer's commit history is preserved. Fetch from `BASE_REMOTE` (captured in Step 1), which is the *base* repository's remote or clone URL — **not** necessarily `origin`. On a fork PR the base branch lives on `upstream` (or a direct URL); `origin/<base.ref>` would be the fork's stale copy or missing entirely:
 
 ```bash
-git fetch origin <base.ref>
-git merge --no-edit origin/<base.ref>
+git fetch <BASE_REMOTE> <base.ref>    # BASE_REMOTE = base repo remote/URL (origin on same-repo PRs, upstream/URL on forks)
+git merge --no-edit FETCH_HEAD        # merges exactly what was just fetched — works for a named remote or a URL
 ```
 
 - **Clean merge (exit 0):** run pre-commit checks; on success `git push`; on an unfixable pre-commit failure undo with `git reset --hard ORIG_HEAD` (set by `git merge` to the pre-merge commit) and exit `merge-conflict`.
