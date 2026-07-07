@@ -19,15 +19,18 @@
 #   4. literal "origin" (final fallback when `git remote` is empty)
 resolve_push_remote() {
   local branch="$1" upstream remote
-  if upstream=$(git rev-parse --abbrev-ref --symbolic-full-name "$branch"@{u} 2>/dev/null) \
-       && [[ -n "$upstream" ]]; then
-    printf '%s' "${upstream%%/*}"; return
+  if upstream=$(git rev-parse --abbrev-ref --symbolic-full-name "$branch@{u}" 2>/dev/null) &&
+    [[ -n "$upstream" ]]; then
+    printf '%s' "${upstream%%/*}"
+    return
   fi
   if remote=$(git config --get "branch.$branch.remote" 2>/dev/null) && [[ -n "$remote" ]]; then
-    printf '%s' "$remote"; return
+    printf '%s' "$remote"
+    return
   fi
   if remote=$(git remote | head -1) && [[ -n "$remote" ]]; then
-    printf '%s' "$remote"; return
+    printf '%s' "$remote"
+    return
   fi
   printf '%s' "origin"
 }
@@ -44,8 +47,8 @@ resolve_push_remote() {
 #      rather than guess.
 resolve_default_branch() {
   local remote="$1" default remote_url remote_repo
-  default=$(git symbolic-ref "refs/remotes/$remote/HEAD" 2>/dev/null \
-    | sed "s|refs/remotes/$remote/||")
+  default=$(git symbolic-ref "refs/remotes/$remote/HEAD" 2>/dev/null |
+    sed "s|refs/remotes/$remote/||")
   if [[ -z "$default" ]]; then
     remote_url=$(git remote get-url "$remote" 2>/dev/null)
     if [[ -n "$remote_url" ]]; then

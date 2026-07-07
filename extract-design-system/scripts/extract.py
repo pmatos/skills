@@ -35,10 +35,10 @@ UA = (
     "Chrome/126.0.0.0 Safari/537.36"
 )
 TIMEOUT = 25
-COLOR_RE = re.compile(
-    r"^\s*(#[0-9a-fA-F]{3,8}\b|rgb|rgba|hsl|hsla|oklab|oklch|lab|lch|color)\b"
+COLOR_RE = re.compile(r"^\s*(#[0-9a-fA-F]{3,8}\b|rgb|rgba|hsl|hsla|oklab|oklch|lab|lch|color)\b")
+COLOR_NAME_RE = re.compile(
+    r"color|fill|stroke|bg|background|border|surface|tint|shade|brand|accent", re.I
 )
-COLOR_NAME_RE = re.compile(r"color|fill|stroke|bg|background|border|surface|tint|shade|brand|accent", re.I)
 
 
 def log(msg: str) -> None:
@@ -106,13 +106,15 @@ def parse_fontface(css_text: str, base_url: str) -> list[dict]:
         style_m = re.search(r"font-style\s*:\s*([^;]+)", block)
         display_m = re.search(r"font-display\s*:\s*([^;]+)", block)
         raw_urls = re.findall(r"url\(\s*['\"]?([^)'\"]+)['\"]?\s*\)", block)
-        fonts.append({
-            "family": (family_m.group(1).strip().strip("'\"") if family_m else None),
-            "weight": weight_m.group(1).strip() if weight_m else None,
-            "style": style_m.group(1).strip() if style_m else None,
-            "display": display_m.group(1).strip() if display_m else None,
-            "urls": [urljoin(base_url, u.strip()) for u in raw_urls],
-        })
+        fonts.append(
+            {
+                "family": (family_m.group(1).strip().strip("'\"") if family_m else None),
+                "weight": weight_m.group(1).strip() if weight_m else None,
+                "style": style_m.group(1).strip() if style_m else None,
+                "display": display_m.group(1).strip() if display_m else None,
+                "urls": [urljoin(base_url, u.strip()) for u in raw_urls],
+            }
+        )
     return fonts
 
 
@@ -220,17 +222,26 @@ def extract(url: str, out: Path, html_override: str | None = None) -> dict:
         if not href:
             continue
         abs_url = urljoin(doc_base, href)
-        if rel_tokens & {"icon", "shortcut", "apple-touch-icon", "apple-touch-icon-precomposed", "mask-icon", "fluid-icon"}:
+        if rel_tokens & {
+            "icon",
+            "shortcut",
+            "apple-touch-icon",
+            "apple-touch-icon-precomposed",
+            "mask-icon",
+            "fluid-icon",
+        }:
             fname = safe_name(abs_url, "favicon.ico")
             dest = out / "images/favicons" / fname
             if download_binary(session, abs_url, dest):
-                manifest["favicons"].append({
-                    "url": abs_url,
-                    "path": str(dest.relative_to(out)),
-                    "rel": " ".join(sorted(rel_tokens)),
-                    "sizes": attr_opt(link, "sizes"),
-                    "type": attr_opt(link, "type"),
-                })
+                manifest["favicons"].append(
+                    {
+                        "url": abs_url,
+                        "path": str(dest.relative_to(out)),
+                        "rel": " ".join(sorted(rel_tokens)),
+                        "sizes": attr_opt(link, "sizes"),
+                        "type": attr_opt(link, "type"),
+                    }
+                )
         elif "manifest" in rel_tokens:
             manifest["manifest_url"] = abs_url
         elif "stylesheet" in rel_tokens:
@@ -300,13 +311,15 @@ def extract(url: str, out: Path, html_override: str | None = None) -> dict:
         digest = hashlib.md5(inner.encode()).hexdigest()[:8]
         fname = f"inline-{i:02d}-{digest}.svg"
         (out / "logos" / fname).write_text(inner, encoding="utf-8")
-        manifest["logos_inline_svg"].append({
-            "path": f"logos/{fname}",
-            "classes": attr_opt(svg, "class"),
-            "id": attr_opt(svg, "id"),
-            "aria_label": attr_opt(svg, "aria-label"),
-            "viewBox": attr_opt(svg, "viewBox"),
-        })
+        manifest["logos_inline_svg"].append(
+            {
+                "path": f"logos/{fname}",
+                "classes": attr_opt(svg, "class"),
+                "id": attr_opt(svg, "id"),
+                "aria_label": attr_opt(svg, "aria-label"),
+                "viewBox": attr_opt(svg, "viewBox"),
+            }
+        )
 
     og_img = manifest["open_graph"].get("og:image") or manifest["twitter"].get("twitter:image")
     if og_img:
@@ -314,11 +327,13 @@ def extract(url: str, out: Path, html_override: str | None = None) -> dict:
         fname = safe_name(abs_og, "og-image")
         dest = out / "images" / fname
         if download_binary(session, abs_og, dest):
-            manifest["images"].append({
-                "source": "og:image",
-                "url": abs_og,
-                "path": f"images/{fname}",
-            })
+            manifest["images"].append(
+                {
+                    "source": "og:image",
+                    "url": abs_og,
+                    "path": f"images/{fname}",
+                }
+            )
 
     if manifest["manifest_url"]:
         r = fetch(session, manifest["manifest_url"])
@@ -338,13 +353,15 @@ def extract(url: str, out: Path, html_override: str | None = None) -> dict:
                     fname = safe_name(abs_icon, "icon")
                     dest = out / "images/favicons" / fname
                     if download_binary(session, abs_icon, dest):
-                        manifest["favicons"].append({
-                            "url": abs_icon,
-                            "path": f"images/favicons/{fname}",
-                            "rel": "manifest-icon",
-                            "sizes": icon.get("sizes"),
-                            "type": icon.get("type"),
-                        })
+                        manifest["favicons"].append(
+                            {
+                                "url": abs_icon,
+                                "path": f"images/favicons/{fname}",
+                                "rel": "manifest-icon",
+                                "sizes": icon.get("sizes"),
+                                "type": icon.get("type"),
+                            }
+                        )
             except (ValueError, KeyError):
                 pass
 
@@ -436,11 +453,11 @@ def write_readme(out: Path, m: dict) -> None:
         for s in m["logos_inline_svg"]:
             bits = [f"`{s['path']}`"]
             if s.get("aria_label"):
-                bits.append(f"aria-label=\"{s['aria_label']}\"")
+                bits.append(f'aria-label="{s["aria_label"]}"')
             if s.get("classes"):
-                bits.append(f"class=\"{s['classes']}\"")
+                bits.append(f'class="{s["classes"]}"')
             if s.get("viewBox"):
-                bits.append(f"viewBox=\"{s['viewBox']}\"")
+                bits.append(f'viewBox="{s["viewBox"]}"')
             lines.append(f"- {' — '.join(bits)}")
         lines.append("")
 
@@ -503,8 +520,12 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("url", help="Full https URL to extract from")
     ap.add_argument("--output", required=True, type=Path, help="Target directory (will be created)")
-    ap.add_argument("--html", type=Path, default=None,
-                    help="Path to a pre-rendered HTML file (from Playwright). Skips requests fetch.")
+    ap.add_argument(
+        "--html",
+        type=Path,
+        default=None,
+        help="Path to a pre-rendered HTML file (from Playwright). Skips requests fetch.",
+    )
     args = ap.parse_args()
 
     args.output.mkdir(parents=True, exist_ok=True)
