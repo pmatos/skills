@@ -1,0 +1,10 @@
+# This project pins GitHub Actions to version tags (e.g. @v4) rather than commit
+# SHAs, so relax zizmor's unpinned-uses audit from the default hash-pin policy to
+# ref-pin. Note: ref-pin accepts any git ref (a tag OR a branch), so it does not
+# enforce tag-only pins by itself — the repo relies on maintainer convention to
+# keep actions on version tags.
+rules:
+  unpinned-uses:
+    config:
+      policies:
+        "*": ref-pin

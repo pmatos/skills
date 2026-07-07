@@ -2,6 +2,19 @@
 
 Personal skills for agentic coding with Claude Code.
 
+## Checks
+
+Run the lint gate before committing (also enforced in CI by
+`.github/workflows/lint.yml`):
+
+```bash
+pre-commit run --all-files
+```
+
+It covers ruff (Python), shfmt + shellcheck (shell), markdownlint-cli2 (Markdown),
+actionlint + zizmor (workflows), and the SKILL.md frontmatter validator. Install
+the git hook once with `pre-commit install`.
+
 ## cp
 
 Slash command `/cp` that commits and pushes changes to the current branch, running only the pre-commit checks described in the project's CLAUDE.md (or AGENTS.md) — nothing more, nothing less.

@@ -35,7 +35,7 @@
 
 set -u
 
-if (( $# == 0 )); then
+if (($# == 0)); then
   printf 'collect-instructions.sh: no paths given.\n' >&2
   exit 1
 fi
@@ -45,10 +45,10 @@ if [[ -z "$root" ]]; then
   printf 'collect-instructions.sh: not inside a git repository.\n' >&2
   exit 1
 fi
-root="$(cd "$root" && pwd -P)"     # canonical, symlink-resolved repo root
+root="$(cd "$root" && pwd -P)" # canonical, symlink-resolved repo root
 
-declare -a found_abs=()            # absolute paths already emitted (for -ef dedup)
-declare -a out_lines=()            # "<depth>\t<repo-relative path>" pending sort
+declare -a found_abs=() # absolute paths already emitted (for -ef dedup)
+declare -a out_lines=() # "<depth>\t<repo-relative path>" pending sort
 
 # Record a found instruction file unless an alias of it (same inode, e.g. an
 # AGENTS.md symlinked to CLAUDE.md) was already recorded.
@@ -59,7 +59,8 @@ record() {
   done
   found_abs+=("$abs")
   rel="${abs#"$root"/}"
-  depth="$(printf '%s' "$rel" | tr -cd '/' | wc -c)"; depth=$((depth))
+  depth="$(printf '%s' "$rel" | tr -cd '/' | wc -c)"
+  depth=$((depth))
   out_lines+=("$depth"$'\t'"$rel")
 }
 
@@ -77,7 +78,7 @@ walk_up() {
   local -a chain=()
   case "$start" in
     /*) : ;;
-    *)  start="$(pwd -P)/$start" ;;
+    *) start="$(pwd -P)/$start" ;;
   esac
   if [[ -d "$start" ]]; then
     existing="$start"
@@ -101,7 +102,7 @@ walk_up() {
     [[ "$d" == "$root" ]] && break
     d="$(dirname -- "$d")"
   done
-  for (( i=${#chain[@]}-1; i>=0; i-- )); do
+  for ((i = ${#chain[@]} - 1; i >= 0; i--)); do
     scan_dir "${chain[i]}"
   done
 }
@@ -110,7 +111,7 @@ for p in "$@"; do
   walk_up "$p"
 done
 
-if (( ${#out_lines[@]} > 0 )); then
+if ((${#out_lines[@]} > 0)); then
   printf '%s\n' "${out_lines[@]}" | sort -s -t"$(printf '\t')" -k1,1n -k2,2 | cut -f2-
 fi
 exit 0

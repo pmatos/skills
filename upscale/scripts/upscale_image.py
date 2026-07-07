@@ -67,7 +67,9 @@ def download_model(scale: int, cache_dir: Path) -> Path:
     return model_path
 
 
-def choose_scale(src_width: int, src_height: int, target: tuple[int, int] | None, factor: int) -> int:
+def choose_scale(
+    src_width: int, src_height: int, target: tuple[int, int] | None, factor: int
+) -> int:
     if target is None:
         return factor
     target_width, target_height = target
@@ -87,7 +89,9 @@ def intervals(length: int, step: int) -> list[tuple[int, int]]:
     return spans
 
 
-def edsr_upscale(img: np.ndarray, model_path: Path, scale: int, tile_size: int, overlap: int) -> np.ndarray:
+def edsr_upscale(
+    img: np.ndarray, model_path: Path, scale: int, tile_size: int, overlap: int
+) -> np.ndarray:
     height, width = img.shape[:2]
     sr = cv2.dnn_superres.DnnSuperResImpl_create()
     sr.readModel(str(model_path))
@@ -124,12 +128,16 @@ def edsr_upscale(img: np.ndarray, model_path: Path, scale: int, tile_size: int, 
     return out
 
 
-def fit_image(image: Image.Image, target: tuple[int, int], mode: str, background: str) -> Image.Image:
+def fit_image(
+    image: Image.Image, target: tuple[int, int], mode: str, background: str
+) -> Image.Image:
     width, height = target
     if mode == "stretch":
         return image.resize((width, height), Image.Resampling.LANCZOS)
     if mode == "cover":
-        return ImageOps.fit(image, (width, height), method=Image.Resampling.LANCZOS, centering=(0.5, 0.5))
+        return ImageOps.fit(
+            image, (width, height), method=Image.Resampling.LANCZOS, centering=(0.5, 0.5)
+        )
     if mode == "contain":
         contained = ImageOps.contain(image, (width, height), method=Image.Resampling.LANCZOS)
         canvas = Image.new("RGB", (width, height), ImageColor.getrgb(background))
@@ -156,15 +164,25 @@ def main() -> int:
     parser.add_argument("input", type=Path, help="source raster image")
     parser.add_argument("--output", "-o", type=Path, help="output image path")
     parser.add_argument("--size", type=parse_size, help="exact final size, e.g. 5120x2160")
-    parser.add_argument("--factor", type=int, choices=(2, 3, 4), default=2, help="scale factor when --size is omitted")
+    parser.add_argument(
+        "--factor",
+        type=int,
+        choices=(2, 3, 4),
+        default=2,
+        help="scale factor when --size is omitted",
+    )
     parser.add_argument("--model-scale", choices=("auto", "2", "3", "4"), default="auto")
     parser.add_argument("--fit", choices=("stretch", "cover", "contain"), default="stretch")
     parser.add_argument("--background", default="#000000", help="padding color for --fit contain")
     parser.add_argument("--tile-size", type=int, default=512, help="source-space tile core size")
     parser.add_argument("--overlap", type=int, default=96, help="source-space tile overlap")
     parser.add_argument("--cache-dir", type=Path, default=default_cache_dir())
-    parser.add_argument("--raw-output", type=Path, help="optional path for raw EDSR output before final resize")
-    parser.add_argument("--keep-raw", action="store_true", help="write a raw EDSR image next to the final output")
+    parser.add_argument(
+        "--raw-output", type=Path, help="optional path for raw EDSR output before final resize"
+    )
+    parser.add_argument(
+        "--keep-raw", action="store_true", help="write a raw EDSR image next to the final output"
+    )
     args = parser.parse_args()
 
     src = args.input.expanduser().resolve()
@@ -180,7 +198,9 @@ def main() -> int:
         raise SystemExit(f"failed to read image: {src}")
 
     src_height, src_width = img.shape[:2]
-    target = args.size if args.size is not None else (src_width * args.factor, src_height * args.factor)
+    target = (
+        args.size if args.size is not None else (src_width * args.factor, src_height * args.factor)
+    )
     if args.model_scale == "auto":
         scale = choose_scale(src_width, src_height, args.size, args.factor)
     else:
@@ -195,9 +215,15 @@ def main() -> int:
     source_aspect = src_width / src_height
     aspect_delta = abs(target_aspect - source_aspect) / source_aspect
     if args.fit == "stretch" and aspect_delta > 0.01:
-        log(f"warning: stretching aspect ratio by {aspect_delta:.1%}; use --fit cover or --fit contain to preserve aspect")
+        log(
+            f"warning: stretching aspect ratio by {aspect_delta:.1%}; use --fit cover or --fit contain to preserve aspect"
+        )
 
-    output = args.output.expanduser().resolve() if args.output else output_default(src, args.size, args.factor)
+    output = (
+        args.output.expanduser().resolve()
+        if args.output
+        else output_default(src, args.size, args.factor)
+    )
     reject_if_source(output, src, "--output")
     output.parent.mkdir(parents=True, exist_ok=True)
 
@@ -209,7 +235,9 @@ def main() -> int:
         reject_if_source(raw_path, src, "--raw-output")
 
     model_path = download_model(scale, args.cache_dir.expanduser())
-    log(f"source {src_width}x{src_height}; EDSR_x{scale}; final {target[0]}x{target[1]}; fit={args.fit}")
+    log(
+        f"source {src_width}x{src_height}; EDSR_x{scale}; final {target[0]}x{target[1]}; fit={args.fit}"
+    )
     raw = edsr_upscale(img, model_path, scale, args.tile_size, args.overlap)
 
     if raw_path is not None:
@@ -218,12 +246,16 @@ def main() -> int:
         log(f"raw {raw.shape[1]}x{raw.shape[0]} -> {raw_path}")
 
     rgb = cv2.cvtColor(raw, cv2.COLOR_BGR2RGB)
-    final = fit_image(Image.fromarray(rgb).convert("RGB"), target, args.fit, args.background).convert("RGB")
+    final = fit_image(
+        Image.fromarray(rgb).convert("RGB"), target, args.fit, args.background
+    ).convert("RGB")
     final.save(output)
 
     with Image.open(output) as check:
         if check.size != target:
-            raise SystemExit(f"verification failed: wrote {check.size[0]}x{check.size[1]}, expected {target[0]}x{target[1]}")
+            raise SystemExit(
+                f"verification failed: wrote {check.size[0]}x{check.size[1]}, expected {target[0]}x{target[1]}"
+            )
     print(output)
     print(f"verified {target[0]}x{target[1]}")
     return 0

@@ -1,0 +1,48 @@
+# Local pre-commit gate mirroring .github/workflows/lint.yml. Set up with:
+#   pre-commit install
+# and run across the whole repo with:
+#   pre-commit run --all-files
+#
+# shellcheck runs as a local uvx hook (koalaman's hook is docker-only) so the
+# whole config provisions with just uv, go, node and python — no Docker.
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.15.15
+    hooks:
+      - id: ruff-check
+      - id: ruff-format
+
+  - repo: https://github.com/scop/pre-commit-shfmt
+    rev: v3.10.0-2
+    hooks:
+      - id: shfmt-src
+        args: [-w, -i, "2", -ci]
+
+  - repo: https://github.com/DavidAnson/markdownlint-cli2
+    rev: v0.23.0
+    hooks:
+      - id: markdownlint-cli2
+
+  - repo: https://github.com/rhysd/actionlint
+    rev: v1.7.7
+    hooks:
+      - id: actionlint
+
+  - repo: https://github.com/woodruffw/zizmor-pre-commit
+    rev: v1.26.1
+    hooks:
+      - id: zizmor
+
+  - repo: local
+    hooks:
+      - id: shellcheck
+        name: shellcheck
+        entry: uvx --from shellcheck-py shellcheck -x
+        language: system
+        types: [shell]
+      - id: validate-skill-frontmatter
+        name: Validate skill frontmatter
+        entry: uv run .github/scripts/validate-frontmatter.py
+        language: system
+        files: /SKILL\.md$
+        pass_filenames: false

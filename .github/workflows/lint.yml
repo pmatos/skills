@@ -1,0 +1,65 @@
+name: Lint
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# Least privilege: the linters only need to read the checked-out tree.
+permissions:
+  contents: read
+
+# Cancel superseded runs on the same ref (e.g. rapid pushes to a PR).
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    env:
+      SHFMT_VERSION: v3.10.0
+      ACTIONLINT_VERSION: v1.7.7
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v8.2.0
+
+      - name: Install pinned shfmt and actionlint
+        run: |
+          mkdir -p "$HOME/.local/bin"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          curl -sSfL "https://github.com/mvdan/sh/releases/download/${SHFMT_VERSION}/shfmt_${SHFMT_VERSION}_linux_amd64" \
+            -o "$HOME/.local/bin/shfmt"
+          chmod +x "$HOME/.local/bin/shfmt"
+          curl -sSfL "https://github.com/rhysd/actionlint/releases/download/${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION#v}_linux_amd64.tar.gz" \
+            | tar -xz -C "$HOME/.local/bin" actionlint
+
+      - name: markdownlint
+        run: npx --yes markdownlint-cli2@0.23.0
+
+      - name: shellcheck
+        run: git ls-files -z '*.sh' | xargs -0 -r uvx --from shellcheck-py shellcheck -x
+
+      - name: shfmt
+        run: git ls-files -z '*.sh' | xargs -0 -r shfmt -i 2 -ci -d
+
+      - name: ruff
+        run: |
+          uvx ruff@0.15.15 check .
+          uvx ruff@0.15.15 format --check .
+
+      - name: actionlint
+        run: actionlint
+
+      - name: zizmor
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: uvx zizmor@1.26.1 .github/
+
+      - name: Validate skill frontmatter
+        run: uv run .github/scripts/validate-frontmatter.py
