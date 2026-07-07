@@ -59,7 +59,7 @@ mcp__github__pull_request_read(
 )
 ```
 
-Returns full PR details including `title`, `body`, `head.ref`, `head.sha`, `url`. Validate `head.ref` matches the local branch.
+Returns full PR details including `title`, `body`, `head.ref`, `head.sha`, `base.ref`, `url`, and mergeability (`mergeable`, `mergeable_state`). Validate `head.ref` matches the local branch. See "Mergeability and base-branch conflict resolution" below for how the skill consumes the mergeability fields.
 
 ## Polling (CI / review / comment monitoring)
 
@@ -95,6 +95,7 @@ The "five Step 3 MCP calls" are exactly the sources Step 3 uses to build the sta
 A snapshot is considered changed (and the loop wakes the evaluator) if any of these differ from the previous iteration:
 
 - `head.sha` from `pull_request_read method=get` — a new push from another contributor.
+- `has_merge_conflict` (derived from `mergeable`/`mergeable_state` on `pull_request_read method=get`) flipped from false to true — the base branch advanced and now conflicts with the PR, which sends the loop into Step 5h.
 - Any check run from `get_check_runs` transitioned from null/`in_progress` to a terminal `conclusion`, or any check run was added or removed.
 - Review-thread count, review-summary count, or PR conversation comment count from `get_review_comments` / `get_reviews` / `get_comments` changed.
 - Any review thread's latest comment `updatedAt`/`updated_at`, any review's `updated_at`, or any PR conversation comment's `updated_at` advanced past the value recorded in the previous snapshot. This catches edits as well as new items uniformly.
@@ -287,6 +288,41 @@ If any MCP call errors with `403` or `429`, wait 60 seconds and retry once. Afte
 - Resolve failures (`pull_request_review_write` with `method="resolve_thread"`) are non-fatal but the thread stays off `ADDRESSED_THREAD_IDS` so it re-surfaces.
 - Issue-create failures (`issue_write` with `method="create"`) trigger the DEFER fallback: post the DEFER reply with `TODO: file as a separate issue — automated issue creation failed (<error>).` and record `issue_number=null` in `DEFERRED_ITEMS`. Do not block convergence.
 - State-fetch failures get added to the `errors` list and prevent the fixed-point declaration in Step 5g.
+
+## Mergeability and base-branch conflict resolution
+
+`pull_request_read method=get` surfaces the same two fields the GitHub REST `GET /pulls/{n}` endpoint returns:
+
+| Field | Values | Meaning |
+|-------|--------|---------|
+| `mergeable` | `true` / `false` / `null` | `null` = GitHub has not finished computing the merge yet. `false` = the PR conflicts with its base. |
+| `mergeable_state` | `clean`, `dirty`, `blocked`, `behind`, `unstable`, `has_hooks`, `unknown`, `draft` | `dirty` is the content-conflict state. The others are not conflicts (see below). |
+
+GitHub computes mergeability asynchronously: the **first** `get` after the base or head moves often returns `mergeable: null`. The skill re-fetches `method=get` up to 3 times with a 3-second sleep and only acts on a definitive `true`/`false`. If it stays `null`, record the indeterminate state in `errors` so Step 5g re-fetches instead of declaring a false fixed point.
+
+Derive `has_merge_conflict = (mergeable == false) || (mergeable_state == "dirty")`. Only these mean "conflicts with base." The other terminal states do **not** block the fixed point:
+
+- `clean` — mergeable, nothing to do.
+- `behind` — the branch is behind base but has no conflicts; a repo may still require it be up to date, but that is a merge-queue/branch-protection concern, not a conflict. Step 5h's base merge would clear it as a side effect if a conflict ever coexists, but `behind` alone does not trigger 5h.
+- `blocked` — a required check or review is pending; surfaced through CI/review channels, not here.
+- `unstable` — mergeable but a non-required check is failing; handled via `get_check_runs`.
+- `has_hooks` / `unknown` — treat as non-conflicting; the re-fetch loop above resolves `unknown`→a real state in most cases.
+
+### Resolving a conflict (Step 5h)
+
+The skill merges the base **into** the PR branch — never rebases — so an already-published branch is not force-pushed and the reviewer's commit history is preserved. Fetch from `BASE_REMOTE` (captured in Step 1), which is the *base* repository's remote or clone URL — **not** necessarily `origin`. On a fork PR the base branch lives on `upstream` (or a direct URL); `origin/<base.ref>` would be the fork's stale copy or missing entirely:
+
+```bash
+git fetch <BASE_REMOTE> <base.ref>    # BASE_REMOTE = base repo remote/URL (origin on same-repo PRs, upstream/URL on forks)
+git merge --no-edit FETCH_HEAD        # merges exactly what was just fetched — works for a named remote or a URL
+```
+
+- **Clean merge (exit 0):** the merge commit already exists; run pre-commit checks; on success fold any formatter/sub-fix edits into it (`git add` + `git commit --amend --no-edit`) so the pushed tree matches what passed validation and the worktree is clean, then `git push`; on an unfixable pre-commit failure undo with `git reset --hard ORIG_HEAD` (set by `git merge` to the pre-merge commit) and exit `merge-conflict`.
+- **Conflicted merge (non-zero exit):** `git diff --name-only --diff-filter=U` lists the conflicted files. Resolve each by hand (keep both the PR's change and the base's independent change; leave no `<<<<<<<`/`=======`/`>>>>>>>` marker), `git add` them, run pre-commit, then `git commit --no-edit`. If resolution can't be done confidently or pre-commit still fails after one sub-fix, `git merge --abort` and exit `merge-conflict`.
+
+Push the resulting merge commit with the same handling as the section below, then continue the loop so the fresh CI run is awaited and mergeability is re-checked.
+
+This `merge-conflict` exit (conflict with the base branch) is distinct from the `rebase-conflict` exit below (conflict with the PR branch's **own** upstream during a push).
 
 ## Push handling (local `git`, fully automatic)
 

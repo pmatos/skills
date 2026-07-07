@@ -6,7 +6,7 @@ user-invocable: true
 
 # Autofix PR
 
-Iteratively fix CI failures and address reviewer feedback on a GitHub PR until a true fixed point is reached — all CI green, every feedback item triaged into one of three outcomes (FIX, DEFER, REJECT), and every feedback item has a reply documenting the outcome. A single invocation handles everything end-to-end without user input.
+Iteratively fix CI failures and address reviewer feedback on a GitHub PR until a true fixed point is reached — all CI green, the PR free of merge conflicts with its base branch, every feedback item triaged into one of three outcomes (FIX, DEFER, REJECT), and every feedback item has a reply documenting the outcome. A single invocation handles everything end-to-end without user input.
 
 ## Core Principle: Three Outcomes per Feedback Item
 
@@ -24,7 +24,7 @@ Every reviewer feedback item must get an explicit reply before the skill can con
 
 ## Core Principle: Never Prompt the User
 
-This skill runs end-to-end without asking the user anything once invoked. There is no "begin fixing?" confirmation, no "ambiguous feedback, how should I handle it?", no "pre-commit failed, retry?", no "stale loop, continue?", no "CI timeout, keep waiting?". Every decision point has a deterministic auto-action defined below; uncertain feedback defaults to DEFER (file an issue and let humans resolve later); unrecoverable conditions exit cleanly with a final summary. The only way the skill stops mid-flight is by reaching the fixed point, hitting a hard precondition failure (missing GitHub MCP, missing cross-harness CLI, no PR for the branch), or hitting an unrecoverable error (rebase conflict, persistent push failure). Each exit goes through Step 7's summary.
+This skill runs end-to-end without asking the user anything once invoked. There is no "begin fixing?" confirmation, no "ambiguous feedback, how should I handle it?", no "pre-commit failed, retry?", no "merge conflict, resolve it?", no "stale loop, continue?", no "CI timeout, keep waiting?". Every decision point has a deterministic auto-action defined below; uncertain feedback defaults to DEFER (file an issue and let humans resolve later); merge conflicts with the base branch are auto-resolved by merging the base in (Step 5h); unrecoverable conditions exit cleanly with a final summary. The only way the skill stops mid-flight is by reaching the fixed point, hitting a hard precondition failure (missing GitHub MCP, missing cross-harness CLI, no PR for the branch), or hitting an unrecoverable error (unresolvable merge conflict, rebase conflict, persistent push failure). Each exit goes through Step 7's summary.
 
 ## Prerequisites
 
@@ -43,7 +43,7 @@ Override via prompt arguments (e.g., `/pm-autofix-pr 10 --ci-timeout 30 --monito
 | `POLL_INTERVAL` | 30 | Seconds between PR-state re-fetches while waiting for CI or monitoring. |
 | `LOG_TAIL_LINES` | 500 | Lines of CI failure log to inspect. |
 
-There is no iteration limit. The loop runs until one of: fixed point reached, stale loop detected, CI timeout, rebase conflict, persistent push failure, or monitoring window elapsed. Every exit goes through Step 7. The skill never prompts the user.
+There is no iteration limit. The loop runs until one of: fixed point reached, stale loop detected, CI timeout, unresolvable merge conflict, rebase conflict, persistent push failure, or monitoring window elapsed. Every exit goes through Step 7. The skill never prompts the user.
 
 ## MCP Tools Used
 
@@ -53,7 +53,7 @@ All GitHub interaction is direct MCP tool calls — no bundled scripts.
 |------|---------|
 | `mcp__github__get_me` | Preflight gate; also returns the current user's `login` for self-comment filtering. |
 | `mcp__github__list_pull_requests` | Auto-detect the PR for the current branch. |
-| `mcp__github__pull_request_read` | Fetch PR details, check runs, review comments/threads, reviews, conversation comments, status. Polled every `POLL_INTERVAL` seconds while waiting on CI or in the monitoring window. |
+| `mcp__github__pull_request_read` | Fetch PR details, check runs, review comments/threads, reviews, conversation comments, status, and mergeability (`mergeable` / `mergeable_state`). Polled every `POLL_INTERVAL` seconds while waiting on CI or in the monitoring window. |
 | `mcp__github__add_reply_to_pull_request_comment` | Post replies on inline review threads (FIX, DEFER, and REJECT replies). |
 | `mcp__github__add_issue_comment` | Post PR-level replies for review summaries and PR conversation comments. |
 | `mcp__github__pull_request_review_write` (`method="resolve_thread"`) | Resolve threads after a fix is pushed. |
@@ -99,12 +99,12 @@ Do not fall back to `gh` for the workflow. On success, capture `login` as `GH_US
 ### Step 1: Identify the PR
 
 1. Get the current branch: `git rev-parse --abbrev-ref HEAD`.
-2. If a PR number was provided as argument, resolve its repo via `mcp__github__pull_request_read` method=`get` (requires owner/repo — derive them from `origin` as in step 3a; if the resolved PR's `head.ref` doesn't match the local branch, warn and continue with the user's explicit number). Skip to step 5.
+2. If a PR number was provided as argument, resolve its repo via `mcp__github__pull_request_read` method=`get` (requires owner/repo — derive them from `origin` as in step 3a; if the resolved PR's `head.ref` doesn't match the local branch, warn and continue with the user's explicit number). Then **skip the auto-detect in step 3 and go straight to step 4** so the same validation and base capture (`base.ref`, `base.repo`, `BASE_REMOTE`) runs — otherwise Step 5h's `git fetch <BASE_REMOTE> <base.ref>` would run with `BASE_REMOTE` unset even for a same-repo PR.
 3. Auto-detect the PR. Try the following resolution strategies in order and stop at the first that yields exactly one open PR whose `head.ref` matches the local branch:
    - **3a. Origin lookup.** Parse `git remote get-url origin` to `{owner}/{repo}` (strip `git@github.com:`, `https://github.com/`, trailing `.git`). Call `mcp__github__list_pull_requests` with `head={owner}:{branch}`, `state=open`, `perPage=5`.
    - **3b. Upstream lookup (fork workflow).** If step 3a returned no PRs and `git remote get-url upstream` exists, parse it the same way to `{upstream_owner}/{upstream_repo}` and call `mcp__github__list_pull_requests` against that repo with `head={origin_owner}:{branch}` (PRs from a fork use the fork owner as the head prefix).
    - **3c. `gh pr view` fallback.** If both MCP lookups fail and `gh` is available, run `gh pr view --json number,headRepositoryOwner,headRepository,baseRepositoryOwner,baseRepository,url` to let `gh` resolve the base repo via `git config`. On success, treat the returned `baseRepositoryOwner.login` / `baseRepository.name` as the PR's owner/repo. If `gh` is not installed or returns nothing, stop and tell the user there is no open PR for the current branch.
-4. Validate by calling `mcp__github__pull_request_read` method=`get` on the resolved `{owner, repo, pullNumber}` to retrieve `title`, `body`, `head.ref`, `head.sha`, `base.ref`, `url`. Confirm `head.ref` matches the local branch. Capture `base.ref` for use in Step 5d's first-push fallback.
+4. Validate — **this runs for both the explicit-number path (step 2) and the auto-detected path (step 3)** — by calling `mcp__github__pull_request_read` method=`get` on the resolved `{owner, repo, pullNumber}` to retrieve `title`, `body`, `head.ref`, `head.sha`, `base.ref`, `base.repo` (the base repository's `full_name`), and `url`. Confirm `head.ref` matches the local branch. Capture `base.ref` for Step 5d's first-push fallback and Step 5h's base-branch merge, and capture **`BASE_REMOTE`** — the fetch source for the *base* repository, which is **not** always `origin`. Resolve it by matching `git remote -v` URLs to `{base_owner}/{base_repo}` (apply the same `git@github.com:` / `https://github.com/` / trailing-`.git` stripping as 3a): `origin` on the 3a origin path, `upstream` on the 3b fork path, and on the 3c `gh` path the remote matching `baseRepositoryOwner/baseRepository`. If no local remote points at the base repository (common for a fork checkout with no `upstream`), set `BASE_REMOTE` to the base repo's clone URL `https://github.com/{base_owner}/{base_repo}.git` — `git fetch` accepts a URL in place of a remote name, so Step 5h works either way.
 
 ### Step 2: Read Project Pre-commit Requirements
 
@@ -117,6 +117,7 @@ Issue these MCP calls (paginate where applicable) and merge into a single state 
 | State field | Source |
 |---|---|
 | `head_sha` | `pull_request_read method=get` → `head.sha` |
+| `has_merge_conflict` | `pull_request_read method=get` → `mergeable` (bool or `null`) and `mergeable_state` (string). If `mergeable` is `null`, GitHub is still computing mergeability in the background — re-fetch `method=get` up to 3 times with a 3-second sleep between tries, and only treat a definitive `true`/`false` as authoritative. Set `has_merge_conflict = true` when `mergeable == false` **or** `mergeable_state == "dirty"` (the PR conflicts with its base branch). Any other terminal state (`clean`, `blocked`, `behind`, `unstable`, `has_hooks`, `unknown`) sets `has_merge_conflict = false` — those don't indicate a content conflict and don't block the fixed point. If `mergeable` is still `null` after the re-fetches, leave `has_merge_conflict = false` but record the indeterminate state in `errors` so Step 5g re-fetches instead of declaring a false fixed point. |
 | `ci_failures` | `pull_request_read method=get_check_runs` → keep entries whose `conclusion ∈ {failure, timed_out, cancelled, startup_failure, action_required}`. For each `failure` whose `app.slug == "github-actions"`, mark `fixable=true` and fetch the log tail with the `Bash` command shown just below this table (kept out of the cell so the shell pipe stays a real pipe). Other failure types are non-fixable — report them. |
 | `review_threads` | `pull_request_read method=get_review_comments` (paginate via `perPage=100`, `after`). Split into `unresolved = [t for t in threads if not t.isResolved]` and `resolved_thread_ids = [t.id for t in threads if t.isResolved]`. For each unresolved thread, take the last non-self element of `comments` (sorted by `createdAt` if order is not guaranteed and `author.login != GH_USER`) as `latestReviewerComment`. Drop self-only threads whose `latestReviewerComment` is absent from `feedback_items`; they are author notes, not reviewer feedback, and must not be dereferenced later. |
 | `review_summaries` | `pull_request_read method=get_reviews`. Apply supersession (see below). |
@@ -142,9 +143,9 @@ Build `feedback_items` from:
 
 Initialize `ADDRESSED_THREAD_IDS` with `resolved_thread_ids`. Initialize `REPLIED_ITEM_KEYS = {}` for review summaries and PR conversation comments that already received an outcome reply during this invocation. Initialize `OUTCOME_MARKERS = {}` (`item_key → latest_reviewer_marker_at_outcome`) covering both REJECTED and DEFERRED items so a later reviewer edit re-enters evaluation. Initialize `DEFERRED_ITEMS = []` (one entry per filed tracking issue, used by Step 7's summary).
 
-Print the initial assessment as a status line — `Found N CI failures and M reviewer feedback items. Begin processing.` — and proceed unconditionally. **Never** wait for a confirmation: the skill is fully automatic from this point on.
+Print the initial assessment as a status line — `Found N CI failures, M reviewer feedback items, and merge conflicts: yes/no. Begin processing.` — and proceed unconditionally. **Never** wait for a confirmation: the skill is fully automatic from this point on.
 
-If nothing to fix, report the PR is clean and proceed to Step 6 (monitoring).
+If there is nothing to fix (no CI failures, no unanswered feedback), `has_merge_conflict` is false, **and the `errors` list is empty**, report the PR is clean and proceed to Step 6 (monitoring). If `has_merge_conflict` is true, go to Step 5h even when there is no other work. If `errors` is non-empty — including an indeterminate `mergeable == null` recorded in Step 3, or any failed Step 3 MCP fetch — do **not** declare the PR clean and do **not** enter monitoring; fall through to Step 5g's retry path (report the fetch failures and retry after 30 seconds) so the ambiguous state resolves before any success exit. A false "clean" here would otherwise skip Step 5g's error gate entirely under `--monitor 0`.
 
 ### Step 4: Evaluate Every Feedback Item
 
@@ -330,6 +331,7 @@ This step is **mandatory** — never skip it. If a reply or resolve call fails w
 2. Re-run Step 3's MCP calls to rebuild PR state.
 3. Compare against the previous snapshot. Treat any of the following as a "change event" worth re-entering Step 4 / Step 5:
    - `head_sha` changed (new push from another contributor).
+   - `has_merge_conflict` flipped from false to true (the base branch advanced and now conflicts with the PR) — re-enter to run Step 5h.
    - Any check run's `conclusion` transitioned from null/`in_progress` to a terminal value, or any check run was added/removed.
    - Review thread count, review summary count, or PR conversation comment count changed, **or** any of their `updated_at` (or per-comment `updatedAt`) timestamps advanced past the previous snapshot. This catches new comments, edited comments, and new reviews uniformly.
 4. If nothing changed and CI is still in flight, loop back to step 1.
@@ -338,25 +340,46 @@ Track wall-clock elapsed time since the last commit was pushed. If `CI_TIMEOUT` 
 
 This polling path is the only mechanism the skill uses to detect new state. It does not depend on `<github-webhook-activity>` envelopes or any subscription tool; those are not available in the standard Claude Code CLI or Codex CLI sessions this skill targets.
 
-**5g. Re-fetch state and check for fixed point.** Re-run Step 3's MCP calls. Filter out threads whose ID is in `ADDRESSED_THREAD_IDS` and PR-level feedback whose key is in `REPLIED_ITEM_KEYS`. For each item in `OUTCOME_MARKERS`, suppress it **only if** its latest reviewer marker still matches the value recorded at the prior REJECT/DEFER outcome; if a later reviewer reply exists, remove the item from `OUTCOME_MARKERS` and treat it as fresh feedback to re-evaluate in Step 4. If the merged state has a non-empty `errors` list, do **not** declare a fixed point — report the fetch failures and retry after 30 seconds.
+**5g. Re-fetch state and check for fixed point.** Re-run Step 3's MCP calls. Filter out threads whose ID is in `ADDRESSED_THREAD_IDS` and PR-level feedback whose key is in `REPLIED_ITEM_KEYS`. For each item in `OUTCOME_MARKERS`, suppress it **only if** its latest reviewer marker still matches the value recorded at the prior REJECT/DEFER outcome; if a later reviewer reply exists, remove the item from `OUTCOME_MARKERS` and treat it as fresh feedback to re-evaluate in Step 4. If the merged state has a non-empty `errors` list (including an indeterminate `mergeable == null`), do **not** declare a fixed point — report the fetch failures and retry after 30 seconds.
 
-**Fixed point reached** if:
+**Fixed point reached** if **all** of:
 - `ci_failures` is empty after filtering out `cancelled` (the only non-success conclusion treated as informational). Any remaining entry — including `timed_out`, `startup_failure`, `action_required`, and non-`github-actions` `failure` — blocks convergence and is reported to the user.
 - No reviewer feedback item remains without an evaluation decision and an outcome reply.
+- `has_merge_conflict` is false — the PR has no merge conflicts with its base branch. **This is a hard gate: never declare a fixed point while the PR is conflicted.** If `has_merge_conflict` is true, do not converge — run Step 5h to resolve the conflict, then continue the loop. (A `null`/indeterminate `mergeable` is not "false"; it was recorded in `errors` above, so this branch retries rather than converging.)
 
 → Proceed to Step 6.
 
-**Stale loop detected** if the same CI checks are failing with similar error patterns as the previous iteration → record `stale_loop` in the final summary and jump to Step 7. Do not prompt the user. (`BLOCKED_ITEMS` cannot accumulate across iterations because Step 5b now converts each blocked FIX into an `automated-fix-failed` DEFER and clears the list.)
+**Merge conflict present** (`has_merge_conflict` true) → run Step 5h, then continue the loop.
+
+**Stale loop detected** if the same CI checks are failing with similar error patterns as the previous iteration, **or** two consecutive iterations resolved base-branch conflicts yet the PR is still reported non-mergeable → record `stale_loop` in the final summary and jump to Step 7. Do not prompt the user. (`BLOCKED_ITEMS` cannot accumulate across iterations because Step 5b now converts each blocked FIX into an `automated-fix-failed` DEFER and clears the list.)
 
 **New issues found** → run Step 4 (evaluate new feedback) and continue the loop.
 
+**5h. Resolve merge conflicts with the base branch.** Runs whenever the fetched state has `has_merge_conflict == true`. The PR branch has diverged from its base (`base.ref`, captured in Step 1) in a way GitHub can't auto-merge; left alone the PR is unmergeable and must never be reported as a fixed point. Resolve by merging the base branch **into** the PR branch — merge, not rebase, because the PR branch is already published and a merge avoids a force-push and preserves the reviewer-visible commit history.
+
+**Precondition:** the worktree must be clean (`git status --porcelain` empty). Step 5b leaves it clean; if it is not, jump to Step 7 with `exit reason: dirty-worktree`.
+
+1. **Fetch the base.** `git fetch <BASE_REMOTE> <base.ref>`, using the `BASE_REMOTE` captured in Step 1 — the base repository's remote or clone URL, **not** necessarily `origin`. For a fork PR the base lives on `upstream` (or a direct URL), and fetching `origin/<base.ref>` would merge the fork's stale copy of the branch — or fail outright — leaving GitHub's conflict unresolved and dead-ending the loop.
+2. **Merge the base in.** `git merge --no-edit FETCH_HEAD` — `FETCH_HEAD` is exactly what step 1 just fetched, so this merges the correct base branch whether `BASE_REMOTE` is a named remote or a URL. (Equivalently `git merge --no-edit <BASE_REMOTE>/<base.ref>` when `BASE_REMOTE` is a named remote.)
+3. **If the merge is clean** (exit 0 — the branch was merely behind, or the divergent changes auto-merged): `git merge` has **already created the merge commit**. Now run the Step 5c pre-commit checks on the merged tree.
+   - On success → if Step 5c staged or modified any files (a formatter run or the one allowed sub-fix), fold them into the merge commit with `git add -- <changed paths>` then `git commit --amend --no-edit`, so the tree you push is exactly the tree that passed validation and no stray changes are left to trip the next iteration's clean-worktree precondition. Confirm `git status --porcelain` is empty, then go to step 6 (push).
+   - On a pre-commit failure that a single sub-fix can't clear, undo the merge with `git reset --hard ORIG_HEAD` (`git merge` sets `ORIG_HEAD` to the pre-merge commit) and jump to Step 7 with `exit reason: merge-conflict`, noting that merging the base broke the pre-commit checks. Do not push a broken merge.
+4. **If the merge conflicts** (non-zero exit; `git diff --name-only --diff-filter=U` lists the conflicted files): resolve each conflicted file, preserving this PR's intent while incorporating the base's changes.
+   - Read **every** conflicted file, reason about both sides (`ours` = this PR, `theirs` = the base), and edit to a coherent resolution that keeps both the PR's change and any independent base change. Never blindly keep one side, and never leave a conflict marker (`<<<<<<<`, `=======`, `>>>>>>>`) behind.
+   - When every file is resolved, `git add` the resolved paths and run the Step 5c pre-commit checks. On success, complete the merge with `git commit --no-edit`.
+   - If resolution can't be done confidently — a semantic conflict the skill can't reason about, markers it can't cleanly remove, or pre-commit still failing after one sub-fix — run `git merge --abort` to restore the clean pre-merge worktree and jump to Step 7 with `exit reason: merge-conflict`. Do not leave a half-resolved merge in place and do not prompt the user.
+5. **Push the merge.** Push with the same handling as Step 5d (upstream check, `git pull --rebase` recovery on a rejected push, exponential backoff on network error). This publishes the merge commit and triggers a fresh CI run.
+6. **Record it.** Append `{sha, base_ref, conflicted_files}` to `MERGE_COMMITS = []` for the Step 7 summary, then continue the loop (return to Step 5f to wait for the new CI run, or Step 5g to re-check the fixed point).
+
+**Bounded attempt.** Successful merges count toward stale-loop detection (Step 5g): if two consecutive iterations resolve base conflicts but the PR is still reported non-mergeable — e.g. the base keeps advancing and re-conflicting faster than the loop can converge — stop with `exit reason: stale-loop` rather than merging forever.
+
 ### Step 6: Monitoring Phase
 
-Skip if `MONITOR_DURATION` is 0 or if there are CI failures or unanswered feedback items.
+Skip if `MONITOR_DURATION` is 0 or if there are CI failures, unanswered feedback items, or a merge conflict (`has_merge_conflict` true). Monitoring is only entered from a true fixed point.
 
 Report: **"All issues resolved. Monitoring for {MONITOR_DURATION} minutes..."**
 
-Poll for change for up to `MONITOR_DURATION` minutes using the same loop as Step 5f: sleep `POLL_INTERVAL` seconds, re-run Step 3's MCP calls, compare counts and `updated_at` markers (and `head_sha`) against the previous snapshot. If a change is detected within the window, re-enter the evaluate + fix loop (Step 4 → Step 5) with a fresh sub-loop. After fixing, resume monitoring with the remaining time. If the window elapses without a change, proceed to Step 7.
+Poll for change for up to `MONITOR_DURATION` minutes using the same loop as Step 5f: sleep `POLL_INTERVAL` seconds, re-run Step 3's MCP calls, compare counts and `updated_at` markers (and `head_sha`, and `has_merge_conflict`) against the previous snapshot. If a change is detected within the window — including the base advancing to introduce a new merge conflict — re-enter the evaluate + fix loop (Step 4 → Step 5, with Step 5h handling any new conflict) with a fresh sub-loop. After fixing, resume monitoring with the remaining time. If the window elapses without a change, proceed to Step 7.
 
 ### Step 7: Final Summary
 
@@ -367,13 +390,18 @@ Print:
 
 ### PR: #<number> — <title>
 ### Iterations: N
-### Exit reason: fixed-point | stale-loop | ci-timeout | rebase-conflict | push-failure | dirty-worktree | monitoring-timeout
+### Exit reason: fixed-point | stale-loop | ci-timeout | merge-conflict | rebase-conflict | push-failure | dirty-worktree | monitoring-timeout
 
 ### Changes Made (FIX outcomes)
 | Iteration | Commit | Fixes Applied | Replies Posted |
 |-----------|--------|---------------|----------------|
 | 1 | abc123 | Fixed lint error in foo.ts, addressed review on bar.ts | @reviewer fixed thread in bar.ts via abc123 |
 | 2 | def456 | Fixed test failure in baz_test.py | n/a |
+
+### Merge Conflict Resolutions (base merged in — Step 5h)
+| Iteration | Merge Commit | Base | Conflicted Files Resolved |
+|-----------|--------------|------|---------------------------|
+| 2 | 9f8e7d6 | main | src/parser.ts, src/index.ts |
 
 ### Deferred Feedback (DEFER outcomes — issue filed)
 | Feedback | Category | Tracking Issue | Reply |
@@ -394,14 +422,15 @@ Print:
 
 ### Current Status
 - CI: All passing / N failures remaining (list each: name, conclusion, log link)
+- Mergeable: yes / no — merge conflicts with `<base.ref>` remaining (list conflicted files if the run exited on `merge-conflict`)
 - Reviewer feedback: All answered / M items still missing replies (list each)
 - Issue creation failures: 0 / K (each requires manual filing — see Deferred table)
 ```
 
 Do **not** ask the user anything at the end. The skill exits unconditionally after printing the summary:
 
-- **Success exits** — `fixed-point` (CI green, all feedback answered) or `monitoring-timeout` (reached only by passing through the same green-CI / answered-feedback gate before entering Step 6, so a clean window-elapse is also success): print **"PR is ready for re-review."**
-- **Failure exits** — `stale-loop`, `ci-timeout`, `rebase-conflict`, `push-failure`, `dirty-worktree`: print **"Autofix exited without converging — see summary above for required follow-up."** Do not loop again, do not prompt.
+- **Success exits** — `fixed-point` (CI green, no merge conflicts, all feedback answered) or `monitoring-timeout` (reached only by passing through the same green-CI / no-conflict / answered-feedback gate before entering Step 6, so a clean window-elapse is also success): print **"PR is ready for re-review."**
+- **Failure exits** — `stale-loop`, `ci-timeout`, `merge-conflict`, `rebase-conflict`, `push-failure`, `dirty-worktree`: print **"Autofix exited without converging — see summary above for required follow-up."** For a `merge-conflict` exit, add: **"Merge conflicts with `<base.ref>` could not be resolved automatically — resolve them manually, then re-run."** Do not loop again, do not prompt.
 
 ## References
 
