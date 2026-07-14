@@ -183,11 +183,12 @@ For each feedback item not already answered, gather context, then spawn **two su
 | Local | Cross-harness | Action |
 |-------|---------------|--------|
 | FIX | FIX | **FIX** — apply code change in this PR |
+| FIX + DEFER | (either order) | **FIX** — both agree the feedback is valid; apply it now instead of filing an issue |
 | REJECT | REJECT | **REJECT** — reply with rationale, no code change, no issue |
 | DEFER | DEFER | **DEFER** — file tracking issue, reply with link |
-| any other combination | | **DEFER** — file tracking issue (any disagreement defaults to DEFER) |
+| any other combination | | **DEFER** — file tracking issue (any remaining disagreement, all involving a REJECT vote, defaults to DEFER) |
 
-The rule is conservative on purpose: only fix when both evaluators agree the change belongs in this PR; only reject when both agree there is no concern worth tracking; otherwise file an issue so nothing is silently dropped. This matches the "Three Outcomes" core principle.
+The rule leans toward action without being reckless: fix when both evaluators agree the change belongs in this PR, and also when one votes FIX and the other DEFER — both consider the feedback valid, so the disagreement is only about timing and fixing now avoids issue churn. Only reject when both agree there is no concern worth tracking. Every remaining disagreement (any combination with a REJECT vote) files an issue so nothing is silently dropped. This matches the "Three Outcomes" core principle.
 
 **Ambiguous feedback** (open questions, architectural suggestions with multiple alternatives, requests that depend on undocumented context) is auto-classified as **DEFER** without consulting the user. The filed issue is the durable artifact a human can resolve later; the PR reply tells the reviewer where the discussion has moved. Do not block the loop on user input.
 

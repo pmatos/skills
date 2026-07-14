@@ -108,21 +108,21 @@ Capture stdout as the evaluator's verdict, then `rm -f` the temp file. **Never**
 
 ## Decision Matrix
 
-The combined verdict picks the most conservative outcome that both evaluators can support. Concretely: only FIX when both vote FIX; only REJECT when both vote REJECT; everything else becomes DEFER (file an issue so nothing is silently dropped).
+The combined verdict resolves each disagreement toward action where both evaluators still consider the feedback valid. Concretely: FIX when both vote FIX, **or** when one votes FIX and the other DEFER (both agree the feedback is legitimate — they only disagree on timing, so fix it now rather than filing an issue); only REJECT when both vote REJECT; every remaining disagreement — all of which carry at least one REJECT vote — becomes DEFER (file an issue so nothing is silently dropped).
 
 | Local Verdict | Cross-harness Verdict | Combined Action |
 |---------------|-----------------------|-----------------|
 | FIX | FIX | **FIX** — apply code change in this PR |
+| FIX | DEFER | **FIX** — both agree the feedback is valid; apply it now instead of filing an issue |
+| DEFER | FIX | **FIX** — both agree the feedback is valid; apply it now instead of filing an issue |
 | REJECT | REJECT | **REJECT** — reply with rationale, no code change, no issue |
 | DEFER | DEFER | **DEFER** — file tracking issue, reply with link |
-| FIX | DEFER | **DEFER** — file tracking issue, reply with link |
-| DEFER | FIX | **DEFER** — file tracking issue, reply with link |
 | FIX | REJECT | **DEFER** — file tracking issue, reply with link |
 | REJECT | FIX | **DEFER** — file tracking issue, reply with link |
 | DEFER | REJECT | **DEFER** — file tracking issue, reply with link |
 | REJECT | DEFER | **DEFER** — file tracking issue, reply with link |
 
-This rule is intentionally churn-averse: a single dissenting vote is enough to keep the change out of this PR, and a single concern vote is enough to put it on the tracker. Use the category from the evaluator whose verdict matched the combined action; on ties, use the higher-confidence evaluator; on full ties, use the Local Evaluator's category.
+This rule leans toward action while staying churn-averse: when both evaluators consider the feedback valid (FIX + DEFER, in either order) the change lands in this PR rather than on the tracker; but a REJECT vote from either evaluator is enough to keep the change out of this PR and file an issue instead. Use the category from the evaluator whose verdict matched the combined action; on ties, use the higher-confidence evaluator; on full ties, use the Local Evaluator's category.
 
 For DEFER outcomes whose evaluators disagreed (e.g. FIX/REJECT), use category `ambiguous` so the filed issue carries a clear "humans need to break the tie" signal.
 
