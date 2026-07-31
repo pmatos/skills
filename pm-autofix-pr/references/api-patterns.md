@@ -94,6 +94,10 @@ loop:
   subtract elapsed wait time from TOTAL_CI_BUDGET_REMAINING and the per-phase clock
   if state changed:             # compare against previous snapshot
     break and re-enter Step 4 / Step 5
+  if --watch available and last wait exited 0 (checks already terminal):
+    sleep remainder of POLL_INTERVAL   # floor — an already-terminal check set makes
+                                        # --watch return instantly every time otherwise,
+                                        # which is the normal case throughout Step 6
 ```
 
 `gh pr checks --watch` only ever replaces the *sleep*; it is never treated as a state source. Its own status output uses the GraphQL `CheckConclusionState` vocabulary (uppercase — see "CI check runs" below), which would silently diverge from the REST vocabulary the rest of this skill and this table rely on if parsed directly. It also only watches check runs, never review threads, review summaries, PR conversation comments, or mergeability — the 300s chunk cap exists so the loop still returns often enough to re-check those four channels via the Step 3 calls even when the CI budget remaining is much larger than five minutes.
