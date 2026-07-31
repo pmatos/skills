@@ -1,6 +1,6 @@
 # API Patterns Reference
 
-Detailed `gh` / `gh api` command signatures and response shapes for the pm-autofix-pr skill. `gh` is the primary path for all GitHub interaction — there is no script layer, and no hard dependency on any MCP server. Two operations are GraphQL-only regardless of `gh` vs. MCP (thread resolution state, and resolving a thread); everywhere else, if a GitHub MCP server happens to already be connected in the session, its tools may be used as an opportunistic fast path for posting comment bodies (it accepts the body as a typed field, sidestepping shell-escaping) — but the skill never waits for or requires one.
+Detailed `gh` / `gh api` command signatures and response shapes for the pm-autofix-pr skill. `gh` is the primary path for all GitHub interaction — there is no script layer, and no hard dependency on any MCP server. Reading review-thread resolution state is GraphQL-only regardless of `gh` vs. MCP (REST has no `isResolved` concept); resolving a thread is also GraphQL-only, and is the one operation where a connected GitHub MCP server may be used as an opportunistic fast path (same underlying mutation) — but the skill never waits for or requires one. Comment/reply posting always goes through `gh`, even when an MCP is connected: `GH_USER` self-authorship filtering is keyed off `gh`'s identity, and a reply posted under a different MCP-authenticated identity would never be recognized as self-authored on a later fetch, risking a non-convergent reply-to-itself loop.
 
 ## Preflight: verify `gh`
 
@@ -227,7 +227,7 @@ Review summaries and PR conversation comments don't have inline review-thread re
 gh pr comment <pull_number> -R {owner}/{repo} --body-file /tmp/reply-body.txt
 ```
 
-(`gh issue comment` is equivalent, since a PR is an issue.) If a GitHub MCP server is already connected in the session, its comment tool may be used instead — its body is a typed field, so it sidesteps the temp-file step entirely. Because this is a PR-level comment, include enough context for humans to connect the reply to the original feedback: reviewer login, review/comment ID or timestamp, and a short quoted/summarized ask.
+(`gh issue comment` is equivalent, since a PR is an issue.) Always post through `gh`, even if a GitHub MCP server is connected — see the intro above for why comment/reply posting never uses the MCP opportunistically. Because this is a PR-level comment, include enough context for humans to connect the reply to the original feedback: reviewer login, review/comment ID or timestamp, and a short quoted/summarized ask.
 
 ## Replying to review threads
 
@@ -238,7 +238,7 @@ gh api repos/{owner}/{repo}/pulls/{pull_number}/comments/{comment_id}/replies \
   -F body=@/tmp/reply-body.txt
 ```
 
-`comment_id` is a **comment** ID, not a thread ID. Pass the numeric `databaseId` of the thread's **latest non-self reviewer comment** — the endpoint rejects the thread's GraphQL `id`. Using the latest reviewer comment keeps replies attached to the current ask instead of replying to the skill's own previous outcome message. If a GitHub MCP server is already connected, its reply tool may be used instead (typed body field, no temp file needed either). A failed reply is not a reason to revert a code fix, but it does block convergence; retry it on the next loop.
+`comment_id` is a **comment** ID, not a thread ID. Pass the numeric `databaseId` of the thread's **latest non-self reviewer comment** — the endpoint rejects the thread's GraphQL `id`. Using the latest reviewer comment keeps replies attached to the current ask instead of replying to the skill's own previous outcome message. Always post through `gh`, even if a GitHub MCP server is connected — see the intro above for why. A failed reply is not a reason to revert a code fix, but it does block convergence; retry it on the next loop.
 
 ## Resolving review threads
 
@@ -261,8 +261,8 @@ On success, add the thread to `ADDRESSED_THREAD_IDS`. On failure, leave it off `
 
 Use the same reply channel as the feedback source:
 
-- Inline review thread: the `.../replies` endpoint (or connected MCP) with a categorized prefix and disclaimer body (see SKILL.md Step 5a for the prefix table).
-- Review summary or PR conversation comment: `gh pr comment`/`gh issue comment --body-file <tmpfile>` (or connected MCP) with `issue_number = pullNumber`, reviewer/context prefix, and the categorized rationale.
+- Inline review thread: the `.../replies` endpoint with a categorized prefix and disclaimer body (see SKILL.md Step 5a for the prefix table).
+- Review summary or PR conversation comment: `gh pr comment`/`gh issue comment --body-file <tmpfile>` with `issue_number = pullNumber`, reviewer/context prefix, and the categorized rationale.
 
 Do **not** resolve rejected inline threads: rejected threads stay open so the reviewer can push back.
 
@@ -305,7 +305,7 @@ If `gh issue create` errors with an HTTP 403 or 429 in its output, wait 60 secon
 
 ### 2. Reply on the PR with a link
 
-Use the same reply channel as the feedback source — inline thread → the `.../replies` endpoint; review summary / PR conversation comment → `gh pr comment`/`gh issue comment` (or connected MCP either way) — with body:
+Use the same reply channel as the feedback source — inline thread → the `.../replies` endpoint; review summary / PR conversation comment → `gh pr comment`/`gh issue comment` — with body:
 
 ```text
 {prefix} {one-sentence rationale}. Tracked as #<issue_number> (<issue_html_url>).

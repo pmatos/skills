@@ -29,7 +29,7 @@ This skill runs end-to-end without asking the user anything once invoked. There 
 ## Prerequisites
 
 - **`gh` CLI** must be installed and authenticated (`gh auth status`). This is now the primary path for all GitHub interaction, including fetching failed-job log tails (`gh run view --job <id> --log-failed`, still the only way to get raw Actions log output). The skill stops at preflight if `gh` is missing or unauthenticated.
-- **GitHub MCP server** is optional. If one happens to be connected in the host session, use it opportunistically for two operations where it's a genuinely better fit than `gh` (see "GitHub CLI Commands Used" below) — thread resolution and comment-body posting. Its absence never blocks the skill.
+- **GitHub MCP server** is optional. If one happens to be connected in the host session, use it opportunistically for thread resolution — the one operation where it's a genuinely better fit than `gh` (see "GitHub CLI Commands Used" below). Its absence never blocks the skill. (Comment/reply posting always goes through `gh` — see the note under "GitHub CLI Commands Used" for why.)
 - **Both harness CLIs** must be installed: `claude` (Claude Code, `npm install -g @anthropic-ai/claude-code`) and `codex` (Codex CLI, `npm install -g @openai/codex`). The dual-evaluator step calls whichever one is *not* the host. The skill stops at preflight if the cross-harness CLI is missing.
 
 ## Configuration
@@ -47,7 +47,7 @@ There is no iteration limit. The loop runs until one of: fixed point reached, st
 
 ## GitHub CLI Commands Used
 
-`gh` / `gh api` is the primary path for all GitHub interaction — no bundled scripts. A GitHub MCP server, if already connected in the session, may be used as an opportunistic fast path for the two operations marked below; never wait for or require one.
+`gh` / `gh api` is the primary path for all GitHub interaction — no bundled scripts. A GitHub MCP server, if already connected in the session, may be used as an opportunistic fast path for the one operation marked below; never wait for or require one. All comment/reply posting always goes through `gh`, even when an MCP is connected — see the note below the table for why.
 
 | Operation | Primary (`gh`) | Opportunistic MCP fast path |
 |------|-----------------|------------------------------|
@@ -58,10 +58,12 @@ There is no iteration limit. The loop runs until one of: fixed point reached, st
 | Fetch review threads (with resolution state) | `gh api graphql` — REST has no `isResolved` field, so this one needs GraphQL regardless of MCP (see `references/api-patterns.md`) | — |
 | Fetch review summaries | `gh api repos/{owner}/{repo}/pulls/{n}/reviews` | — |
 | Fetch PR conversation comments | `gh api repos/{owner}/{repo}/issues/{n}/comments` | — |
-| Reply on an inline review thread | `gh api repos/{owner}/{repo}/pulls/{n}/comments/{id}/replies -F body=@<tmpfile>` (body written to a temp file first, so no shell-escaping of the reviewer-authored text is needed — no `jq` or other extra binary required) | MCP's typed body field, if connected — no temp file needed either |
-| Reply on a review summary / PR conversation comment | `gh pr comment <n> -R {owner}/{repo} --body-file <tmpfile>` / `gh issue comment <n> -R {owner}/{repo} --body-file <tmpfile>` | MCP's typed body field, if connected |
+| Reply on an inline review thread | `gh api repos/{owner}/{repo}/pulls/{n}/comments/{id}/replies -F body=@<tmpfile>` (body written to a temp file first, so no shell-escaping of the reviewer-authored text is needed — no `jq` or other extra binary required) | — |
+| Reply on a review summary / PR conversation comment | `gh pr comment <n> -R {owner}/{repo} --body-file <tmpfile>` / `gh issue comment <n> -R {owner}/{repo} --body-file <tmpfile>` | — |
 | Resolve a review thread after a fix | `gh api graphql` — `resolveReviewThread` mutation (GraphQL-only; no REST equivalent) | MCP's thread-resolve method, if connected — same GraphQL mutation under the hood |
 | File a tracking issue (DEFER outcome) | `gh issue create -R {owner}/{repo} --body-file <tmpfile>` | — |
+
+**Why posting never uses MCP, even opportunistically:** `GH_USER` (used for all self-authored-comment filtering) is captured from `gh api user`. If a connected MCP server posts a comment under a *different* authenticated identity, that reply would never be recognized as self-authored on a later re-fetch — the skill could then evaluate and reply to its own past outcome messages indefinitely, breaking convergence. Since `gh api -F body=@<tmpfile>` / `gh pr comment --body-file <tmpfile>` already avoid the shell-escaping problem MCP's typed body field solved, MCP's only remaining advantage for posting was skipping a temp file — not enough to justify the risk. Thread resolution has no such coupling (it authors no content attributable to an identity), so it keeps the MCP fast path.
 
 See `references/api-patterns.md` for exact commands, JSON shapes, and pagination/vocabulary notes.
 
@@ -102,7 +104,7 @@ Run `gh auth status`. If it exits non-zero (not installed, not authenticated, or
 
 Then capture `GH_USER` via `gh api user -q .login` (used to filter out self-authored comments later — see the `[bot]`-suffix note in `references/api-patterns.md` when comparing this login against GraphQL-sourced `author.login` values).
 
-If a GitHub MCP server happens to be connected in this session, note it for opportunistic use later (thread resolution, comment posting — see "GitHub CLI Commands Used" below); its absence is not a preflight failure and no check for it is needed here.
+If a GitHub MCP server happens to be connected in this session, note it for opportunistic use later (thread resolution only — see "GitHub CLI Commands Used" below); its absence is not a preflight failure and no check for it is needed here.
 
 ### Step 1: Identify the PR
 
@@ -209,8 +211,8 @@ The rule leans toward action without being reckless: fix when both evaluators ag
 Loop until fixed point or unrecoverable abort. Process each feedback item exactly once per fetch cycle through the outcome flow that matches its Step 4 verdict.
 
 **5a. REJECT flow** (verdict = REJECT). Compose a rejection body using the prefix table below and reply through the right channel (see "GitHub CLI Commands Used" and `references/api-patterns.md` for exact commands):
-- Inline review thread: reply to `commentId = latestReviewerComment.databaseId` — primary path `gh api repos/{owner}/{repo}/pulls/<n>/comments/<commentId>/replies -F body=@<tmpfile>` with the body written to a temp file first (no `jq` or other JSON-building tool needed — `gh api -F key=@path` reads and correctly encodes the file's raw contents); if a GitHub MCP is already connected, its reply tool may be used instead (its typed body field needs no temp file at all).
-- Review summary or PR conversation comment: `gh pr comment <n> -R {owner}/{repo} --body-file <tmpfile>` (or `gh issue comment`) with the body written to a temp file first, or the connected MCP's comment tool if available. Start the body with `@reviewer Regarding your <review/comment> (<short identifier>):` and quote or summarize the specific ask being rejected.
+- Inline review thread: reply to `commentId = latestReviewerComment.databaseId` via `gh api repos/{owner}/{repo}/pulls/<n>/comments/<commentId>/replies -F body=@<tmpfile>` with the body written to a temp file first (no `jq` or other JSON-building tool needed — `gh api -F key=@path` reads and correctly encodes the file's raw contents). Always post through `gh`, even if a GitHub MCP is connected — see "GitHub CLI Commands Used" for why.
+- Review summary or PR conversation comment: `gh pr comment <n> -R {owner}/{repo} --body-file <tmpfile>` (or `gh issue comment`) with the body written to a temp file first. Start the body with `@reviewer Regarding your <review/comment> (<short identifier>):` and quote or summarize the specific ask being rejected.
 
 Do **not** resolve rejected inline threads — they stay unresolved so the reviewer can push back. Record the item in `OUTCOME_MARKERS` as `item_key → latest_reviewer_marker_at_outcome` using a mutable marker: `latestReviewerComment.databaseId + updatedAt` for inline threads, `review.id + body_hash(body)` for review summaries (REST reviews have no `updated_at`, and `submitted_at` doesn't change on a body edit — see `references/api-patterns.md`), and `comment.id + updated_at` for PR conversation comments. Do **not** add it to `ADDRESSED_THREAD_IDS`; suppression depends on the recorded reviewer marker staying current.
 
@@ -267,7 +269,7 @@ Prefixes by REJECT category:
    | `automated-fix-failed` | `**Deferred (automated fix failed pre-commit)** —` |
    | (default) | `**Deferred** —` |
 
-5. Reply through the same channel as REJECT (inline thread → the `.../replies` endpoint; review summary / PR comment → `gh pr comment`/`gh issue comment`, or the connected MCP's tools if available). Do **not** resolve inline threads — the reviewer can push back if the deferral is wrong.
+5. Reply through the same channel as REJECT (inline thread → the `.../replies` endpoint; review summary / PR comment → `gh pr comment`/`gh issue comment`). Do **not** resolve inline threads — the reviewer can push back if the deferral is wrong.
 6. Record the item in `OUTCOME_MARKERS` (same marker scheme as REJECT). Append `{item_key, issue_number, issue_url, category, title}` to `DEFERRED_ITEMS` for the Step 7 summary.
 
 **Issue-creation failure fallback.** If `gh issue create` fails (rate limit, permissions, transient error) — retry once after 60 seconds. If the retry also fails, **do not block the loop**: post the DEFER reply with `TODO: file as a separate issue — automated issue creation failed (<error summary>).` instead of the tracked-issue link, and append `{item_key, issue_number=null, ...}` to `DEFERRED_ITEMS` so the final summary surfaces the gap. The reviewer's concern is still acknowledged in writing.
@@ -333,8 +335,8 @@ Validation: <pre-commit check, targeted test, or reason validation was not run>.
 ```
 
 Use the right channel:
-- Inline review thread: reply to `commentId = latestReviewerComment.databaseId` (the numeric REST ID of the thread's most recent reviewer comment — **not** the thread's GraphQL `id`) via `gh api repos/{owner}/{repo}/pulls/<n>/comments/<commentId>/replies -F body=@<tmpfile>`, or the connected MCP's reply tool if available. After the reply succeeds, resolve the thread: primary path `gh api graphql` with the `resolveReviewThread` mutation and `threadId = <thread.id>` (the GraphQL node ID from the `review_threads` query in Step 3); if a GitHub MCP is already connected, its thread-resolve method may be used instead — it performs the same mutation. If both the reply and the resolve succeed, add the thread to `ADDRESSED_THREAD_IDS`.
-- Review summary or PR conversation comment: `gh pr comment <n> -R {owner}/{repo} --body-file <tmpfile>` (or `gh issue comment`), or the connected MCP's comment tool if available. Start the body with `@reviewer Regarding your <review/comment> (<short identifier>):`, then include the fixed outcome. If the reply succeeds, add the item key to `REPLIED_ITEM_KEYS`.
+- Inline review thread: reply to `commentId = latestReviewerComment.databaseId` (the numeric REST ID of the thread's most recent reviewer comment — **not** the thread's GraphQL `id`) via `gh api repos/{owner}/{repo}/pulls/<n>/comments/<commentId>/replies -F body=@<tmpfile>` — always through `gh`, even if a GitHub MCP is connected (see "GitHub CLI Commands Used"). After the reply succeeds, resolve the thread: primary path `gh api graphql` with the `resolveReviewThread` mutation and `threadId = <thread.id>` (the GraphQL node ID from the `review_threads` query in Step 3); if a GitHub MCP is already connected, its thread-resolve method may be used instead — it performs the same mutation. If both the reply and the resolve succeed, add the thread to `ADDRESSED_THREAD_IDS`.
+- Review summary or PR conversation comment: `gh pr comment <n> -R {owner}/{repo} --body-file <tmpfile>` (or `gh issue comment`). Start the body with `@reviewer Regarding your <review/comment> (<short identifier>):`, then include the fixed outcome. If the reply succeeds, add the item key to `REPLIED_ITEM_KEYS`.
 
 This step is **mandatory** — never skip it. If a reply or resolve call fails with 403/429, wait 60s and retry once. After a failed retry, continue the code loop if needed, but do not count that feedback item as addressed and do not declare convergence; it must reappear on the next fetch/retry cycle until a reply is posted.
 
@@ -453,5 +455,5 @@ Do **not** ask the user anything at the end. The skill exits unconditionally aft
 
 ## References
 
-- **`references/api-patterns.md`** — `gh`/`gh api` command signatures, expected response shapes, polling-loop semantics, supersession algorithm, push and rebase handling, issue-creation flow, opportunistic-MCP exceptions
+- **`references/api-patterns.md`** — `gh`/`gh api` command signatures, expected response shapes, polling-loop semantics, supersession algorithm, push and rebase handling, issue-creation flow, the opportunistic-MCP thread-resolution fast path
 - **`references/comment-evaluation.md`** — Full evaluation prompt templates, FIX/DEFER/REJECT decision matrix, DEFER and REJECT taxonomies, ambiguity-to-DEFER policy
