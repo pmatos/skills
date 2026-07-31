@@ -392,7 +392,11 @@ Skip if `MONITOR_DURATION` is 0 or if there are CI failures, unanswered feedback
 
 Report: **"All issues resolved. Monitoring for {MONITOR_DURATION} minutes..."**
 
-Poll for change for up to `MONITOR_DURATION` minutes using the same loop as Step 5f: sleep `POLL_INTERVAL` seconds, re-run Step 3's calls, compare counts and `updated_at` markers (and `head_sha`, and `has_merge_conflict`) against the previous snapshot. If a change is detected within the window — including the base advancing to introduce a new merge conflict — re-enter the evaluate + fix loop (Step 4 → Step 5, with Step 5h handling any new conflict) with a fresh sub-loop. After fixing, resume monitoring with the remaining time. If the window elapses without a change, proceed to Step 7.
+Poll for change for up to `MONITOR_DURATION` minutes using the same loop as Step 5f: sleep `POLL_INTERVAL` seconds, re-run Step 3's calls, compare counts and `updated_at` markers (and `head_sha`, and `has_merge_conflict`) against the previous snapshot. If a change is detected within the window — including the base advancing to introduce a new merge conflict — re-enter the evaluate + fix loop (Step 4 → Step 5, with Step 5h handling any new conflict) with a fresh sub-loop. After fixing, resume monitoring with the remaining time.
+
+A non-empty `errors` list (Step 3's error accumulation, including an indeterminate `mergeable == null`) is never itself evidence of "no change": counts, timestamps, `head_sha`, and `has_merge_conflict` can look identical to the previous snapshot even though mergeability was never actually confirmed. If the window elapses while the most recent fetch's `errors` list is non-empty, do not declare `monitoring-timeout` success yet — perform one more Step 3 re-fetch, mirroring Step 5g's gate. If that re-fetch's `errors` list comes back empty and no other change is detected, the window has genuinely elapsed clean — proceed to Step 7 as `monitoring-timeout`. If `errors` is still non-empty, treat it as a change event and re-enter the evaluate + fix loop (Step 4 → Step 5g), so Step 5g's own retry-after-30-seconds gate resolves the ambiguous state instead of the window silently expiring into a false success.
+
+If the window elapses without a change and the most recent fetch's `errors` list is empty, proceed to Step 7.
 
 ### Step 7: Final Summary
 

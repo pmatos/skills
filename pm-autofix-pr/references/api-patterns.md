@@ -83,6 +83,8 @@ loop:
     abort with the appropriate exit reason
 ```
 
+Step 6 adds one gate Step 5f doesn't need: on wall-clock budget exceeded, it first checks the most recent fetch's `errors` list. A non-empty list (e.g. an indeterminate `mergeable == null`) doesn't move `head.sha`, check runs, or comment counts, so it looks identical to "no change" — but mergeability was never actually confirmed. Step 6 does one extra re-fetch to resolve it before declaring the window elapsed clean (`monitoring-timeout`); if `errors` is still non-empty after that, it's treated as a state change and routed back into Step 4/5 instead. See SKILL.md Step 6.
+
 The "five Step 3 calls" are exactly the sources Step 3 uses to build the state object — omit any one of them and the loop can declare a false fixed point because the missing channel will never report new feedback:
 
 1. `gh api repos/{owner}/{repo}/pulls/{pull_number}` — for `head.sha`, `base.ref`, and mergeability.
@@ -321,7 +323,7 @@ If any `gh api` call fails with an HTTP 403 or 429 (visible in its non-zero exit
 - Reply failures (the `.../replies` endpoint, `gh pr comment`, `gh issue comment`) are not code-fatal, but they block convergence. Leave the item off `ADDRESSED_THREAD_IDS` / `REPLIED_ITEM_KEYS` so it re-surfaces for another reply attempt.
 - Resolve failures (`resolveReviewThread`) are non-fatal but the thread stays off `ADDRESSED_THREAD_IDS` so it re-surfaces.
 - Issue-create failures (`gh issue create`) trigger the DEFER fallback: post the DEFER reply with `TODO: file as a separate issue — automated issue creation failed (<error>).` and record `issue_number=null` in `DEFERRED_ITEMS`. Do not block convergence.
-- State-fetch failures get added to the `errors` list and prevent the fixed-point declaration in Step 5g.
+- State-fetch failures get added to the `errors` list and prevent the fixed-point declaration in Step 5g; during Step 6 monitoring, a non-empty `errors` list also blocks a clean `monitoring-timeout` exit until one more re-fetch resolves it (see "Polling" above).
 
 ## Mergeability and base-branch conflict resolution
 
