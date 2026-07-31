@@ -5,6 +5,8 @@
 #
 # shellcheck runs as a local uvx hook (koalaman's hook is docker-only) so the
 # whole config provisions with just uv, go, node and python — no Docker.
+default_install_hook_types: [pre-commit, commit-msg]
+
 repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.15.15
@@ -32,6 +34,12 @@ repos:
     rev: v1.26.1
     hooks:
       - id: zizmor
+
+  - repo: https://github.com/compilerla/conventional-pre-commit
+    rev: v4.4.0
+    hooks:
+      - id: conventional-pre-commit
+        stages: [commit-msg]
 
   - repo: local
     hooks:
