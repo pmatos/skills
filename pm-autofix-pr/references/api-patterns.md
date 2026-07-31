@@ -76,25 +76,30 @@ The wait loop runs in two places, sharing one run-wide budget:
 Both draw down the same `TOTAL_CI_BUDGET_REMAINING` counter, initialized once at run start (SKILL.md Step 0b, alongside `GH_USER`) and never reset by a later push or by re-entering monitoring — see "Cadence and bounds" below for why a single shared counter, rather than a per-phase one, is the point, and why it can't be lazily initialized on first entry into Step 5f (some runs reach Step 6 without ever entering Step 5f). Both use the same shape:
 
 ```text
-probe once per run: does `gh pr checks --help` advertise --watch?
+probe once per run: does `gh pr checks --help` advertise --watch,
+                     AND is a timeout binary present (`timeout`, else `gtimeout`)?
+watch_usable = both of the above; TIMEOUT_BIN = whichever binary resolved
 
 loop:
   budget_this_wait = min(per-phase clock remaining, TOTAL_CI_BUDGET_REMAINING)
   if budget_this_wait <= 0:
     abort with the appropriate exit reason
-  if --watch available:
-    timeout <min(budget_this_wait_seconds, 300)>s \
+  if watch_usable:
+    TIMEOUT_BIN <min(budget_this_wait_seconds, 300)>s \
       gh pr checks <n> -R {owner}/{repo} --watch --interval POLL_INTERVAL
-    # exit 0  -> checks reached a terminal state
+    # exit 0   -> checks reached a terminal state
     # exit 124 -> chunk elapsed with checks still pending; treat as "no change"
   else:
     sleep POLL_INTERVAL          # default 30s, via Bash `sleep <n>`, repeated up to budget_this_wait
+    # used when --watch is unsupported OR no timeout/gtimeout binary exists —
+    # an unbounded --watch call would defeat the run-wide budget just as surely
+    # as a missing binary failing instantly would
   re-fetch PR state             # the five Step 3 calls (see below) — always authoritative,
                                  # never the --watch command's own (GraphQL-vocabulary) output
   subtract elapsed wait time from TOTAL_CI_BUDGET_REMAINING and the per-phase clock
   if state changed:             # compare against previous snapshot
     break and re-enter Step 4 / Step 5
-  if --watch available and last wait exited 0 (checks already terminal):
+  if watch_usable and last wait exited 0 (checks already terminal):
     sleep remainder of POLL_INTERVAL   # floor — an already-terminal check set makes
                                         # --watch return instantly every time otherwise,
                                         # which is the normal case throughout Step 6
