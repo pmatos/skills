@@ -28,15 +28,17 @@ git rev-parse --abbrev-ref HEAD  # local branch name
 
 Owner/repo parsing rules: strip `git@github.com:` or `https://github.com/` prefixes and any trailing `.git`.
 
-**Origin lookup (default case):**
+**Origin lookup (default case)** — query, then filter the results by head repository owner:
 
 ```bash
 gh pr list -R "$ORIGIN_OWNER/$ORIGIN_REPO" \
   --head "$BRANCH" --state open \
-  --json number,url,headRefName,baseRefName
+  --json number,url,headRefName,baseRefName,headRepositoryOwner
 ```
 
-**Upstream lookup (fork workflow fallback).** If the origin lookup returned no open PRs and an `upstream` remote exists, query upstream instead — then filter the results by head repository owner:
+Keep only entries whose `.headRepositoryOwner.login` equals `$ORIGIN_OWNER`. This filter is load-bearing here, not just at the upstream tier below: `gh pr list --head` filters by branch name only (it does not support the `owner:branch` qualifier some REST-based tools use), and `-R` scopes only *which repo's* PR list is searched — not which fork owns each result's head. `origin` is frequently the base repository itself (a maintainer or push-access contributor who cloned it directly has no `upstream` remote at all, so the tier below never runs and this is the only lookup that fires), and a base repository's PR list includes every cross-repository PR opened from a fork — so an unfiltered query can return a stranger's PR whose head branch merely shares the same name (verified empirically: a single `--head <branch>` query against a busy public repo returned open PRs from several distinct fork owners, all cross-repository). If the filtered list is empty, treat this tier as "no PR found" and fall through — including the uncommon case where the branch's own PR head lives in a fork registered under some remote name other than `origin`/`upstream`, which the ambient fallback below exists to catch.
+
+**Upstream lookup (fork workflow fallback).** If the origin lookup returned no open PRs *after its owner filter* and an `upstream` remote exists, query upstream instead — then filter the same way:
 
 ```bash
 gh pr list -R "$UPSTREAM_OWNER/$UPSTREAM_REPO" \
@@ -44,7 +46,7 @@ gh pr list -R "$UPSTREAM_OWNER/$UPSTREAM_REPO" \
   --json number,url,headRefName,baseRefName,headRepositoryOwner
 ```
 
-Keep only entries whose `.headRepositoryOwner.login` equals `$ORIGIN_OWNER`. `gh pr list --head` filters by branch name only (it does not support the `owner:branch` qualifier some REST-based tools use), and `-R` scopes only *which repo's* PR list is searched — not which fork owns each result's head. Both are blind to the fork owner, so an unfiltered query against upstream can return another contributor's PR whose head branch merely shares the same name (verified empirically: a single `--head <branch>` query against a busy public repo returned open PRs from several distinct fork owners). Comparing `headRepositoryOwner.login` against `$ORIGIN_OWNER` is what actually disambiguates. If the filtered list is empty, treat this tier as "no PR found" and fall through to the ambient `gh pr view` last resort.
+Keep only entries whose `.headRepositoryOwner.login` equals `$ORIGIN_OWNER` — the same filter as the origin lookup above, load-bearing for the same reasons. If the filtered list is empty, treat this tier as "no PR found" and fall through to the ambient `gh pr view` last resort.
 
 **Ambient `gh pr view` last-resort fallback.** If both explicit-remote lookups return nothing (uncommon remote naming, or the base repo isn't reachable via `origin`/`upstream`), let `gh` resolve it:
 
