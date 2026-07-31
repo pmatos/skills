@@ -160,7 +160,7 @@ Build `feedback_items` from:
 - `review_summaries`, keyed as `review:<review.id>`
 - `pr_comments`, keyed as `comment:<comment.id>`
 
-Initialize `ADDRESSED_THREAD_IDS` with `resolved_thread_ids`. Initialize `REPLIED_ITEM_KEYS = {}` for review summaries and PR conversation comments that already received an outcome reply during this invocation. Initialize `OUTCOME_MARKERS = {}` (`item_key → latest_reviewer_marker_at_outcome`) covering both REJECTED and DEFERRED items so a later reviewer edit re-enters evaluation. Initialize `DEFERRED_ITEMS = []` (one entry per filed tracking issue, used by Step 7's summary).
+Initialize `ADDRESSED_THREAD_IDS` with `resolved_thread_ids`. Initialize `REPLIED_ITEM_KEYS = {}` for review summaries and PR conversation comments that already received an outcome reply during this invocation. Initialize `OUTCOME_MARKERS = {}` (`item_key → latest_reviewer_marker_at_outcome`) covering both REJECTED and DEFERRED items so a later reviewer edit re-enters evaluation. Initialize `DEFERRED_ITEMS = []` (one entry per filed tracking issue, used by Step 7's summary). Initialize `ALL_COMMITTED_ITEMS = []` — one entry per successful FIX commit across *every* iteration of this run, used by Step 7's budget-exhaustion comment. This is distinct from the per-iteration `COMMITTED_ITEMS` Step 5b/5d/5e use to isolate each iteration's own push and replies — do not widen `COMMITTED_ITEMS` itself to run scope, or 5d's empty-iteration short-circuit and 5e's reply-once guarantee both break.
 
 Print the initial assessment as a status line — `Found N CI failures, M reviewer feedback items, and merge conflicts: yes/no. Begin processing.` — and proceed unconditionally. **Never** wait for a confirmation: the skill is fully automatic from this point on.
 
@@ -294,7 +294,7 @@ For each FIX item in `feedback_items` whose verdict is FIX (CI failures included
    - `modified_paths` — entries with status codes `M`, `A`, `D`, `R`, `T` (tracked changes/renames/deletes).
    - `untracked_paths` — entries with status code `??` (new files this FIX created).
 4. **Run pre-commit checks** for this item (Step 5c).
-5. **On pre-commit success:** stage the touched files by name (never `git add -A`) — staging both `modified_paths` and `untracked_paths`. Commit with a descriptive message that names the feedback item (e.g. `Fix null check in extractTokens (review thread #PRRT_xxx)`), capture the resulting short-sha, and add the FIX item to `COMMITTED_ITEMS = []` with `{item_key, sha, files, validation}`.
+5. **On pre-commit success:** stage the touched files by name (never `git add -A`) — staging both `modified_paths` and `untracked_paths`. Commit with a descriptive message that names the feedback item (e.g. `Fix null check in extractTokens (review thread #PRRT_xxx)`), capture the resulting short-sha, and add the FIX item to `COMMITTED_ITEMS = []` with `{item_key, sha, files, validation}` — also append the same entry to the run-wide `ALL_COMMITTED_ITEMS` (initialized in Step 3) so Step 7's exhaustion comment can report every commit landed this run, not just this iteration's.
 6. **On pre-commit failure** (5c returned a hard fail after the sub-fix attempt): revert this item completely so the next FIX starts from a clean worktree:
    - `git restore --source=HEAD --staged --worktree -- <modified_paths>` to undo tracked modifications/renames/deletions (also unstages anything pre-commit staged).
    - `git clean -fd -- <untracked_paths>` to delete files this FIX created (`-fd` so newly-created subdirectories are removed too).
@@ -424,7 +424,7 @@ If the window elapses without a change and the most recent fetch's `errors` list
 ```
 Autofix paused: {if TIMEOUT_TRIGGER == total-budget: total CI budget exhausted (`TOTAL_CI_BUDGET` = {TOTAL_CI_BUDGET} min) | if TIMEOUT_TRIGGER == per-push: CI check wait exceeded `CI_TIMEOUT` ({CI_TIMEOUT} min) for this push}.
 
-**Fixes landed this run:** {COMMITTED_ITEMS shas + one-line summaries, or "none"}.
+**Fixes landed this run:** {ALL_COMMITTED_ITEMS shas + one-line summaries, or "none"} — the run-wide accumulator (Step 3), not the current iteration's `COMMITTED_ITEMS`, so a multi-iteration run reports every commit it made before exhausting the budget.
 **Feedback resolved:** {count of threads resolved / DEFER issues filed this run, or "none"}.
 **Still pending:** {ci_failures not yet terminal, and/or unresolved feedback items, and/or merge conflicts, whichever apply}.
 
