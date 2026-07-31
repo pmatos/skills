@@ -38,7 +38,7 @@ Override via prompt arguments (e.g., `/pm-autofix-pr 10 --ci-timeout 30 --monito
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `TOTAL_CI_BUDGET` | 15 | Overall wall-clock ceiling (minutes) on **all** CI-wait (Step 5f) + monitoring (Step 6) time for the whole run, measured from first entry into Step 5f — not reset by later pushes or monitoring cycles. `CI_TIMEOUT` and `MONITOR_DURATION` below remain the per-phase bounds, but each wait is clamped to whichever of `TOTAL_CI_BUDGET` or the per-phase bound remains, whichever is smaller. Once it reaches zero, the run aborts through Step 7 with `ci-timeout` (which also posts a resume-pointer PR comment — see Step 7) regardless of how recently the last commit was pushed or how many fix/push cycles happened inside it. |
+| `TOTAL_CI_BUDGET` | 15 | Overall wall-clock ceiling (minutes) on **all** CI-wait (Step 5f) + monitoring (Step 6) time for the whole run, initialized once at run start (Step 0b) — not reset by later pushes or monitoring cycles. `CI_TIMEOUT` and `MONITOR_DURATION` below remain the per-phase bounds, but each wait is clamped to whichever of `TOTAL_CI_BUDGET` or the per-phase bound remains, whichever is smaller. Once it reaches zero, the run aborts through Step 7 with `ci-timeout` (which also posts a resume-pointer PR comment — see Step 7) regardless of how recently the last commit was pushed or how many fix/push cycles happened inside it. |
 | `MONITOR_DURATION` | 10 | Minutes to watch for new issues after convergence. 0 to skip. Also bounded by whatever of `TOTAL_CI_BUDGET` remains. |
 | `CI_TIMEOUT` | 20 | Minutes to wait for CI before aborting (no user prompt — exits through Step 7 with `ci-timeout`). Also bounded by whatever of `TOTAL_CI_BUDGET` remains — with the defaults above, `TOTAL_CI_BUDGET` (15) binds first. |
 | `POLL_INTERVAL` | 30 | Seconds between PR-state re-fetches while waiting for CI or monitoring; also the `--interval` passed to `gh pr checks --watch` where supported (see Step 5f). |
@@ -106,6 +106,8 @@ Run `gh auth status`. If it exits non-zero (not installed, not authenticated, or
 > **`gh` CLI not available.** This skill requires the GitHub CLI (`gh`), authenticated. Install it from <https://cli.github.com/> and run `gh auth login`, then re-run.
 
 Then capture `GH_USER` via `gh api user -q .login` (used to filter out self-authored comments later — see the `[bot]`-suffix note in `references/api-patterns.md` when comparing this login against GraphQL-sourced `author.login` values).
+
+Also initialize `TOTAL_CI_BUDGET_REMAINING` to `TOTAL_CI_BUDGET` minutes here — run-scoped state captured once at the start of the run, like `GH_USER`, not on first entry into Step 5f. This matters because some runs never enter Step 5f at all: Step 3's "nothing to fix" path goes straight to Step 6, and Step 5d's "no commits this iteration" path skips to Step 5g and from there can also reach Step 6 — both would reference an uninitialized counter if the budget were only set up inside Step 5f's own prose.
 
 If a GitHub MCP server happens to be connected in this session, note it for opportunistic use later (thread resolution only — see "GitHub CLI Commands Used" below); its absence is not a preflight failure and no check for it is needed here.
 
@@ -345,7 +347,7 @@ This step is **mandatory** — never skip it. If a reply or resolve call fails w
 
 **5f. Wait for CI only after feedback is answered.** If any fetched feedback item still lacks an evaluation decision and an outcome reply, re-enter Step 4 immediately instead of waiting. Once feedback is answered, wait for CI to change:
 
-On the very first entry into this step for the whole run, start `TOTAL_CI_BUDGET_REMAINING` at `TOTAL_CI_BUDGET` minutes. It is never reset by a later push or by a monitoring cycle (Step 6) — every wait anywhere in the run draws down the same counter, which is exactly what closes the "resets per push" and "monitoring windows chain unboundedly" gaps described in the issue this behavior was added for.
+`TOTAL_CI_BUDGET_REMAINING` was already initialized once in Step 0b, at run start — not here. It is never reset by a later push or by a monitoring cycle (Step 6); every wait anywhere in the run, in either step, draws down the same counter, which is what closes the "resets per push" and "monitoring windows chain unboundedly" gaps described in the issue this behavior was added for.
 
 At the top of each wait, compute `budget_this_wait = min(minutes remaining on the per-push CI_TIMEOUT clock, TOTAL_CI_BUDGET_REMAINING)`. If that is `<= 0`, skip straight to the timeout check below without waiting.
 
@@ -405,7 +407,7 @@ This wait-and-refetch path is the only mechanism the skill uses to detect new st
 
 Skip if `MONITOR_DURATION` is 0 or if there are CI failures, unanswered feedback items, or a merge conflict (`has_merge_conflict` true). Monitoring is only entered from a true fixed point.
 
-The effective monitor window is `min(MONITOR_DURATION, TOTAL_CI_BUDGET_REMAINING)` — the same shared counter Step 5f draws down, since it was started on first entry into Step 5f and is never reset by convergence. If that effective window is `<= 0` (the run reached a fixed point but exhausted the total budget getting there), skip monitoring entirely and proceed straight to Step 7 as `monitoring-timeout`: the PR genuinely has no open work, there is just no budget left to keep watching it — still a success exit, and no resume-pointer comment is needed since nothing is pending.
+The effective monitor window is `min(MONITOR_DURATION, TOTAL_CI_BUDGET_REMAINING)` — the same shared counter Step 5f draws down, initialized once in Step 0b and never reset by convergence (this holds even when Step 6 is entered directly from Step 3's "nothing to fix" exit, without ever passing through Step 5f). If that effective window is `<= 0` (the run reached a fixed point but exhausted the total budget getting there), skip monitoring entirely and proceed straight to Step 7 as `monitoring-timeout`: the PR genuinely has no open work, there is just no budget left to keep watching it — still a success exit, and no resume-pointer comment is needed since nothing is pending.
 
 Report: **"All issues resolved. Monitoring for {effective window} minutes..."**
 
