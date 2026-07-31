@@ -272,14 +272,16 @@ DEFER is "correct, but not in this PR" — the skill files a tracking issue and 
 
 ### 1. File the tracking issue
 
-Write the body to a temp file (same escaping rationale as replies), then:
+Write the body to a temp file (same escaping rationale as replies). Write the title to its own temp file too, as a single non-empty line — it's equally derived from untrusted reviewer feedback, and interpolating it directly into `--title "<title>"` would let shell metacharacters in the feedback (backticks, `$(...)`, quotes) execute as commands or break the invocation:
 
 ```bash
 gh issue create -R {owner}/{repo} \
-  --title "<short imperative phrase from feedback>" \
+  --title "$(cat /tmp/issue-title.txt)" \
   --body-file /tmp/issue-body.txt \
   --label deferred-from-pr
 ```
+
+`$(cat /tmp/issue-title.txt)` must be written verbatim into the command text — never splice the title's actual content into the command string. The file's content becomes inert command-substitution output inside a double-quoted argument, not re-parsed shell syntax, so it's safe regardless of what the reviewer's feedback contains.
 
 Body template:
 

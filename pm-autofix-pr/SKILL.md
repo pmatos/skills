@@ -61,7 +61,7 @@ There is no iteration limit. The loop runs until one of: fixed point reached, st
 | Reply on an inline review thread | `gh api repos/{owner}/{repo}/pulls/{n}/comments/{id}/replies -F body=@<tmpfile>` (body written to a temp file first, so no shell-escaping of the reviewer-authored text is needed — no `jq` or other extra binary required) | — |
 | Reply on a review summary / PR conversation comment | `gh pr comment <n> -R {owner}/{repo} --body-file <tmpfile>` / `gh issue comment <n> -R {owner}/{repo} --body-file <tmpfile>` | — |
 | Resolve a review thread after a fix | `gh api graphql` — `resolveReviewThread` mutation (GraphQL-only; no REST equivalent) | MCP's thread-resolve method, if connected — same GraphQL mutation under the hood |
-| File a tracking issue (DEFER outcome) | `gh issue create -R {owner}/{repo} --body-file <tmpfile>` | — |
+| File a tracking issue (DEFER outcome) | `gh issue create -R {owner}/{repo} --title "$(cat <titlefile>)" --body-file <tmpfile>` | — |
 
 **Why posting never uses MCP, even opportunistically:** `GH_USER` (used for all self-authored-comment filtering) is captured from `gh api user`. If a connected MCP server posts a comment under a *different* authenticated identity, that reply would never be recognized as self-authored on a later re-fetch — the skill could then evaluate and reply to its own past outcome messages indefinitely, breaking convergence. Since `gh api -F body=@<tmpfile>` / `gh pr comment --body-file <tmpfile>` already avoid the shell-escaping problem MCP's typed body field solved, MCP's only remaining advantage for posting was skipping a temp file — not enough to justify the risk. Thread resolution has no such coupling (it authors no content attributable to an identity), so it keeps the MCP fast path.
 
@@ -256,7 +256,7 @@ Prefixes by REJECT category:
    _Filed automatically by `pm-autofix-pr` after dual-evaluator triage by {LOCAL_LABEL} and {REMOTE_LABEL}._
    ```
 
-3. Run `gh issue create -R {owner}/{repo} --title "<title>" --body-file <tmpfile> [--label deferred-from-pr]` (body written to the temp file first), or if the repo has no `deferred-from-pr` label, drop `--label` and retry rather than pre-creating it. Capture the returned issue number and URL by parsing `gh issue create`'s stdout (it prints the new issue's URL, from which the number is the trailing path segment).
+3. Write the title to its own temp file first, as a single non-empty line — the title, like the body, is derived from untrusted reviewer feedback, and interpolating it directly into `--title "<title>"` lets shell metacharacters in the feedback (backticks, `$(...)`, quotes) execute as commands or simply break the invocation. Run `gh issue create -R {owner}/{repo} --title "$(cat <titlefile>)" --body-file <tmpfile> [--label deferred-from-pr]` — write `$(cat <titlefile>)` **verbatim** into the command text; never splice the title text itself into the command string. The file's content becomes inert command-substitution output inside a double-quoted argument, not re-parsed shell syntax. If the repo has no `deferred-from-pr` label, drop `--label` and retry rather than pre-creating it. Capture the returned issue number and URL by parsing `gh issue create`'s stdout (it prints the new issue's URL, from which the number is the trailing path segment).
 4. Compose the PR reply with the matching prefix below, ending with `Tracked as #{new_issue_number} ({issue_html_url}).`
 
    Prefixes by DEFER category:
