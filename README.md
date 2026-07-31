@@ -105,7 +105,7 @@ Iteratively fixes CI failures and addresses reviewer feedback on a GitHub PR, wo
 
 What it does:
 - Detects the PR from the current branch (or accepts a PR number).
-- Fetches failed CI checks, review threads, review summaries, and PR comments via the GitHub MCP.
+- Fetches failed CI checks, review threads, review summaries, and PR comments via the `gh` CLI.
 - Evaluates each feedback item before acting: valid issues are fixed, invalid/out-of-scope issues are rejected with rationale, ambiguous comments prompt for user guidance.
 - Runs local pre-commit checks from `CLAUDE.md` before each push.
 - Commits and pushes fixes, then replies with what changed, where, and how it was validated.
@@ -117,7 +117,7 @@ What it does:
 
 Trigger phrases: `autofix pr`, `fix pr locally`, `fix ci failures`, `fix review comments`, `iterate on pr`, `fix failing checks`, `fix pr comments`, `make ci green`, `fix the build`, `address reviewer feedback`.
 
-**Requires**: GitHub MCP configured. [GitHub CLI](https://cli.github.com/) (`gh`) is still used for failed GitHub Actions log tails.
+**Requires**: [GitHub CLI](https://cli.github.com/) (`gh`), authenticated. A GitHub MCP server is optional — used opportunistically for thread resolution and comment posting if already connected, never required.
 
 ### `/pm-plan` — Deep Implementation Planning (dual-harness)
 

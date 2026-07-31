@@ -24,12 +24,12 @@ Every reviewer feedback item must get an explicit reply before the skill can con
 
 ## Core Principle: Never Prompt the User
 
-This skill runs end-to-end without asking the user anything once invoked. There is no "begin fixing?" confirmation, no "ambiguous feedback, how should I handle it?", no "pre-commit failed, retry?", no "merge conflict, resolve it?", no "stale loop, continue?", no "CI timeout, keep waiting?". Every decision point has a deterministic auto-action defined below; uncertain feedback defaults to DEFER (file an issue and let humans resolve later); merge conflicts with the base branch are auto-resolved by merging the base in (Step 5h); unrecoverable conditions exit cleanly with a final summary. The only way the skill stops mid-flight is by reaching the fixed point, hitting a hard precondition failure (missing GitHub MCP, missing cross-harness CLI, no PR for the branch), or hitting an unrecoverable error (unresolvable merge conflict, rebase conflict, persistent push failure). Each exit goes through Step 7's summary.
+This skill runs end-to-end without asking the user anything once invoked. There is no "begin fixing?" confirmation, no "ambiguous feedback, how should I handle it?", no "pre-commit failed, retry?", no "merge conflict, resolve it?", no "stale loop, continue?", no "CI timeout, keep waiting?". Every decision point has a deterministic auto-action defined below; uncertain feedback defaults to DEFER (file an issue and let humans resolve later); merge conflicts with the base branch are auto-resolved by merging the base in (Step 5h); unrecoverable conditions exit cleanly with a final summary. The only way the skill stops mid-flight is by reaching the fixed point, hitting a hard precondition failure (missing/unauthenticated `gh`, missing cross-harness CLI, no PR for the branch), or hitting an unrecoverable error (unresolvable merge conflict, rebase conflict, persistent push failure). Each exit goes through Step 7's summary.
 
 ## Prerequisites
 
-- **GitHub MCP server** must be configured in the host session (Claude Code or Codex CLI). The skill stops at preflight if it isn't available.
-- **`gh` CLI** is still required for one thing only: fetching failed-job log tails (`gh run view --job <id> --log-failed`). The MCP has no equivalent. All other GitHub interaction goes through the MCP.
+- **`gh` CLI** must be installed and authenticated (`gh auth status`). This is now the primary path for all GitHub interaction, including fetching failed-job log tails (`gh run view --job <id> --log-failed`, still the only way to get raw Actions log output). The skill stops at preflight if `gh` is missing or unauthenticated.
+- **GitHub MCP server** is optional. If one happens to be connected in the host session, use it opportunistically for thread resolution — the one operation where it's a genuinely better fit than `gh` (see "GitHub CLI Commands Used" below). Its absence never blocks the skill. (Comment/reply posting always goes through `gh` — see the note under "GitHub CLI Commands Used" for why.)
 - **Both harness CLIs** must be installed: `claude` (Claude Code, `npm install -g @anthropic-ai/claude-code`) and `codex` (Codex CLI, `npm install -g @openai/codex`). The dual-evaluator step calls whichever one is *not* the host. The skill stops at preflight if the cross-harness CLI is missing.
 
 ## Configuration
@@ -45,19 +45,29 @@ Override via prompt arguments (e.g., `/pm-autofix-pr 10 --ci-timeout 30 --monito
 
 There is no iteration limit. The loop runs until one of: fixed point reached, stale loop detected, CI timeout, unresolvable merge conflict, rebase conflict, persistent push failure, or monitoring window elapsed. Every exit goes through Step 7. The skill never prompts the user.
 
-## MCP Tools Used
+## GitHub CLI Commands Used
 
-All GitHub interaction is direct MCP tool calls — no bundled scripts.
+`gh` / `gh api` is the primary path for all GitHub interaction — no bundled scripts. A GitHub MCP server, if already connected in the session, may be used as an opportunistic fast path for the one operation marked below; never wait for or require one. All comment/reply posting always goes through `gh`, even when an MCP is connected — see the note below the table for why.
 
-| Tool | Purpose |
-|------|---------|
-| `mcp__github__get_me` | Preflight gate; also returns the current user's `login` for self-comment filtering. |
-| `mcp__github__list_pull_requests` | Auto-detect the PR for the current branch. |
-| `mcp__github__pull_request_read` | Fetch PR details, check runs, review comments/threads, reviews, conversation comments, status, and mergeability (`mergeable` / `mergeable_state`). Polled every `POLL_INTERVAL` seconds while waiting on CI or in the monitoring window. |
-| `mcp__github__add_reply_to_pull_request_comment` | Post replies on inline review threads (FIX, DEFER, and REJECT replies). |
-| `mcp__github__add_issue_comment` | Post PR-level replies for review summaries and PR conversation comments. |
-| `mcp__github__pull_request_review_write` (`method="resolve_thread"`) | Resolve threads after a fix is pushed. |
-| `mcp__github__issue_write` (`method="create"`) | File a tracking issue for each DEFER outcome (out-of-scope, diminishing-returns, ambiguous, or automated-fix-failed). |
+`<tmpfile>` and `<titlefile>` below always mean a file allocated via `mktemp` for that specific write (e.g. `mktemp /tmp/reply-body-XXXXXX`) — never a fixed literal path. Two concurrent `/pm-autofix-pr` invocations on the same host would otherwise race on a shared filename, letting one invocation's generated body or title get overwritten by the other's before `gh` reads it. Capture the exact path `mktemp` returns, reuse it across the write and the `gh` call, then `rm -f` it afterward — the same discipline Step 0a already uses for evaluator prompt files.
+
+| Operation | Primary (`gh`) | Opportunistic MCP fast path |
+|------|-----------------|------------------------------|
+| Preflight / current user | `gh auth status`; `gh api user -q .login` for `GH_USER` | — |
+| Auto-detect the PR for the current branch | `gh pr list -R {owner}/{repo} --json number,headRefName,url --head <branch>` (see Step 1) | — |
+| Fetch PR details and mergeability | `gh api repos/{owner}/{repo}/pulls/{n}` (`mergeable`, `mergeable_state`, `head.sha`, `base.ref`, …) | — |
+| Fetch CI check runs | `gh api repos/{owner}/{repo}/commits/{sha}/check-runs` | — |
+| Fetch review threads (with resolution state) | `gh api graphql` — REST has no `isResolved` field, so this one needs GraphQL regardless of MCP (see `references/api-patterns.md`) | — |
+| Fetch review summaries | `gh api repos/{owner}/{repo}/pulls/{n}/reviews` | — |
+| Fetch PR conversation comments | `gh api repos/{owner}/{repo}/issues/{n}/comments` | — |
+| Reply on an inline review thread | `gh api repos/{owner}/{repo}/pulls/{n}/comments/{id}/replies -F body=@<tmpfile>` (body written to a temp file first, so no shell-escaping of the reviewer-authored text is needed — no `jq` or other extra binary required) | — |
+| Reply on a review summary / PR conversation comment | `gh pr comment <n> -R {owner}/{repo} --body-file <tmpfile>` / `gh issue comment <n> -R {owner}/{repo} --body-file <tmpfile>` | — |
+| Resolve a review thread after a fix | `gh api graphql` — `resolveReviewThread` mutation (GraphQL-only; no REST equivalent) | MCP's thread-resolve method, if connected — same GraphQL mutation under the hood |
+| File a tracking issue (DEFER outcome) | `gh issue create -R {owner}/{repo} --title "$(cat <titlefile>)" --body-file <tmpfile>` | — |
+
+**Why posting never uses MCP, even opportunistically:** `GH_USER` (used for all self-authored-comment filtering) is captured from `gh api user`. If a connected MCP server posts a comment under a *different* authenticated identity, that reply would never be recognized as self-authored on a later re-fetch — the skill could then evaluate and reply to its own past outcome messages indefinitely, breaking convergence. Since `gh api -F body=@<tmpfile>` / `gh pr comment --body-file <tmpfile>` already avoid the shell-escaping problem MCP's typed body field solved, MCP's only remaining advantage for posting was skipping a temp file — not enough to justify the risk. Thread resolution has no such coupling (it authors no content attributable to an identity), so it keeps the MCP fast path.
+
+See `references/api-patterns.md` for exact commands, JSON shapes, and pagination/vocabulary notes.
 
 ## Workflow
 
@@ -88,23 +98,27 @@ Per-host invocation table (referenced by Step 4):
 
 For Bash-based evaluator spawns, write the prompt to a `mktemp /tmp/eval-XXXXXX` file, run the command with stdin redirection, capture stdout, then `rm -f` the temp file.
 
-### Step 0b: Preflight — verify the GitHub MCP
+### Step 0b: Preflight — verify `gh`
 
-Call `mcp__github__get_me`. If the tool is unavailable in the session or the call errors, **stop immediately** with this message:
+Run `gh auth status`. If it exits non-zero (not installed, not authenticated, or unreachable), **stop immediately** with this message:
 
-> **GitHub MCP not available.** This skill requires the GitHub MCP server. Enable it in your host's MCP settings (`.mcp.json`, `~/.claude/settings.json`, or the Codex equivalent) and re-run. See <https://github.com/github/github-mcp-server> for setup.
+> **`gh` CLI not available.** This skill requires the GitHub CLI (`gh`), authenticated. Install it from <https://cli.github.com/> and run `gh auth login`, then re-run.
 
-Do not fall back to `gh` for the workflow. On success, capture `login` as `GH_USER` (used to filter out self-authored comments later).
+Then capture `GH_USER` via `gh api user -q .login` (used to filter out self-authored comments later — see the `[bot]`-suffix note in `references/api-patterns.md` when comparing this login against GraphQL-sourced `author.login` values).
+
+If a GitHub MCP server happens to be connected in this session, note it for opportunistic use later (thread resolution only — see "GitHub CLI Commands Used" below); its absence is not a preflight failure and no check for it is needed here.
 
 ### Step 1: Identify the PR
 
+`gh`'s own ambient repo resolution (bare `gh pr view`, no `-R`) can be ambiguous on a checkout with multiple GitHub remotes and no `gh repo set-default` — in the worst case `gh` prompts for the base repository, which this skill can never do (Never Prompt the User). So every tier below except the deliberate last-resort (3c) resolves and passes an explicit `-R {owner}/{repo}` rather than relying on ambient resolution.
+
 1. Get the current branch: `git rev-parse --abbrev-ref HEAD`.
-2. If a PR number was provided as argument, resolve its repo via `mcp__github__pull_request_read` method=`get` (requires owner/repo — derive them from `origin` as in step 3a; if the resolved PR's `head.ref` doesn't match the local branch, warn and continue with the user's explicit number). Then **skip the auto-detect in step 3 and go straight to step 4** so the same validation and base capture (`base.ref`, `base.repo`, `BASE_REMOTE`) runs — otherwise Step 5h's `git fetch <BASE_REMOTE> <base.ref>` would run with `BASE_REMOTE` unset even for a same-repo PR.
+2. If a PR number was provided as argument, resolve its repo the same way as 3a (derive `{owner}/{repo}` from `origin`), then call `gh api repos/{owner}/{repo}/pulls/<n>` (if the resolved PR's `head.ref` doesn't match the local branch, warn and continue with the user's explicit number). Then **skip the auto-detect in step 3 and go straight to step 4** so the same validation and base capture (`base.ref`, `base.repo`, `BASE_REMOTE`) runs — otherwise Step 5h's `git fetch <BASE_REMOTE> <base.ref>` would run with `BASE_REMOTE` unset even for a same-repo PR.
 3. Auto-detect the PR. Try the following resolution strategies in order and stop at the first that yields exactly one open PR whose `head.ref` matches the local branch:
-   - **3a. Origin lookup.** Parse `git remote get-url origin` to `{owner}/{repo}` (strip `git@github.com:`, `https://github.com/`, trailing `.git`). Call `mcp__github__list_pull_requests` with `head={owner}:{branch}`, `state=open`, `perPage=5`.
-   - **3b. Upstream lookup (fork workflow).** If step 3a returned no PRs and `git remote get-url upstream` exists, parse it the same way to `{upstream_owner}/{upstream_repo}` and call `mcp__github__list_pull_requests` against that repo with `head={origin_owner}:{branch}` (PRs from a fork use the fork owner as the head prefix).
-   - **3c. `gh pr view` fallback.** If both MCP lookups fail and `gh` is available, run `gh pr view --json number,headRepositoryOwner,headRepository,baseRepositoryOwner,baseRepository,url` to let `gh` resolve the base repo via `git config`. On success, treat the returned `baseRepositoryOwner.login` / `baseRepository.name` as the PR's owner/repo. If `gh` is not installed or returns nothing, stop and tell the user there is no open PR for the current branch.
-4. Validate — **this runs for both the explicit-number path (step 2) and the auto-detected path (step 3)** — by calling `mcp__github__pull_request_read` method=`get` on the resolved `{owner, repo, pullNumber}` to retrieve `title`, `body`, `head.ref`, `head.sha`, `base.ref`, `base.repo` (the base repository's `full_name`), and `url`. Confirm `head.ref` matches the local branch. Capture `base.ref` for Step 5d's first-push fallback and Step 5h's base-branch merge, and capture **`BASE_REMOTE`** — the fetch source for the *base* repository, which is **not** always `origin`. Resolve it by matching `git remote -v` URLs to `{base_owner}/{base_repo}` (apply the same `git@github.com:` / `https://github.com/` / trailing-`.git` stripping as 3a): `origin` on the 3a origin path, `upstream` on the 3b fork path, and on the 3c `gh` path the remote matching `baseRepositoryOwner/baseRepository`. If no local remote points at the base repository (common for a fork checkout with no `upstream`), set `BASE_REMOTE` to the base repo's clone URL `https://github.com/{base_owner}/{base_repo}.git` — `git fetch` accepts a URL in place of a remote name, so Step 5h works either way.
+   - **3a. Origin lookup.** Parse `git remote get-url origin` to `{owner}/{repo}` (strip `git@github.com:`, `https://github.com/`, trailing `.git`). Run `gh pr list -R {owner}/{repo} --head <branch> --state open --json number,url,headRefName,baseRefName,headRepositoryOwner`, then **keep only PRs whose `headRepositoryOwner.login` equals `{owner}`** (the owner just parsed from `origin`). This filter is load-bearing, not belt-and-braces: `gh pr list`'s `--head` filter matches on branch name only — it does not support the `owner:branch` qualifier (`gh pr list --help`: `"<owner>:<branch>" syntax not supported`) — and `-R` only scopes *which repo's* PR list is searched, not which fork owns each result's head. It is needed at 3a and not only at 3b because `origin` is frequently the base repository itself: a maintainer or push-access contributor who cloned it directly has no `upstream` remote at all, so 3b never runs and 3a is the only tier that fires. A base repository's PR list includes every cross-repository PR opened from a fork, so an unfiltered lookup can return a stranger's PR whose head branch merely happens to share the same name (verified empirically: a single `gh pr list -R <owner>/<repo> --head <branch>` against a busy public repo returned open PRs from several distinct fork owners, all cross-repository). Since Step 4 validates only `head.ref`, an unfiltered match would let the skill fetch, comment on, and triage that stranger's PR whenever the local branch's own PR is absent or closed. A deleted or inaccessible head repository yields an empty/missing `login`, which correctly fails the comparison. If the filter leaves no PRs, treat 3a as "no PR found" and fall through — including the uncommon case where the branch's own PR head lives in a fork registered under some remote name other than `origin`/`upstream`, which 3c exists to catch.
+   - **3b. Upstream lookup (fork workflow).** If step 3a returned no PRs *after its owner filter* and `git remote get-url upstream` exists, parse it the same way to `{upstream_owner}/{upstream_repo}` and run `gh pr list -R {upstream_owner}/{upstream_repo} --head <branch> --state open --json number,url,headRefName,baseRefName,headRepositoryOwner`, then **keep only PRs whose `headRepositoryOwner.login` equals `{origin_owner}`** (the owner parsed from `origin` in 3a) — the same filter as 3a, load-bearing for the same reasons stated there. If the filter leaves no PRs, treat 3b as "no PR found" and fall through to 3c.
+   - **3c. Ambient `gh pr view` fallback.** If both explicit-remote lookups return nothing (uncommon remote naming, or the base repo isn't reachable via `origin`/`upstream`), run bare `gh pr view --json number,url,headRefName,baseRefName` and let `gh`'s own resolution find it. Parse `{base_owner}/{base_repo}` directly out of the returned `url` (`https://github.com/{owner}/{repo}/pull/{number}`) rather than depending on version-specific JSON field names for the base repository. Treat any non-zero exit (including `gh` being unable to resolve a single unambiguous repo) as "no PR found" — stop and tell the user there is no open PR for the current branch.
+4. Validate — **this runs for both the explicit-number path (step 2) and the auto-detected path (step 3)** — by calling `gh api repos/{owner}/{repo}/pulls/<pullNumber>` on the resolved `{owner, repo, pullNumber}` to retrieve `title`, `body`, `head.ref`, `head.sha`, `base.ref`, and `html_url` (the base repository's `full_name` is `{owner}/{repo}`, the same pair just queried). Confirm `head.ref` matches the local branch. Capture `base.ref` for Step 5d's first-push fallback and Step 5h's base-branch merge, and capture **`BASE_REMOTE`** — the fetch source for the *base* repository, which is **not** always `origin`. Resolve it by matching `git remote -v` URLs to `{base_owner}/{base_repo}` (apply the same `git@github.com:` / `https://github.com/` / trailing-`.git` stripping as 3a): `origin` on the 3a origin path, `upstream` on the 3b fork path, and on the 3c path the remote matching the `{base_owner}/{base_repo}` parsed from `url`. If no local remote points at the base repository (common for a fork checkout with no `upstream`), set `BASE_REMOTE` to the base repo's clone URL `https://github.com/{base_owner}/{base_repo}.git` — `git fetch` accepts a URL in place of a remote name, so Step 5h works either way.
 
 ### Step 2: Read Project Pre-commit Requirements
 
@@ -112,16 +126,18 @@ Find CLAUDE.md (or AGENTS.md) by walking from working directory to repo root. Ex
 
 ### Step 3: Fetch PR State
 
-Issue these MCP calls (paginate where applicable) and merge into a single state object:
+Issue these `gh`/`gh api` calls (paginate where applicable) and merge into a single state object. All REST calls below use the `{owner}/{repo}` and `pullNumber` captured in Step 1:
 
 | State field | Source |
 |---|---|
-| `head_sha` | `pull_request_read method=get` → `head.sha` |
-| `has_merge_conflict` | `pull_request_read method=get` → `mergeable` (bool or `null`) and `mergeable_state` (string). If `mergeable` is `null`, GitHub is still computing mergeability in the background — re-fetch `method=get` up to 3 times with a 3-second sleep between tries, and only treat a definitive `true`/`false` as authoritative. Set `has_merge_conflict = true` when `mergeable == false` **or** `mergeable_state == "dirty"` (the PR conflicts with its base branch). Any other terminal state (`clean`, `blocked`, `behind`, `unstable`, `has_hooks`, `unknown`) sets `has_merge_conflict = false` — those don't indicate a content conflict and don't block the fixed point. If `mergeable` is still `null` after the re-fetches, leave `has_merge_conflict = false` but record the indeterminate state in `errors` so Step 5g re-fetches instead of declaring a false fixed point. |
-| `ci_failures` | `pull_request_read method=get_check_runs` → keep entries whose `conclusion ∈ {failure, timed_out, cancelled, startup_failure, action_required}`. For each `failure` whose `app.slug == "github-actions"`, mark `fixable=true` and fetch the log tail with the `Bash` command shown just below this table (kept out of the cell so the shell pipe stays a real pipe). Other failure types are non-fixable — report them. |
-| `review_threads` | `pull_request_read method=get_review_comments` (paginate via `perPage=100`, `after`). Split into `unresolved = [t for t in threads if not t.isResolved]` and `resolved_thread_ids = [t.id for t in threads if t.isResolved]`. For each unresolved thread, take the last non-self element of `comments` (sorted by `createdAt` if order is not guaranteed and `author.login != GH_USER`) as `latestReviewerComment`. Drop self-only threads whose `latestReviewerComment` is absent from `feedback_items`; they are author notes, not reviewer feedback, and must not be dereferenced later. |
-| `review_summaries` | `pull_request_read method=get_reviews`. Apply supersession (see below). |
-| `pr_comments` | `pull_request_read method=get_comments`. Drop entries where `user.login == GH_USER`. |
+| `head_sha`, `base.ref` | `gh api repos/{owner}/{repo}/pulls/<n>` → `.head.sha`, `.base.ref` |
+| `has_merge_conflict` | Same call → `.mergeable` (bool or `null`) and `.mergeable_state` (string) — this is the REST vocabulary, distinct from the uppercase `MERGEABLE`/`CONFLICTING` values `gh pr view --json mergeable` returns via GraphQL; use the REST call so this table's vocabulary and the retry logic below stay correct. If `mergeable` is `null`, GitHub is still computing mergeability in the background — re-fetch up to 3 times with a 3-second sleep between tries, and only treat a definitive `true`/`false` as authoritative. Set `has_merge_conflict = true` when `mergeable == false` **or** `mergeable_state == "dirty"` (the PR conflicts with its base branch). Any other terminal state (`clean`, `blocked`, `behind`, `unstable`, `has_hooks`, `unknown`) sets `has_merge_conflict = false` — those don't indicate a content conflict and don't block the fixed point. If `mergeable` is still `null` after the re-fetches, leave `has_merge_conflict = false` but record the indeterminate state in `errors` so Step 5g re-fetches instead of declaring a false fixed point. |
+| `ci_failures` | `gh api repos/{owner}/{repo}/commits/<head_sha>/check-runs` → keep entries whose `.conclusion ∈ {failure, timed_out, cancelled, startup_failure, action_required}`. For each `failure` whose `.app.slug == "github-actions"`, mark `fixable=true` and fetch the log tail with the `Bash` command shown just below this table (kept out of the cell so the shell pipe stays a real pipe) — the check run's `.id` here is the job id `gh run view --job` expects. Other failure types are non-fixable — report them. |
+| `review_threads` | `gh api graphql` with a `reviewThreads` query (see below and `references/api-patterns.md`) — REST's `pulls/<n>/comments` endpoint has no thread-resolution concept at all (`isResolved` only exists in the GraphQL schema), so this is the one piece of PR state that requires GraphQL regardless of whether an MCP is connected. Paginate `reviewThreads(first: 100, after: $cursor)`. Split into `unresolved = [t for t in threads if not t.isResolved]` and `resolved_thread_ids = [t.id for t in threads if t.isResolved]`. For each unresolved thread, take the last non-self element of `comments(last: 20)` (not `first:` — the goal is the *latest* reviewer comment, and GraphQL connections default to oldest-first; `last: 20` also bounds the query since nested pagination of comments-within-threads isn't practical in one `gh api graphql` call) as `latestReviewerComment`, sorting by `createdAt` if order is not guaranteed and excluding `author.login == GH_USER`. Drop self-only threads whose `latestReviewerComment` is absent from `feedback_items`; they are author notes, not reviewer feedback, and must not be dereferenced later. |
+| `review_summaries` | `gh api repos/{owner}/{repo}/pulls/<n>/reviews`. Apply supersession (see below). |
+| `pr_comments` | `gh api repos/{owner}/{repo}/issues/<n>/comments`. Drop entries where `.user.login == GH_USER`. |
+
+REST and GraphQL disagree on bot logins: for the same comment, REST's `user.login` carries a `[bot]` suffix (e.g. `"chatgpt-codex-connector[bot]"`) while GraphQL's `author.login` for the identical comment (matched by `databaseId`) omits it (`"chatgpt-codex-connector"`) — verified on a live PR in this repo. `GH_USER` is captured via REST (`gh api user -q .login` in Step 0b) and self-filtering compares it against both REST-sourced logins (`review_summaries`, `pr_comments`) and GraphQL-sourced logins (`review_threads`). Rather than reasoning about which side is which, strip a trailing `[bot]` from **both** `GH_USER` and the login being compared before every self-authorship check — this is cheap, always correct, and avoids depending on which identity type (personal account, GitHub App, Actions bot) `gh` happens to be authenticated as in a given run.
 
 The `ci_failures` log-tail fetch lives here rather than inside the table cell
 above: an escaped `\|` renders correctly on GitHub but is a literal argument, not
@@ -134,7 +150,7 @@ gh run view --job <check_run.id> --log-failed 2>&1 | tail -<LOG_TAIL_LINES>
 
 **Supersession algorithm for reviews:** group reviews by `user.login`. Within each group, sort by `submitted_at` ascending. Find the index of the latest `APPROVED` or `DISMISSED` review (or -1 if none). Discard everything at or before that index. From the remainder, keep only `CHANGES_REQUESTED` or `COMMENTED` reviews with non-empty `body` and `user.login != GH_USER`. The result is the actionable summary list.
 
-**Errors:** if any MCP call fails, accumulate the error message into an `errors` list. Do not abort — downstream steps tolerate partial state and re-fetch.
+**Errors:** if any `gh`/`gh api` call fails, accumulate the error message into an `errors` list. Do not abort — downstream steps tolerate partial state and re-fetch.
 
 Build `feedback_items` from:
 - unresolved review threads with a non-null `latestReviewerComment`, keyed as `thread:<thread.id>`
@@ -145,7 +161,7 @@ Initialize `ADDRESSED_THREAD_IDS` with `resolved_thread_ids`. Initialize `REPLIE
 
 Print the initial assessment as a status line — `Found N CI failures, M reviewer feedback items, and merge conflicts: yes/no. Begin processing.` — and proceed unconditionally. **Never** wait for a confirmation: the skill is fully automatic from this point on.
 
-If there is nothing to fix (no CI failures, no unanswered feedback), `has_merge_conflict` is false, **and the `errors` list is empty**, report the PR is clean and proceed to Step 6 (monitoring). If `has_merge_conflict` is true, go to Step 5h even when there is no other work. If `errors` is non-empty — including an indeterminate `mergeable == null` recorded in Step 3, or any failed Step 3 MCP fetch — do **not** declare the PR clean and do **not** enter monitoring; fall through to Step 5g's retry path (report the fetch failures and retry after 30 seconds) so the ambiguous state resolves before any success exit. A false "clean" here would otherwise skip Step 5g's error gate entirely under `--monitor 0`.
+If there is nothing to fix (no CI failures, no unanswered feedback), `has_merge_conflict` is false, **and the `errors` list is empty**, report the PR is clean and proceed to Step 6 (monitoring). If `has_merge_conflict` is true, go to Step 5h even when there is no other work. If `errors` is non-empty — including an indeterminate `mergeable == null` recorded in Step 3, or any failed Step 3 fetch — do **not** declare the PR clean and do **not** enter monitoring; fall through to Step 5g's retry path (report the fetch failures and retry after 30 seconds) so the ambiguous state resolves before any success exit. A false "clean" here would otherwise skip Step 5g's error gate entirely under `--monitor 0`.
 
 ### Step 4: Evaluate Every Feedback Item
 
@@ -196,11 +212,11 @@ The rule leans toward action without being reckless: fix when both evaluators ag
 
 Loop until fixed point or unrecoverable abort. Process each feedback item exactly once per fetch cycle through the outcome flow that matches its Step 4 verdict.
 
-**5a. REJECT flow** (verdict = REJECT). Compose a rejection body using the prefix table below and reply through the right channel:
-- Inline review thread: call `mcp__github__add_reply_to_pull_request_comment` with `commentId = latestReviewerComment.databaseId`.
-- Review summary or PR conversation comment: call `mcp__github__add_issue_comment` with `issue_number = pullNumber`. Start the body with `@reviewer Regarding your <review/comment> (<short identifier>):` and quote or summarize the specific ask being rejected.
+**5a. REJECT flow** (verdict = REJECT). Compose a rejection body using the prefix table below and reply through the right channel (see "GitHub CLI Commands Used" and `references/api-patterns.md` for exact commands):
+- Inline review thread: reply to `commentId = latestReviewerComment.databaseId` via `gh api repos/{owner}/{repo}/pulls/<n>/comments/<commentId>/replies -F body=@<tmpfile>` with the body written to a temp file first (no `jq` or other JSON-building tool needed — `gh api -F key=@path` reads and correctly encodes the file's raw contents). Always post through `gh`, even if a GitHub MCP is connected — see "GitHub CLI Commands Used" for why.
+- Review summary or PR conversation comment: `gh pr comment <n> -R {owner}/{repo} --body-file <tmpfile>` (or `gh issue comment`) with the body written to a temp file first. Start the body with `@reviewer Regarding your <review/comment> (<short identifier>):` and quote or summarize the specific ask being rejected.
 
-Do **not** resolve rejected inline threads — they stay unresolved so the reviewer can push back. Record the item in `OUTCOME_MARKERS` as `item_key → latest_reviewer_marker_at_outcome` using a mutable marker: `latestReviewerComment.databaseId + updatedAt` for inline threads, `review.id + updated_at` for review summaries when available, `review.id + body_hash(body)` for review summaries when no update timestamp exists, and `comment.id + updated_at` for PR conversation comments. Do **not** add it to `ADDRESSED_THREAD_IDS`; suppression depends on the recorded reviewer marker staying current.
+Do **not** resolve rejected inline threads — they stay unresolved so the reviewer can push back. Record the item in `OUTCOME_MARKERS` as `item_key → latest_reviewer_marker_at_outcome` using a mutable marker: `latestReviewerComment.databaseId + updatedAt` for inline threads, `review.id + body_hash(body)` for review summaries (REST reviews have no `updated_at`, and `submitted_at` doesn't change on a body edit — see `references/api-patterns.md`), and `comment.id + updated_at` for PR conversation comments. Do **not** add it to `ADDRESSED_THREAD_IDS`; suppression depends on the recorded reviewer marker staying current.
 
 Rejection body format:
 
@@ -242,7 +258,7 @@ Prefixes by REJECT category:
    _Filed automatically by `pm-autofix-pr` after dual-evaluator triage by {LOCAL_LABEL} and {REMOTE_LABEL}._
    ```
 
-3. Call `mcp__github__issue_write` with `method="create"`, `owner`, `repo`, `title`, `body`, and (if applicable) `labels=["deferred-from-pr"]`. Capture the returned `number` and `html_url`.
+3. Write the title to its own temp file first, as a single non-empty line — the title, like the body, is derived from untrusted reviewer feedback, and interpolating it directly into `--title "<title>"` lets shell metacharacters in the feedback (backticks, `$(...)`, quotes) execute as commands or simply break the invocation. Run `gh issue create -R {owner}/{repo} --title "$(cat <titlefile>)" --body-file <tmpfile> [--label deferred-from-pr]` — write `$(cat <titlefile>)` **verbatim** into the command text; never splice the title text itself into the command string. The file's content becomes inert command-substitution output inside a double-quoted argument, not re-parsed shell syntax. If the repo has no `deferred-from-pr` label, drop `--label` and retry rather than pre-creating it. Capture the returned issue number and URL by parsing `gh issue create`'s stdout (it prints the new issue's URL, from which the number is the trailing path segment).
 4. Compose the PR reply with the matching prefix below, ending with `Tracked as #{new_issue_number} ({issue_html_url}).`
 
    Prefixes by DEFER category:
@@ -255,10 +271,10 @@ Prefixes by REJECT category:
    | `automated-fix-failed` | `**Deferred (automated fix failed pre-commit)** —` |
    | (default) | `**Deferred** —` |
 
-5. Reply through the same channel as REJECT (inline thread → `add_reply_to_pull_request_comment`; review summary / PR comment → `add_issue_comment`). Do **not** resolve inline threads — the reviewer can push back if the deferral is wrong.
+5. Reply through the same channel as REJECT (inline thread → the `.../replies` endpoint; review summary / PR comment → `gh pr comment`/`gh issue comment`). Do **not** resolve inline threads — the reviewer can push back if the deferral is wrong.
 6. Record the item in `OUTCOME_MARKERS` (same marker scheme as REJECT). Append `{item_key, issue_number, issue_url, category, title}` to `DEFERRED_ITEMS` for the Step 7 summary.
 
-**Issue-creation failure fallback.** If `mcp__github__issue_write` fails (rate limit, permissions, transient error) — retry once after 60 seconds. If the retry also fails, **do not block the loop**: post the DEFER reply with `TODO: file as a separate issue — automated issue creation failed (<error summary>).` instead of the tracked-issue link, and append `{item_key, issue_number=null, ...}` to `DEFERRED_ITEMS` so the final summary surfaces the gap. The reviewer's concern is still acknowledged in writing.
+**Issue-creation failure fallback.** If `gh issue create` fails (rate limit, permissions, transient error) — retry once after 60 seconds. If the retry also fails, **do not block the loop**: post the DEFER reply with `TODO: file as a separate issue — automated issue creation failed (<error summary>).` instead of the tracked-issue link, and append `{item_key, issue_number=null, ...}` to `DEFERRED_ITEMS` so the final summary surfaces the gap. The reviewer's concern is still acknowledged in writing.
 
 **5b. FIX flow** (verdict = FIX) and CI failures. Process each FIX item individually — apply, check, commit — before moving to the next. This isolates each item in its own commit so a pre-commit failure can be reverted cleanly without touching earlier successful fixes (the revert combines `git restore` for tracked changes and `git clean -fd` for untracked files the FIX created — both are safe because only the in-flight item's changes are in the worktree).
 
@@ -289,7 +305,7 @@ After all FIX items have been processed, the worktree is clean and `COMMITTED_IT
 
 - Title: `Auto-fix failed pre-commit: <one-line summary of the original feedback>`.
 - Issue body: include the reviewer's original feedback (quoted), the file paths the FIX touched, and the `pre_commit_error_tail` captured in 5b. Set the `**Why deferred:**` line to `automated-fix-failed — <one-line of the pre-commit error>`.
-- File the tracking issue with `mcp__github__issue_write`, post the DEFER reply on the original thread / review summary / PR conversation comment using the `automated-fix-failed` prefix from Step 5a' and ending with `Tracked as #<issue_number> (<issue_html_url>).`, then record the item in `OUTCOME_MARKERS` and append it to `DEFERRED_ITEMS` — exactly like an evaluator-driven DEFER. Apply the same retry + `TODO: file as a separate issue` fallback if `issue_write` fails.
+- File the tracking issue with `gh issue create` (as in Step 5a'), post the DEFER reply on the original thread / review summary / PR conversation comment using the `automated-fix-failed` prefix from Step 5a' and ending with `Tracked as #<issue_number> (<issue_html_url>).`, then record the item in `OUTCOME_MARKERS` and append it to `DEFERRED_ITEMS` — exactly like an evaluator-driven DEFER. Apply the same retry + `TODO: file as a separate issue` fallback if issue creation fails.
 
 After this conversion, every blocked item has an explicit PR reply and (best-effort) a tracking issue, so the "Always Reply" core principle holds for blocked FIXes too. Clear `BLOCKED_ITEMS` for the iteration; do not include their entries in 5e (which only iterates `COMMITTED_ITEMS`).
 
@@ -321,27 +337,29 @@ Validation: <pre-commit check, targeted test, or reason validation was not run>.
 ```
 
 Use the right channel:
-- Inline review thread: call `mcp__github__add_reply_to_pull_request_comment` with `commentId = latestReviewerComment.databaseId` (the numeric REST ID of the thread's most recent reviewer comment — **not** the thread's GraphQL `id`). After the reply succeeds, call `mcp__github__pull_request_review_write` with `method="resolve_thread"` and `threadId = <thread.id>` (the GraphQL node ID from `get_review_comments`). If both calls succeed, add the thread to `ADDRESSED_THREAD_IDS`.
-- Review summary or PR conversation comment: call `mcp__github__add_issue_comment` with `issue_number = pullNumber`. Start the body with `@reviewer Regarding your <review/comment> (<short identifier>):`, then include the fixed outcome. If the reply succeeds, add the item key to `REPLIED_ITEM_KEYS`.
+- Inline review thread: reply to `commentId = latestReviewerComment.databaseId` (the numeric REST ID of the thread's most recent reviewer comment — **not** the thread's GraphQL `id`) via `gh api repos/{owner}/{repo}/pulls/<n>/comments/<commentId>/replies -F body=@<tmpfile>` — always through `gh`, even if a GitHub MCP is connected (see "GitHub CLI Commands Used"). After the reply succeeds, resolve the thread: primary path `gh api graphql` with the `resolveReviewThread` mutation and `threadId = <thread.id>` (the GraphQL node ID from the `review_threads` query in Step 3); if a GitHub MCP is already connected, its thread-resolve method may be used instead — it performs the same mutation. If both the reply and the resolve succeed, add the thread to `ADDRESSED_THREAD_IDS`.
+- Review summary or PR conversation comment: `gh pr comment <n> -R {owner}/{repo} --body-file <tmpfile>` (or `gh issue comment`). Start the body with `@reviewer Regarding your <review/comment> (<short identifier>):`, then include the fixed outcome. If the reply succeeds, add the item key to `REPLIED_ITEM_KEYS`.
 
 This step is **mandatory** — never skip it. If a reply or resolve call fails with 403/429, wait 60s and retry once. After a failed retry, continue the code loop if needed, but do not count that feedback item as addressed and do not declare convergence; it must reappear on the next fetch/retry cycle until a reply is posted.
 
 **5f. Wait for CI only after feedback is answered.** If any fetched feedback item still lacks an evaluation decision and an outcome reply, re-enter Step 4 immediately instead of polling. Once feedback is answered, poll for change:
 
 1. Sleep `POLL_INTERVAL` seconds (via `Bash` with `sleep <n>`).
-2. Re-run Step 3's MCP calls to rebuild PR state.
+2. Re-run Step 3's calls to rebuild PR state.
 3. Compare against the previous snapshot. Treat any of the following as a "change event" worth re-entering Step 4 / Step 5:
    - `head_sha` changed (new push from another contributor).
    - `has_merge_conflict` flipped from false to true (the base branch advanced and now conflicts with the PR) — re-enter to run Step 5h.
    - Any check run's `conclusion` transitioned from null/`in_progress` to a terminal value, or any check run was added/removed.
-   - Review thread count, review summary count, or PR conversation comment count changed, **or** any of their `updated_at` (or per-comment `updatedAt`) timestamps advanced past the previous snapshot. This catches new comments, edited comments, and new reviews uniformly.
+   - Review thread count, review summary count, or PR conversation comment count changed.
+   - Any review thread's latest comment `updatedAt`, or any PR conversation comment's `updated_at`, advanced past the previous snapshot. These fields are real and reliable on their respective endpoints.
+   - Any review summary's `hash(body)` differs from the previous snapshot's — **not** `updated_at`: the REST `pulls/{n}/reviews` response has no `updated_at` field at all (only `submitted_at`, which does not change when a review body is edited), so a body-edited review would never be detected otherwise. This mirrors the `OUTCOME_MARKERS` scheme already used for edited reviews after a REJECT/DEFER outcome.
 4. If nothing changed and CI is still in flight, loop back to step 1.
 
 Track wall-clock elapsed time since the last commit was pushed. If `CI_TIMEOUT` minutes elapse with no terminal CI conclusion for at least one previously-pending check, **abort the loop** — record `ci_timeout` in the final summary and jump to Step 7. Do not prompt the user.
 
 This polling path is the only mechanism the skill uses to detect new state. It does not depend on `<github-webhook-activity>` envelopes or any subscription tool; those are not available in the standard Claude Code CLI or Codex CLI sessions this skill targets.
 
-**5g. Re-fetch state and check for fixed point.** Re-run Step 3's MCP calls. Filter out threads whose ID is in `ADDRESSED_THREAD_IDS` and PR-level feedback whose key is in `REPLIED_ITEM_KEYS`. For each item in `OUTCOME_MARKERS`, suppress it **only if** its latest reviewer marker still matches the value recorded at the prior REJECT/DEFER outcome; if a later reviewer reply exists, remove the item from `OUTCOME_MARKERS` and treat it as fresh feedback to re-evaluate in Step 4. If the merged state has a non-empty `errors` list (including an indeterminate `mergeable == null`), do **not** declare a fixed point — report the fetch failures and retry after 30 seconds.
+**5g. Re-fetch state and check for fixed point.** Re-run Step 3's calls. Filter out threads whose ID is in `ADDRESSED_THREAD_IDS` and PR-level feedback whose key is in `REPLIED_ITEM_KEYS`. For each item in `OUTCOME_MARKERS`, suppress it **only if** its latest reviewer marker still matches the value recorded at the prior REJECT/DEFER outcome; if a later reviewer reply exists, remove the item from `OUTCOME_MARKERS` and treat it as fresh feedback to re-evaluate in Step 4. If the merged state has a non-empty `errors` list (including an indeterminate `mergeable == null`), do **not** declare a fixed point — report the fetch failures and retry after 30 seconds.
 
 **Fixed point reached** if **all** of:
 - `ci_failures` is empty after filtering out `cancelled` (the only non-success conclusion treated as informational). Any remaining entry — including `timed_out`, `startup_failure`, `action_required`, and non-`github-actions` `failure` — blocks convergence and is reported to the user.
@@ -380,7 +398,7 @@ Skip if `MONITOR_DURATION` is 0 or if there are CI failures, unanswered feedback
 
 Report: **"All issues resolved. Monitoring for {MONITOR_DURATION} minutes..."**
 
-Poll for change for up to `MONITOR_DURATION` minutes using the same loop as Step 5f: sleep `POLL_INTERVAL` seconds, re-run Step 3's MCP calls, compare counts and `updated_at` markers (and `head_sha`, and `has_merge_conflict`) against the previous snapshot. If a change is detected within the window — including the base advancing to introduce a new merge conflict — re-enter the evaluate + fix loop (Step 4 → Step 5, with Step 5h handling any new conflict) with a fresh sub-loop. After fixing, resume monitoring with the remaining time.
+Poll for change for up to `MONITOR_DURATION` minutes using the same loop as Step 5f: sleep `POLL_INTERVAL` seconds, re-run Step 3's calls, compare counts, `updated_at` markers, review-summary body hashes (and `head_sha`, and `has_merge_conflict`) against the previous snapshot — same signals as Step 5f's "change event" list. If a change is detected within the window — including the base advancing to introduce a new merge conflict — re-enter the evaluate + fix loop (Step 4 → Step 5, with Step 5h handling any new conflict) with a fresh sub-loop. After fixing, resume monitoring with the remaining time.
 
 A non-empty `errors` list (Step 3's error accumulation, including an indeterminate `mergeable == null`) is never itself evidence of "no change": counts, timestamps, `head_sha`, and `has_merge_conflict` can look identical to the previous snapshot even though mergeability was never actually confirmed. If the window elapses while the most recent fetch's `errors` list is non-empty, do not declare `monitoring-timeout` success yet — perform one more Step 3 re-fetch, mirroring Step 5g's gate. If that re-fetch's `errors` list comes back empty and no other change is detected, the window has genuinely elapsed clean — proceed to Step 7 as `monitoring-timeout`. If `errors` is still non-empty, treat it as a change event and re-enter the evaluate + fix loop (Step 4 → Step 5g), so Step 5g's own retry-after-30-seconds gate resolves the ambiguous state instead of the window silently expiring into a false success.
 
@@ -439,5 +457,5 @@ Do **not** ask the user anything at the end. The skill exits unconditionally aft
 
 ## References
 
-- **`references/api-patterns.md`** — MCP tool signatures, expected response shapes, polling-loop semantics, supersession algorithm, push and rebase handling, issue-creation flow, log-fetching gap
+- **`references/api-patterns.md`** — `gh`/`gh api` command signatures, expected response shapes, polling-loop semantics, supersession algorithm, push and rebase handling, issue-creation flow, the opportunistic-MCP thread-resolution fast path
 - **`references/comment-evaluation.md`** — Full evaluation prompt templates, FIX/DEFER/REJECT decision matrix, DEFER and REJECT taxonomies, ambiguity-to-DEFER policy
