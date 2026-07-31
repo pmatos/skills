@@ -230,14 +230,14 @@ gh pr comment <pull_number> -R {owner}/{repo} --body-file /tmp/reply-body.txt
 
 ## Replying to review threads
 
-Inline review-thread replies have no `gh pr comment` equivalent — use the REST reply endpoint directly, again via a temp file to avoid hand-escaping the body into a `-f` string:
+Inline review-thread replies have no `gh pr comment` equivalent — use the REST reply endpoint directly, again via a temp file to avoid hand-escaping the body into a `-f` string. `gh api -F key=@path` reads the field's value from a file and encodes it correctly as a JSON string (backticks, `$`, quotes, newlines all handled) — no `jq` or other JSON-building tool needed:
 
 ```bash
-jq -n --rawfile body /tmp/reply-body.txt '{body: $body}' \
-  | gh api repos/{owner}/{repo}/pulls/{pull_number}/comments/{comment_id}/replies --input -
+gh api repos/{owner}/{repo}/pulls/{pull_number}/comments/{comment_id}/replies \
+  -F body=@/tmp/reply-body.txt
 ```
 
-`comment_id` is a **comment** ID, not a thread ID. Pass the numeric `databaseId` of the thread's **latest non-self reviewer comment** — the endpoint rejects the thread's GraphQL `id`. Using the latest reviewer comment keeps replies attached to the current ask instead of replying to the skill's own previous outcome message. If a GitHub MCP server is already connected, its reply tool may be used instead (typed body field, no `jq`/temp-file step needed). A failed reply is not a reason to revert a code fix, but it does block convergence; retry it on the next loop.
+`comment_id` is a **comment** ID, not a thread ID. Pass the numeric `databaseId` of the thread's **latest non-self reviewer comment** — the endpoint rejects the thread's GraphQL `id`. Using the latest reviewer comment keeps replies attached to the current ask instead of replying to the skill's own previous outcome message. If a GitHub MCP server is already connected, its reply tool may be used instead (typed body field, no temp file needed either). A failed reply is not a reason to revert a code fix, but it does block convergence; retry it on the next loop.
 
 ## Resolving review threads
 
