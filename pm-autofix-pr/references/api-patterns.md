@@ -101,7 +101,8 @@ A snapshot is considered changed (and the loop wakes the evaluator) if any of th
 - `has_merge_conflict` (derived from `.mergeable`/`.mergeable_state` on call 1) flipped from false to true — the base branch advanced and now conflicts with the PR, which sends the loop into Step 5h.
 - Any check run from call 2 transitioned from `null`/`in_progress` `.status` to a terminal `.conclusion`, or any check run was added or removed.
 - Review-thread count, review-summary count, or PR conversation comment count from calls 3/4/5 changed.
-- Any review thread's latest comment `updatedAt`, any review's `updated_at` (call 4), or any PR conversation comment's `updated_at` (call 5) advanced past the value recorded in the previous snapshot. This catches edits as well as new items uniformly.
+- Any review thread's latest comment `updatedAt` (call 3) or any PR conversation comment's `updated_at` (call 5) advanced past the value recorded in the previous snapshot. This catches edits as well as new items uniformly.
+- Any review summary's (call 4) `hash(.body)` differs from the value recorded in the previous snapshot. Call 4's REST response has **no `updated_at` field** — only `submitted_at`, which doesn't change on a body edit (see "Review summaries" below) — so a body hash is the only way to detect an edited review that didn't also change the review count.
 
 ### Cadence and bounds
 
@@ -198,7 +199,7 @@ Derived state:
 gh api repos/{owner}/{repo}/pulls/{pull_number}/reviews
 ```
 
-Returns reviews with `.id`, `.body`, `.state` (`APPROVED`, `CHANGES_REQUESTED`, `COMMENTED`, `DISMISSED`), `.user.login`, `.submitted_at`. Track REJECT/DEFER review summaries in `OUTCOME_MARKERS` with a mutable marker such as `<review.id>:<review.submitted_at>`; if the review body can be edited without changing `submitted_at`, fall back to `<review.id>:<hash(review.body)>` so edited review bodies re-enter evaluation.
+Returns reviews with `.id`, `.body`, `.state` (`APPROVED`, `CHANGES_REQUESTED`, `COMMENTED`, `DISMISSED`), `.user.login`, `.submitted_at` — there is no `.updated_at` field on a review object, and editing a review's body does not change `.submitted_at` either. Track REJECT/DEFER review summaries in `OUTCOME_MARKERS` with a mutable marker of `<review.id>:<hash(review.body)>` (not `.submitted_at`, which can't detect a body edit) so edited review bodies re-enter evaluation. The general polling "state change" check above uses the same body-hash approach for the same reason.
 
 ### Supersession algorithm
 
