@@ -49,6 +49,8 @@ There is no iteration limit. The loop runs until one of: fixed point reached, st
 
 `gh` / `gh api` is the primary path for all GitHub interaction — no bundled scripts. A GitHub MCP server, if already connected in the session, may be used as an opportunistic fast path for the one operation marked below; never wait for or require one. All comment/reply posting always goes through `gh`, even when an MCP is connected — see the note below the table for why.
 
+`<tmpfile>` and `<titlefile>` below always mean a file allocated via `mktemp` for that specific write (e.g. `mktemp /tmp/reply-body-XXXXXX`) — never a fixed literal path. Two concurrent `/pm-autofix-pr` invocations on the same host would otherwise race on a shared filename, letting one invocation's generated body or title get overwritten by the other's before `gh` reads it. Capture the exact path `mktemp` returns, reuse it across the write and the `gh` call, then `rm -f` it afterward — the same discipline Step 0a already uses for evaluator prompt files.
+
 | Operation | Primary (`gh`) | Opportunistic MCP fast path |
 |------|-----------------|------------------------------|
 | Preflight / current user | `gh auth status`; `gh api user -q .login` for `GH_USER` | — |

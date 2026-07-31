@@ -223,21 +223,21 @@ A pull request is also an issue, so its top-level conversation comments live und
 
 ## Replying to review summaries and PR conversation comments
 
-Review summaries and PR conversation comments don't have inline review-thread reply anchors; post a PR-level comment through the issues endpoint. Write the body to a temp file first — a reviewer-authored or generated body can contain backticks, `$`, and newlines that are unsafe to inline as a shell argument:
+Review summaries and PR conversation comments don't have inline review-thread reply anchors; post a PR-level comment through the issues endpoint. Write the body to a temp file first — a reviewer-authored or generated body can contain backticks, `$`, and newlines that are unsafe to inline as a shell argument. Allocate that file with `mktemp` (e.g. `mktemp /tmp/reply-body-XXXXXX`) rather than a fixed literal path: two concurrent `/pm-autofix-pr` invocations on the same host would otherwise race on the same filename, letting one invocation's reply get overwritten by the other's before `gh` reads it. Capture the exact path `mktemp` returns and reuse it for both the write and the `gh` call below, then `rm -f` it afterward — the same discipline already used for evaluator prompt files (Step 0a):
 
 ```bash
-gh pr comment <pull_number> -R {owner}/{repo} --body-file /tmp/reply-body.txt
+gh pr comment <pull_number> -R {owner}/{repo} --body-file <tmpfile>
 ```
 
 (`gh issue comment` is equivalent, since a PR is an issue.) Always post through `gh`, even if a GitHub MCP server is connected — see the intro above for why comment/reply posting never uses the MCP opportunistically. Because this is a PR-level comment, include enough context for humans to connect the reply to the original feedback: reviewer login, review/comment ID or timestamp, and a short quoted/summarized ask.
 
 ## Replying to review threads
 
-Inline review-thread replies have no `gh pr comment` equivalent — use the REST reply endpoint directly, again via a temp file to avoid hand-escaping the body into a `-f` string. `gh api -F key=@path` reads the field's value from a file and encodes it correctly as a JSON string (backticks, `$`, quotes, newlines all handled) — no `jq` or other JSON-building tool needed:
+Inline review-thread replies have no `gh pr comment` equivalent — use the REST reply endpoint directly, again via a `mktemp`-allocated temp file (not a fixed literal path — same concurrent-invocation race as above) to avoid hand-escaping the body into a `-f` string. `gh api -F key=@path` reads the field's value from a file and encodes it correctly as a JSON string (backticks, `$`, quotes, newlines all handled) — no `jq` or other JSON-building tool needed:
 
 ```bash
 gh api repos/{owner}/{repo}/pulls/{pull_number}/comments/{comment_id}/replies \
-  -F body=@/tmp/reply-body.txt
+  -F body=@<tmpfile>
 ```
 
 `comment_id` is a **comment** ID, not a thread ID. Pass the numeric `databaseId` of the thread's **latest non-self reviewer comment** — the endpoint rejects the thread's GraphQL `id`. Using the latest reviewer comment keeps replies attached to the current ask instead of replying to the skill's own previous outcome message. Always post through `gh`, even if a GitHub MCP server is connected — see the intro above for why. A failed reply is not a reason to revert a code fix, but it does block convergence; retry it on the next loop.
@@ -274,16 +274,16 @@ DEFER is "correct, but not in this PR" — the skill files a tracking issue and 
 
 ### 1. File the tracking issue
 
-Write the body to a temp file (same escaping rationale as replies). Write the title to its own temp file too, as a single non-empty line — it's equally derived from untrusted reviewer feedback, and interpolating it directly into `--title "<title>"` would let shell metacharacters in the feedback (backticks, `$(...)`, quotes) execute as commands or break the invocation:
+Write the body to a `mktemp`-allocated temp file (same escaping rationale as replies, and same concurrent-invocation race if a fixed literal path were used instead). Write the title to its own `mktemp`-allocated temp file too, as a single non-empty line — it's equally derived from untrusted reviewer feedback, and interpolating it directly into `--title "<title>"` would let shell metacharacters in the feedback (backticks, `$(...)`, quotes) execute as commands or break the invocation:
 
 ```bash
 gh issue create -R {owner}/{repo} \
-  --title "$(cat /tmp/issue-title.txt)" \
-  --body-file /tmp/issue-body.txt \
+  --title "$(cat <titlefile>)" \
+  --body-file <tmpfile> \
   --label deferred-from-pr
 ```
 
-`$(cat /tmp/issue-title.txt)` must be written verbatim into the command text — never splice the title's actual content into the command string. The file's content becomes inert command-substitution output inside a double-quoted argument, not re-parsed shell syntax, so it's safe regardless of what the reviewer's feedback contains.
+`$(cat <titlefile>)` must be written verbatim into the command text — never splice the title's actual content into the command string. The file's content becomes inert command-substitution output inside a double-quoted argument, not re-parsed shell syntax, so it's safe regardless of what the reviewer's feedback contains.
 
 Body template:
 
