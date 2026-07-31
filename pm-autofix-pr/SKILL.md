@@ -38,12 +38,13 @@ Override via prompt arguments (e.g., `/pm-autofix-pr 10 --ci-timeout 30 --monito
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `MONITOR_DURATION` | 10 | Minutes to watch for new issues after convergence. 0 to skip. |
-| `CI_TIMEOUT` | 20 | Minutes to wait for CI before aborting (no user prompt — exits through Step 7 with `ci-timeout`). |
-| `POLL_INTERVAL` | 30 | Seconds between PR-state re-fetches while waiting for CI or monitoring. |
+| `TOTAL_CI_BUDGET` | 15 | Overall wall-clock ceiling (minutes) on **all** CI-wait (Step 5f) + monitoring (Step 6) time for the whole run, measured from first entry into Step 5f — not reset by later pushes or monitoring cycles. `CI_TIMEOUT` and `MONITOR_DURATION` below remain the per-phase bounds, but each wait is clamped to whichever of `TOTAL_CI_BUDGET` or the per-phase bound remains, whichever is smaller. Once it reaches zero, the run aborts through Step 7 with `ci-timeout` (which also posts a resume-pointer PR comment — see Step 7) regardless of how recently the last commit was pushed or how many fix/push cycles happened inside it. |
+| `MONITOR_DURATION` | 10 | Minutes to watch for new issues after convergence. 0 to skip. Also bounded by whatever of `TOTAL_CI_BUDGET` remains. |
+| `CI_TIMEOUT` | 20 | Minutes to wait for CI before aborting (no user prompt — exits through Step 7 with `ci-timeout`). Also bounded by whatever of `TOTAL_CI_BUDGET` remains — with the defaults above, `TOTAL_CI_BUDGET` (15) binds first. |
+| `POLL_INTERVAL` | 30 | Seconds between PR-state re-fetches while waiting for CI or monitoring; also the `--interval` passed to `gh pr checks --watch` where supported (see Step 5f). |
 | `LOG_TAIL_LINES` | 500 | Lines of CI failure log to inspect. |
 
-There is no iteration limit. The loop runs until one of: fixed point reached, stale loop detected, CI timeout, unresolvable merge conflict, rebase conflict, persistent push failure, or monitoring window elapsed. Every exit goes through Step 7. The skill never prompts the user.
+There is no iteration limit. The loop runs until one of: fixed point reached, stale loop detected, CI timeout (per-push or total budget exhausted), unresolvable merge conflict, rebase conflict, persistent push failure, or monitoring window elapsed. Every exit goes through Step 7. The skill never prompts the user.
 
 ## GitHub CLI Commands Used
 
@@ -342,9 +343,16 @@ Use the right channel:
 
 This step is **mandatory** — never skip it. If a reply or resolve call fails with 403/429, wait 60s and retry once. After a failed retry, continue the code loop if needed, but do not count that feedback item as addressed and do not declare convergence; it must reappear on the next fetch/retry cycle until a reply is posted.
 
-**5f. Wait for CI only after feedback is answered.** If any fetched feedback item still lacks an evaluation decision and an outcome reply, re-enter Step 4 immediately instead of polling. Once feedback is answered, poll for change:
+**5f. Wait for CI only after feedback is answered.** If any fetched feedback item still lacks an evaluation decision and an outcome reply, re-enter Step 4 immediately instead of waiting. Once feedback is answered, wait for CI to change:
 
-1. Sleep `POLL_INTERVAL` seconds (via `Bash` with `sleep <n>`).
+On the very first entry into this step for the whole run, start `TOTAL_CI_BUDGET_REMAINING` at `TOTAL_CI_BUDGET` minutes. It is never reset by a later push or by a monitoring cycle (Step 6) — every wait anywhere in the run draws down the same counter, which is exactly what closes the "resets per push" and "monitoring windows chain unboundedly" gaps described in the issue this behavior was added for.
+
+At the top of each wait, compute `budget_this_wait = min(minutes remaining on the per-push CI_TIMEOUT clock, TOTAL_CI_BUDGET_REMAINING)`. If that is `<= 0`, skip straight to the timeout check below without waiting.
+
+1. **Waiting primitive** — prefer a blocking watch over a manual sleep loop:
+   - **Probe once per run**, not per iteration: `gh pr checks --help 2>&1 | grep -q -- '--watch'`. If present, wait with `timeout <chunk>s gh pr checks <n> -R {owner}/{repo} --watch --interval <POLL_INTERVAL>`, where `<chunk>` is `min(budget_this_wait in seconds, 300)` — capping every watch invocation at 5 minutes even when more budget remains, so control returns periodically to check the four channels `--watch` never looks at (review threads, review summaries, PR conversation comments, mergeability). `timeout` exits 124 when the chunk elapses with checks still pending; treat that the same as "nothing changed this wait" below. A clean exit (`0`) from `gh pr checks --watch` means the checks reached a terminal state — re-fetch immediately rather than waiting out the rest of the chunk.
+   - If the probe finds no `--watch` support (older `gh`), fall back to the original loop: sleep `POLL_INTERVAL` seconds at a time (via `Bash` with `sleep <n>`), for up to `budget_this_wait`.
+   - **`gh pr checks --watch` is a sleep replacement only, never a state source.** Its own status output uses the GraphQL `CheckConclusionState` vocabulary (uppercase — see `references/api-patterns.md`'s "CI check runs" section), not the REST vocabulary the rest of this skill relies on. Whichever waiting path was used, always re-run Step 3's five calls next to rebuild authoritative state — do not parse `gh pr checks`' own output.
 2. Re-run Step 3's calls to rebuild PR state.
 3. Compare against the previous snapshot. Treat any of the following as a "change event" worth re-entering Step 4 / Step 5:
    - `head_sha` changed (new push from another contributor).
@@ -353,11 +361,12 @@ This step is **mandatory** — never skip it. If a reply or resolve call fails w
    - Review thread count, review summary count, or PR conversation comment count changed.
    - Any review thread's latest comment `updatedAt`, or any PR conversation comment's `updated_at`, advanced past the previous snapshot. These fields are real and reliable on their respective endpoints.
    - Any review summary's `hash(body)` differs from the previous snapshot's — **not** `updated_at`: the REST `pulls/{n}/reviews` response has no `updated_at` field at all (only `submitted_at`, which does not change when a review body is edited), so a body-edited review would never be detected otherwise. This mirrors the `OUTCOME_MARKERS` scheme already used for edited reviews after a REJECT/DEFER outcome.
-4. If nothing changed and CI is still in flight, loop back to step 1.
+4. Subtract this wait's actual elapsed wall-clock time from both `TOTAL_CI_BUDGET_REMAINING` and the per-push `CI_TIMEOUT` clock.
+5. If nothing changed and CI is still in flight, loop back to step 1 — unless the timeout check below now fires.
 
-Track wall-clock elapsed time since the last commit was pushed. If `CI_TIMEOUT` minutes elapse with no terminal CI conclusion for at least one previously-pending check, **abort the loop** — record `ci_timeout` in the final summary and jump to Step 7. Do not prompt the user.
+**Timeout check.** Abort the loop — record `ci-timeout` in the final summary and jump to Step 7 (which posts a resume-pointer PR comment before exiting) — if **either**: the per-push `CI_TIMEOUT` minutes have elapsed with no terminal CI conclusion for at least one previously-pending check, **or** `TOTAL_CI_BUDGET_REMAINING` has reached zero, regardless of how recently the last commit was pushed. Do not prompt the user.
 
-This polling path is the only mechanism the skill uses to detect new state. It does not depend on `<github-webhook-activity>` envelopes or any subscription tool; those are not available in the standard Claude Code CLI or Codex CLI sessions this skill targets.
+This wait-and-refetch path is the only mechanism the skill uses to detect new state. It does not depend on `<github-webhook-activity>` envelopes or any subscription tool; those are not available in the standard Claude Code CLI or Codex CLI sessions this skill targets. `gh pr checks --watch` changes how the wait is spent, not how state is detected.
 
 **5g. Re-fetch state and check for fixed point.** Re-run Step 3's calls. Filter out threads whose ID is in `ADDRESSED_THREAD_IDS` and PR-level feedback whose key is in `REPLIED_ITEM_KEYS`. For each item in `OUTCOME_MARKERS`, suppress it **only if** its latest reviewer marker still matches the value recorded at the prior REJECT/DEFER outcome; if a later reviewer reply exists, remove the item from `OUTCOME_MARKERS` and treat it as fresh feedback to re-evaluate in Step 4. If the merged state has a non-empty `errors` list (including an indeterminate `mergeable == null`), do **not** declare a fixed point — report the fetch failures and retry after 30 seconds.
 
@@ -396,15 +405,31 @@ This polling path is the only mechanism the skill uses to detect new state. It d
 
 Skip if `MONITOR_DURATION` is 0 or if there are CI failures, unanswered feedback items, or a merge conflict (`has_merge_conflict` true). Monitoring is only entered from a true fixed point.
 
-Report: **"All issues resolved. Monitoring for {MONITOR_DURATION} minutes..."**
+The effective monitor window is `min(MONITOR_DURATION, TOTAL_CI_BUDGET_REMAINING)` — the same shared counter Step 5f draws down, since it was started on first entry into Step 5f and is never reset by convergence. If that effective window is `<= 0` (the run reached a fixed point but exhausted the total budget getting there), skip monitoring entirely and proceed straight to Step 7 as `monitoring-timeout`: the PR genuinely has no open work, there is just no budget left to keep watching it — still a success exit, and no resume-pointer comment is needed since nothing is pending.
 
-Poll for change for up to `MONITOR_DURATION` minutes using the same loop as Step 5f: sleep `POLL_INTERVAL` seconds, re-run Step 3's calls, compare counts, `updated_at` markers, review-summary body hashes (and `head_sha`, and `has_merge_conflict`) against the previous snapshot — same signals as Step 5f's "change event" list. If a change is detected within the window — including the base advancing to introduce a new merge conflict — re-enter the evaluate + fix loop (Step 4 → Step 5, with Step 5h handling any new conflict) with a fresh sub-loop. After fixing, resume monitoring with the remaining time.
+Report: **"All issues resolved. Monitoring for {effective window} minutes..."**
+
+Wait for change for up to the effective window using the same waiting primitive as Step 5f (`gh pr checks --watch`, probed once per run, chunked and falling back to the sleep loop exactly as described there), re-run Step 3's calls, compare counts, `updated_at` markers, review-summary body hashes (and `head_sha`, and `has_merge_conflict`) against the previous snapshot — same signals as Step 5f's "change event" list. Subtract each wait's elapsed time from `TOTAL_CI_BUDGET_REMAINING` exactly as Step 5f does. If a change is detected within the window — including the base advancing to introduce a new merge conflict — re-enter the evaluate + fix loop (Step 4 → Step 5, with Step 5h handling any new conflict) with a fresh sub-loop. Because that sub-loop runs Step 5f, it draws on the same `TOTAL_CI_BUDGET_REMAINING` and can itself hit the `ci-timeout` timeout check if the total budget runs out before the sub-loop reconverges — this is what stops flapping monitor-detect-fix cycles from chaining forever. After fixing, resume monitoring with the remaining time — `min(what was left of the original MONITOR_DURATION window, the now-smaller TOTAL_CI_BUDGET_REMAINING)`, not a fresh `MONITOR_DURATION`.
 
 A non-empty `errors` list (Step 3's error accumulation, including an indeterminate `mergeable == null`) is never itself evidence of "no change": counts, timestamps, `head_sha`, and `has_merge_conflict` can look identical to the previous snapshot even though mergeability was never actually confirmed. If the window elapses while the most recent fetch's `errors` list is non-empty, do not declare `monitoring-timeout` success yet — perform one more Step 3 re-fetch, mirroring Step 5g's gate. If that re-fetch's `errors` list comes back empty and no other change is detected, the window has genuinely elapsed clean — proceed to Step 7 as `monitoring-timeout`. If `errors` is still non-empty, treat it as a change event and re-enter the evaluate + fix loop (Step 4 → Step 5g), so Step 5g's own retry-after-30-seconds gate resolves the ambiguous state instead of the window silently expiring into a false success.
 
 If the window elapses without a change and the most recent fetch's `errors` list is empty, proceed to Step 7.
 
 ### Step 7: Final Summary
+
+**Budget-exhaustion PR comment.** If the exit reason is `ci-timeout` (whether the per-push `CI_TIMEOUT` clock or the run-wide `TOTAL_CI_BUDGET` triggered it — see Step 5f), post a PR comment *before* printing the local summary below, so the state and the resume path are visible on GitHub without anyone needing to re-run the skill just to read local output. Write the body to a `mktemp`'d temp file first (the same discipline as every other reply in this skill — see "GitHub CLI Commands Used") and post with `gh pr comment <n> -R {owner}/{repo} --body-file <tmpfile>`:
+
+```
+Autofix paused: CI budget exhausted (`TOTAL_CI_BUDGET` = {TOTAL_CI_BUDGET} min).
+
+**Fixes landed this run:** {COMMITTED_ITEMS shas + one-line summaries, or "none"}.
+**Feedback resolved:** {count of threads resolved / DEFER issues filed this run, or "none"}.
+**Still pending:** {ci_failures not yet terminal, and/or unresolved feedback items, and/or merge conflicts, whichever apply}.
+
+Resume with `/pm-autofix-pr {pullNumber}`.
+```
+
+This comment is authored by `GH_USER` — the same identity every other reply in this skill already posts under — so Step 3's existing `pr_comments` self-filter (drops entries where `.user.login == GH_USER`, `[bot]`-suffix stripped on both sides per the note under Step 3) already keeps a later, resumed run from misreading its own exhaustion comment as reviewer feedback; no new filtering logic is needed. If the comment post itself fails, do not retry indefinitely or block the exit — log the failure and proceed to print the local summary regardless.
 
 Print:
 
@@ -453,7 +478,7 @@ Print:
 Do **not** ask the user anything at the end. The skill exits unconditionally after printing the summary:
 
 - **Success exits** — `fixed-point` (CI green, no merge conflicts, all feedback answered) or `monitoring-timeout` (reached only by passing through the same green-CI / no-conflict / answered-feedback gate before entering Step 6, so a clean window-elapse is also success): print **"PR is ready for re-review."**
-- **Failure exits** — `stale-loop`, `ci-timeout`, `merge-conflict`, `rebase-conflict`, `push-failure`, `dirty-worktree`: print **"Autofix exited without converging — see summary above for required follow-up."** For a `merge-conflict` exit, add: **"Merge conflicts with `<base.ref>` could not be resolved automatically — resolve them manually, then re-run."** Do not loop again, do not prompt.
+- **Failure exits** — `stale-loop`, `ci-timeout` (also posts the budget-exhaustion PR comment above), `merge-conflict`, `rebase-conflict`, `push-failure`, `dirty-worktree`: print **"Autofix exited without converging — see summary above for required follow-up."** For a `merge-conflict` exit, add: **"Merge conflicts with `<base.ref>` could not be resolved automatically — resolve them manually, then re-run."** Do not loop again, do not prompt.
 
 ## References
 
