@@ -73,24 +73,26 @@ The wait loop runs in two places, sharing one run-wide budget:
 - **Step 5f** — after every push, while waiting for CI to terminate or for new reviewer feedback to arrive.
 - **Step 6** — after convergence, throughout the monitoring window.
 
-Both draw down the same `TOTAL_CI_BUDGET_REMAINING` counter, initialized once at run start (SKILL.md Step 0b, alongside `GH_USER`) and never reset by a later push or by re-entering monitoring — see "Cadence and bounds" below for why a single shared counter, rather than a per-phase one, is the point, and why it can't be lazily initialized on first entry into Step 5f (some runs reach Step 6 without ever entering Step 5f). Both use the same shape:
+Both draw down the same `TOTAL_CI_BUDGET_REMAINING` counter, initialized once at run start (SKILL.md Step 0b, alongside `GH_USER`) and never reset by a later push or by re-entering monitoring — see "Cadence and bounds" below for why a single shared counter, rather than a per-phase one, is the point, and why it can't be lazily initialized on first entry into Step 5f (some runs reach Step 6 without ever entering Step 5f). `WATCH_USABLE`/`TIMEOUT_BIN` are probed the same way, once, also in SKILL.md Step 0b — not inside this loop — so both call sites can reuse the result even on the Step 3 → Step 6 direct path that never visits Step 5f. Both use the same shape:
 
 ```text
-probe once per run: does `gh pr checks --help` advertise --watch,
-                     AND is a timeout binary present (`timeout`, else `gtimeout`)?
-watch_usable = both of the above; TIMEOUT_BIN = whichever binary resolved
-
 loop:
   budget_this_wait = min(per-phase clock remaining, TOTAL_CI_BUDGET_REMAINING)
   if budget_this_wait <= 0:
-    abort with the appropriate exit reason
-  if watch_usable:
+    # Step 5f: abort with exit reason `ci-timeout`.
+    # Step 6: this is `monitoring-timeout` — still a success exit, since Step 6
+    #         is only ever entered from a genuine fixed point (see SKILL.md Step 6).
+    exit per the calling step's own rule above
+  if WATCH_USABLE:
     TIMEOUT_BIN <min(budget_this_wait_seconds, 300)>s \
       gh pr checks <n> -R {owner}/{repo} --watch --interval POLL_INTERVAL
     # exit 0   -> checks reached a terminal state
     # exit 124 -> chunk elapsed with checks still pending; treat as "no change"
   else:
-    sleep POLL_INTERVAL          # default 30s, via Bash `sleep <n>`, repeated up to budget_this_wait
+    sleep POLL_INTERVAL          # default 30s, via Bash `sleep <n>` — ONE sleep this
+                                  # pass; the outer `loop:` re-enters and sleeps again
+                                  # until budget_this_wait is exhausted, same cadence
+                                  # as the WATCH_USABLE branch's chunking
     # used when --watch is unsupported OR no timeout/gtimeout binary exists —
     # an unbounded --watch call would defeat the run-wide budget just as surely
     # as a missing binary failing instantly would
@@ -99,7 +101,7 @@ loop:
   subtract elapsed wait time from TOTAL_CI_BUDGET_REMAINING and the per-phase clock
   if state changed:             # compare against previous snapshot
     break and re-enter Step 4 / Step 5
-  if watch_usable and last wait exited 0 (checks already terminal):
+  if WATCH_USABLE and last wait exited 0 (checks already terminal):
     sleep remainder of POLL_INTERVAL   # floor — an already-terminal check set makes
                                         # --watch return instantly every time otherwise,
                                         # which is the normal case throughout Step 6
@@ -135,8 +137,9 @@ A snapshot is considered changed (and the loop wakes the evaluator) if any of th
 
 - `POLL_INTERVAL` defaults to 30s. At that cadence, an hour of waiting costs ≈120 reads per loop instance — well below GitHub's REST/GraphQL rate limits for a single authenticated user on a single PR. It is also the `--interval` passed to `gh pr checks --watch` where that primitive is used.
 - `TOTAL_CI_BUDGET` is the run-wide wall-clock ceiling (default 15 min) on the **sum** of all Step 5f waiting plus all Step 6 waiting, for the whole run. It is initialized once at run start (Step 0b) rather than lazily on first entry into Step 5f — a PR that's already clean on the very first fetch goes straight from Step 3 to Step 6 without ever entering Step 5f, and a no-commit iteration can reach Step 6 the same way via Step 5d's skip to Step 5g, so a Step-5f-scoped init would leave the counter undefined on those paths. It is deliberately **not** reset by a later push or by re-entering monitoring after a mid-monitoring fix — that per-push/per-cycle reset is what let a real run spend ~80 minutes polling a stalled PR (4x the old per-push `CI_TIMEOUT`) via several small fix→push cycles and chained monitoring windows. `CI_TIMEOUT` and `MONITOR_DURATION` below are still the nominal per-phase bounds, but every wait is clamped to whichever of its per-phase clock or `TOTAL_CI_BUDGET_REMAINING` is smaller; once the shared counter hits zero the run aborts through Step 7 with `ci-timeout` regardless of what the per-phase clock still allows.
-- `CI_TIMEOUT` is the nominal per-push wall-clock budget for Step 5f, inner to `TOTAL_CI_BUDGET`. Measure from the moment the loop's most recent push completed; abort when the budget is exceeded with **no** previously-pending check having reached a terminal `conclusion` — or when `TOTAL_CI_BUDGET_REMAINING` reaches zero first, whichever comes first.
-- `MONITOR_DURATION` is the nominal wall-clock budget for Step 6, inner to `TOTAL_CI_BUDGET`. Measure from entry to monitoring; exit cleanly (`monitoring-timeout`) when it elapses, or when the shared `TOTAL_CI_BUDGET_REMAINING` reaches zero first — the latter is still a success exit, since Step 6 is only ever entered from a genuine fixed point.
+- `CI_TIMEOUT` is the nominal per-push wall-clock budget for Step 5f, inner to `TOTAL_CI_BUDGET`. Tracked as a countdown (the "per-push `CI_TIMEOUT` clock," SKILL.md Step 5f) that resets to `CI_TIMEOUT` minutes on every successful push (Step 5d, Step 5h) rather than merely being measured passively from the last push timestamp; abort when it reaches zero with **no** previously-pending check having reached a terminal `conclusion` — or when `TOTAL_CI_BUDGET_REMAINING` reaches zero first, whichever comes first.
+- `MONITOR_DURATION` is the nominal wall-clock budget for Step 6, inner to `TOTAL_CI_BUDGET`. Tracked as its own countdown, `MONITOR_DURATION_REMAINING`, initialized to `min(MONITOR_DURATION, TOTAL_CI_BUDGET_REMAINING)` at Step 6 entry; exit cleanly (`monitoring-timeout`) when it or the shared `TOTAL_CI_BUDGET_REMAINING` reaches zero first — either is still a success exit, since Step 6 is only ever entered from a genuine fixed point (see SKILL.md Step 6 for why a mid-wait budget exhaustion is `monitoring-timeout`, not `ci-timeout`, even though both call sites share the same waiting primitive).
+- `TIMEOUT_TRIGGER` records which of the two Step 5f conditions above actually fired on a `ci-timeout` abort — `total-budget` if `TOTAL_CI_BUDGET_REMAINING` reached zero (checked first), otherwise `per-push` (SKILL.md Step 5f's Timeout check). Step 7's budget-exhaustion PR comment (SKILL.md Step 7) reads this value to report the real cause instead of always blaming the total budget.
 
 ### Why polling, not webhook subscription
 
