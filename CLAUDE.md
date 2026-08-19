@@ -43,6 +43,10 @@ Slash command `/pm-autofix-pr` that iteratively fixes CI failures and addresses 
 
 Skill `/pm-plan` (dual-harness) that performs deep, multi-phase implementation planning before writing any code. The shared workflow runs under either harness; a capability fork selects the dispatch mechanism for parallel exploration, plan-name generation, and adversarial review: the native `Agent`/`Task` tool (Claude Code) or `claude -p` headless subagents (OpenAI Codex CLI, which has no native subagent tool). Mechanics live in `references/dispatch-claude.md` and `references/dispatch-codex.md`. Produces a structured plan at `.ultraplan/<plan-name>.md`. The shell path requires `codex --sandbox workspace-write` and `claude` on `$PATH`; the native path needs neither.
 
+## pm-cr
+
+Slash command `/pm-cr` that reviews the current diff, or a PR/branch/path target, for correctness bugs and reuse/simplification/efficiency/altitude/conventions cleanups at a chosen effort level (low/medium/high/xhigh/max/ultra, defaulting to whatever was last used this conversation). Low/medium favor precision; high through max fan out across up to 10 parallel finder angles, verify each candidate (3-state at medium, recall-biased above it), and xhigh/max add a gap-sweep pass. `--fix` applies the findings directly, `--comment` posts them as inline PR comments, `ultra` (no local cloud access) falls back to a local max-effort review. Mechanics live in `references/angles.md`, `references/effort-levels.md`, and `references/output-and-flags.md`.
+
 ## fork
 
 Slash command `/fork` that accepts a prompt and implements it with both Claude Code and OpenAI Codex CLI in parallel git worktrees. After both finish, runs the best-of skill to compare implementations and pick the winner.
