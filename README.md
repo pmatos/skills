@@ -138,6 +138,22 @@ Trigger phrases: `plan this`, `make a plan`, `implementation plan`, `deep plan`,
 
 **Requires**: nothing extra on the native Claude Code path. On the Codex CLI (shell) path: `codex` invoked with `--sandbox workspace-write` (or higher) and the `claude` CLI authenticated and on `$PATH`.
 
+### `/pm-simplify` — Simplify
+
+```bash
+npx skills@latest add pmatos/skills/pm-simplify
+```
+
+Cleans up the changed code without changing behavior. Reviews the diff for reuse, simplification, efficiency, and altitude issues, then fixes what it finds directly. Quality only — it does not hunt for correctness bugs.
+
+What it does:
+- Gathers the diff under review (`git diff @{upstream}...HEAD`, falling back to `main...HEAD` / `HEAD~1`, plus any uncommitted working-tree changes), or reviews an explicit PR/branch/path argument.
+- If a native subagent tool (the `Agent`/`Task` tool) is available, launches four parallel review agents — one per angle: **Reuse** (re-implemented functionality that already exists in the codebase), **Simplification** (redundant state, copy-paste, deep nesting, dead code), **Efficiency** (redundant computation/I/O, sequential independent work, closures that leak large captured scopes), and **Altitude** (special cases bolted onto shared infrastructure instead of a deeper fix).
+- Without a native subagent tool, works through all four angles inline in a single pass instead, and says so in its summary.
+- Dedups overlapping findings and fixes each directly, skipping anything that would change behavior, reach outside the diff, or looks like a false positive — noting the skip rather than arguing with it.
+
+Trigger phrases: `simplify this`, `simplify the diff`, `clean up this code`, `clean up the changed code`, `reuse pass`, `simplification pass`, `efficiency pass`, `altitude pass`.
+
 ### `/fork` — Dual-Model Implementation
 
 ```bash
