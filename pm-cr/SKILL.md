@@ -50,7 +50,22 @@ existing ref or path, add one line saying so alongside the level line.
 ## Phase 1 — Gather the diff
 
 Resolve the base branch first, in order, keeping it remote-qualified
-wherever the tier names a remote: the remote default branch from
+wherever the tier names a remote. **First, if there is a PR, use its
+base**: `gh pr view --json url,baseRefName` for the current branch, or
+resolve the PR parsed as the target in Phase 0. `baseRefName` is only a
+branch name, so take the base *repository* from `url` — a PR URL is always
+`https://github.com/<owner>/<repo>/pull/<n>` in the base repo, never in the
+fork. The base remote is the local remote whose *fetch* URL points at that
+`<owner>/<repo>` (strip `git@github.com:`, `https://github.com/`, and a
+trailing `.git` before comparing); the base is then
+`<base-remote>/<baseRefName>`. This tier is what makes a PR into a
+non-default base such as `release/1.x` work: the default-branch tiers below
+would pick `main`, whose merge base sits further back, so `release/1.x`'s
+own commits enter the scope as author changes and `--fix` edits code
+outside the PR. Fall through to those tiers when the branch has no open PR,
+when `gh pr view` cannot resolve a single repository, or when no local
+remote's fetch URL matches the base repo. The fall-through tiers: the
+remote default branch from
 `git symbolic-ref refs/remotes/origin/HEAD` (strip only the
 `refs/remotes/` prefix, so the base stays `origin/<branch>` — a bare name
 resolves through `refs/heads/`, never `refs/remotes/origin/`); else `gh
@@ -70,7 +85,9 @@ is empty for every pushed commit. When no tier resolves (a `git clone
 no local `main`), take the disclosed `HEAD~1` last resort below rather than
 a tracking ref that reviews nothing.
 
-What you actually want is the branch point. Where more than one candidate
+What you actually want is the branch point. When the PR base resolved
+above, use it directly — the candidate comparison here exists to
+disambiguate default-branch candidates. Where more than one candidate
 base resolves — in a fork checkout `origin`'s and `upstream`'s default
 branches are both candidates, and tier 1 would otherwise always pick
 `origin`'s because `git clone` sets `refs/remotes/origin/HEAD` while `git
