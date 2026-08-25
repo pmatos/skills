@@ -21,18 +21,40 @@ $ARGUMENTS
 Resolve the base to diff against, in this order:
 
 1. If the current branch has an open PR, use its base: `gh pr view --json
-   baseRefName -q .baseRefName`.
+   url,baseRefName`. `baseRefName` is only a branch name, so take the base
+   *repository* from `url` — a PR URL is always
+   `https://github.com/<owner>/<repo>/pull/<n>` in the base repo, never in
+   the fork. The base remote is the local remote whose `git remote -v` URL
+   points at that `<owner>/<repo>` (strip `git@github.com:`,
+   `https://github.com/`, and a trailing `.git` before comparing); if none
+   does — a fork checkout with no `upstream` — use the clone URL
+   `https://github.com/<owner>/<repo>.git`, which `git fetch` accepts in
+   place of a remote name. If `gh pr view` cannot resolve a single
+   repository on its own, fall through to rule 2.
 2. Otherwise use the remote's default branch — `git symbolic-ref
    refs/remotes/origin/HEAD` with the `refs/remotes/origin/` prefix
    stripped — falling back to `main` or `master` if that symref is absent.
+   Here the base remote is `origin`.
 
-Diff against the remote-tracking ref for that base: `git diff
-origin/<base>...HEAD`. Not `@{upstream}` — once the branch is pushed that
-resolves to the branch's own remote copy, so the three-dot diff is empty
-and the whole committed PR silently drops out of scope. Not the local base
-branch either: it is often stale, which widens the range to already-merged
-work. With no remote at all, use the local `<base>...HEAD`, and `git diff
-HEAD~1` only as a last resort.
+Refresh that base before diffing — `git fetch <base-remote> <base>` — and
+diff `FETCH_HEAD...HEAD`. Both halves matter: hard-coding `origin/<base>`
+diffs against the fork's copy of the branch on a cross-repository PR, and
+any remote-tracking ref goes stale between fetches. Either way the
+three-dot merge-base slides backwards and already-merged commits enter the
+scope, where Phase 2 would edit code the change never touched. Do not
+substitute `baseRefOid`: it is frozen at the base tip recorded when the PR
+was opened and does not follow the base branch as that branch moves, so it
+reintroduces the same stale merge-base. Not `@{upstream}` — once the
+branch is pushed that resolves to the branch's own remote copy, so the
+three-dot diff is empty and the whole committed PR silently drops out of
+scope. Not the local base branch either: it is often stale, which widens
+the range to already-merged work.
+
+If the fetch fails, and only when the base remote is a *named* remote,
+fall back to `<base-remote>/<base>...HEAD` and say the base may be stale —
+a clone-URL base has no local ref to fall back to. With no usable remote
+at all, use the local `<base>...HEAD`, and `git diff HEAD~1` only as a
+last resort.
 
 Then pick up the working tree as well — this review often runs before the
 commit. `git diff HEAD` covers modified tracked files; `git ls-files
