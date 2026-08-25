@@ -54,10 +54,15 @@ Override via prompt arguments (e.g. `/rebase-pr 42 --watch-ci --ci-budget 20`).
 | Operation | Command |
 |-----------|---------|
 | Preflight | `gh auth status` |
-| Resolve the PR for the current branch | `gh pr list --head <branch> --state open --json number,headRefName,headRepositoryOwner,baseRefName,url` |
-| Read PR head/base/mergeability | `gh pr view <n> --json number,headRefName,baseRefName,mergeable,headRepositoryOwner,url,title` |
-| Report what was rebased | `gh pr comment <n> --body-file <tmpfile>` |
-| Wait for post-push CI (opt-in) | `gh pr checks <n> --watch --interval <POLL_INTERVAL>` |
+| Resolve the PR for the current branch | `gh pr list -R "$PR_REPO" --head <branch> --state open --json number,headRefName,headRepositoryOwner,baseRefName,url` |
+| Read PR head/base/mergeability | `gh pr view <n> -R "$PR_REPO" --json number,headRefName,baseRefName,mergeable,headRepositoryOwner,url,title` |
+| Report what was rebased | `gh pr comment <n> -R "$PR_REPO" --body-file <tmpfile>` |
+| Wait for post-push CI (opt-in) | `gh pr checks <n> -R "$PR_REPO" --watch --interval <POLL_INTERVAL>` |
+
+Every call passes `-R "$PR_REPO"` explicitly (resolved in Step 1) rather than relying on `gh`'s
+ambient repo resolution. On a checkout with several GitHub remotes and no `gh repo set-default`,
+ambient resolution can **prompt** for the base repository — and this skill has no way to answer a
+prompt. `pm-autofix-pr` Step 1 documents the same hazard at greater length.
 
 `gh pr view --json mergeable` returns the GraphQL vocabulary — `MERGEABLE`, `CONFLICTING`,
 `UNKNOWN` (uppercase) — **not** REST's `mergeable`/`mergeable_state` pair. Treat it as a hint about
@@ -96,20 +101,34 @@ skill installs on its own, so they share no library with any other skill in the 
 ### Step 1: Identify the PR
 
 1. `BRANCH=$(git rev-parse --abbrev-ref HEAD)`. A detached HEAD stops the run.
-2. If a PR number was given, `gh pr view <n> --json number,headRefName,baseRefName,mergeable,headRepositoryOwner,url,title`.
-   Otherwise `gh pr list --head "$BRANCH" --state open --json number,headRefName,headRepositoryOwner,baseRefName,url`
-   and require exactly one open PR whose `headRefName` matches `$BRANCH`. Zero or several → stop and
-   say so; never guess.
-3. Capture `PR_NUMBER`, `HEAD_REF` (`headRefName`), and **`BASE_REF` (`baseRefName`) — the base branch
+2. Parse `git remote get-url origin` into `ORIGIN_OWNER` / `ORIGIN_REPO` (strip `git@github.com:`,
+   `https://github.com/`, and a trailing `.git`) and set `PR_REPO = <ORIGIN_OWNER>/<ORIGIN_REPO>`.
+3. If a PR number was given, read it with
+   `gh pr view <n> -R "$PR_REPO" --json number,headRefName,baseRefName,mergeable,headRepositoryOwner,url,title`.
+   Otherwise look it up, stopping at the first tier that yields exactly one match:
+   - **Origin.** `gh pr list -R "$PR_REPO" --head "$BRANCH" --state open --json number,headRefName,headRepositoryOwner,baseRefName,url`,
+     then **keep only PRs whose `headRepositoryOwner.login` equals `ORIGIN_OWNER`**. That filter is
+     load-bearing, not belt-and-braces: `--head` matches on branch name alone (`gh` rejects the
+     `owner:branch` qualifier), and a base repository's PR list includes every cross-repository PR
+     opened from a fork — so an unfiltered lookup can return a stranger's PR whose head branch merely
+     shares a name with yours. Rebasing and force-pushing someone else's PR is not a recoverable
+     mistake.
+   - **Upstream (fork checkout).** If the filtered origin lookup found nothing and
+     `git remote get-url upstream` exists, parse it the same way, set `PR_REPO` to it, and repeat the
+     query — still filtering on `headRepositoryOwner.login == ORIGIN_OWNER`, since the head branch
+     lives in your fork, not in the base repository.
+
+   Zero matches after filtering, or more than one, → stop and say so; never guess.
+4. Capture `PR_NUMBER`, `HEAD_REF` (`headRefName`), and **`BASE_REF` (`baseRefName`) — the base branch
    is whatever the PR says it is, not a hardcoded `main`.**
-4. Resolve the two remotes by matching `git remote -v` URLs (strip `git@github.com:`,
+5. Resolve the two remotes by matching `git remote -v` URLs (strip `git@github.com:`,
    `https://github.com/`, and a trailing `.git`):
    - `PUSH_REMOTE` — the remote holding `headRepositoryOwner.login`'s copy of the head branch. This
      is where the force-push goes. For a fork PR it is the fork, not the base repository.
    - `BASE_REMOTE` — the remote holding the base repository. For a same-repo PR both are `origin`.
      If no local remote points at the base repository, use its clone URL
      `https://github.com/<base_owner>/<base_repo>.git`; `git fetch` accepts a URL in place of a name.
-5. If `git rev-parse --abbrev-ref HEAD` differs from `HEAD_REF` (a fork checkout may name the local
+6. If `git rev-parse --abbrev-ref HEAD` differs from `HEAD_REF` (a fork checkout may name the local
    branch differently), note it — the push in Step 7 targets `HEAD_REF` on `PUSH_REMOTE` explicitly,
    so the local name never has to match.
 
@@ -174,8 +193,10 @@ On a conflict, loop until the rebase completes:
    - `git diff --name-only` — empty (nothing resolved-but-unstaged).
    - `git grep -nE '^(<<<<<<< |=======$|>>>>>>> )' -- <resolved paths>` — no hits.
    If any fails, go back to item 1 rather than continuing over a half-resolved tree.
-6. `GIT_EDITOR=true git rebase --continue`. The editor override is mandatory: an interactive editor
-   has nothing to attach to here and the command would hang. Never use `git rebase -i`.
+6. `GIT_EDITOR=true git rebase --continue`. The override is mandatory: a real editor has nothing to
+   attach to in a headless run and the command would hang. **No git invocation in this skill may open
+   an editor** — bare `git rebase -i` is therefore forbidden, and the one place a todo list is needed
+   (Step 6's autosquash) stubs both `GIT_EDITOR` and `GIT_SEQUENCE_EDITOR`.
 7. If a replayed commit becomes empty because the base already contains it,
    `GIT_EDITOR=true git rebase --skip`, and record it for the Step 7 comment.
 
@@ -194,9 +215,20 @@ step's classification possible.
 
 For each failing command, classify it once (see `references/quality-gate.md`):
 
-- **REGRESSION** — the rebase caused it. Fix it, `git add` the fix, and amend it into the commit it
-  belongs to (or add a follow-up commit if it does not belong to one commit). Re-run that gate
-  command.
+- **REGRESSION** — the rebase caused it. Fix it and `git add` the fix. If it belongs to the branch
+  tip, `git commit --amend --no-edit`. If it belongs to an **earlier** commit, do not reach for
+  `git rebase -i` — it opens an editor and hangs. Use the non-interactive equivalent:
+
+  ```bash
+  git commit --fixup=<sha>
+  GIT_SEQUENCE_EDITOR=true GIT_EDITOR=true git rebase --autosquash "$BASE_SHA"
+  ```
+
+  (On git older than 2.45, `--autosquash` needs `--interactive` alongside it; with
+  `GIT_SEQUENCE_EDITOR=true` accepting the already-reordered todo list, that stays non-interactive.)
+  Squashing into an earlier commit replays the branch, so re-run the failing gate command afterwards
+  — and if it conflicts, Step 4's conflict rules apply unchanged. Adding a plain follow-up commit is
+  always an acceptable alternative when the fix does not belong to any single commit.
 - **PRE-EXISTING** — it fails on the base branch too. Do not chase it. Verify **once**, with
   evidence: on a clean worktree `git switch --detach "$BASE_SHA"`, run only the failing command,
   then `git switch -` back to the branch. Record the evidence (command, exit status, one-line
@@ -223,7 +255,7 @@ then pushes with `--force-with-lease=<branch>:<expected-sha>`. Exit codes:
 - **2 / 3** — usage error, or the worktree went dirty / a rebase is still in progress. Fix and re-run.
 
 Then comment on the PR with what actually happened — write the body to a `mktemp` file and post with
-`gh pr comment "$PR_NUMBER" --body-file <tmpfile>`, then `rm -f` it. The body covers: the base SHA
+`gh pr comment "$PR_NUMBER" -R "$PR_REPO" --body-file <tmpfile>`, then `rm -f` it. The body covers: the base SHA
 rebased onto, each conflicted file and the resolution taken, any skipped-as-empty commits, the gate
 results, and each PRE-EXISTING failure with its evidence.
 
@@ -237,12 +269,12 @@ second one:
    back to `command -v gtimeout` (the name Homebrew's coreutils installs on macOS). Both must
    succeed to use the blocking watch; record the binary as `TIMEOUT_BIN`.
 2. Initialize `CI_BUDGET_REMAINING = CI_BUDGET` once, here. Each wait is
-   `TIMEOUT_BIN <chunk>s gh pr checks "$PR_NUMBER" --watch --interval <POLL_INTERVAL>` where
+   `TIMEOUT_BIN <chunk>s gh pr checks "$PR_NUMBER" -R "$PR_REPO" --watch --interval <POLL_INTERVAL>` where
    `<chunk>` is `min(CI_BUDGET_REMAINING in seconds, 300)`. Exit 124 means the chunk elapsed with
    checks still pending; exit 0 means they reached a terminal state. Subtract each wait's actual
    elapsed time from `CI_BUDGET_REMAINING`.
 3. Without the blocking watch, fall back to `sleep <POLL_INTERVAL>` once per pass plus a
-   `gh pr checks "$PR_NUMBER"` re-read, bounded by the same budget.
+   `gh pr checks "$PR_NUMBER" -R "$PR_REPO"` re-read, bounded by the same budget.
 4. **On budget exhaustion, exit degraded, not silently:** post a PR comment naming what was rebased,
    which checks are still pending, and the exact resume command (`/rebase-pr <n> --watch-ci`), then
    stop with `exit reason: ci-timeout`.
