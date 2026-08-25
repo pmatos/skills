@@ -51,6 +51,20 @@ existing ref or path, add one line saying so alongside the level line.
 
 Resolve a base commit, diff it against `HEAD`, then add the working tree.
 
+Every rule below diffs against the current worktree's `HEAD`, and Step 5
+folds in that worktree's uncommitted and untracked files, so a PR or branch
+target is reviewable only when its head is what is checked out. Check that
+before Step 1: compare `headRefOid` from the Step 1a `gh pr view` call (or
+`git rev-parse <branch>`) against `git rev-parse HEAD`. Compare the commit,
+not the branch name — a local branch of the right name that is stale or
+behind the PR head still has files on disk the reviewed diff's line numbers
+don't match. If the two differ, review nothing: report that PR #`<n>` /
+`<branch>` isn't checked out, and that `gh pr checkout <n>` (or `git switch
+<branch>`) then a rerun will review it. Reviewing from here would diff
+*this* branch's `HEAD` against *that* target's base and report the wrong
+branch's changes. A path target is unaffected — it narrows the scope, not
+the endpoints.
+
 ### The base record
 
 Every rule below produces the same shape:
@@ -67,8 +81,8 @@ Every rule below produces the same shape:
 Take the first rule that produces a record.
 
 **1a. The PR's own base — wins outright.** Run `gh pr view --json
-url,baseRefName` for the current branch, or for the PR parsed as the target
-in Phase 0. `baseRefName` is only a branch name, so take the base
+url,baseRefName,headRefOid` for the current branch, or for the PR parsed as
+the target in Phase 0 (`headRefOid` serves the checkout check above). `baseRefName` is only a branch name, so take the base
 *repository* from `url`: a PR URL is always
 `https://github.com/<owner>/<repo>/pull/<n>` in the base repo, never in the
 fork. The base remote is the local remote whose *fetch* URL points at that
@@ -178,8 +192,9 @@ full as an all-additions hunk only once `test -f "./$p"` succeeds and `test
 -L "./$p"` fails — `test -f` follows the link, so it is not a symlink check
 on its own. Skip and report anything that classifies as neither.
 
-If a PR number, branch name, or file path was parsed as the target in Phase
-0, review that target instead. Treat this diff as the review scope. If the
+A path target narrows everything above to that path. A PR or branch target
+passed the checkout check, so its head *is* `HEAD` and the diff already
+covers it. Treat this diff as the review scope. If the
 scope is genuinely empty after all of this, say so explicitly rather than
 reporting a clean review.
 
