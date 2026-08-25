@@ -127,6 +127,17 @@ The `<branch>` operand is never optional. `git fetch <url>` with no ref
 fetches that repository's `HEAD`, so `FETCH_HEAD` would name `main` and a PR
 into `release/1.x` would be diffed against the wrong branch.
 
+A fetch that succeeds can still produce a diff that fails with `fatal:
+<oid>...HEAD: no merge base`. In a `--depth 1` checkout of the *branch*
+(`actions/checkout` at `fetch-depth: 1`, or a shallow `gh pr checkout`),
+`HEAD` is itself the shallow boundary, so it has no parents to share with
+the base — the graft cuts the link even though the fetch brought the base's
+whole history into the object store. If `git rev-parse
+--is-shallow-repository` says `true`, run `git fetch --unshallow` and retry
+the diff once; `--deepen=1` is not enough when the branch point is more than
+one commit back. If the repository is not shallow, or the retry fails too,
+the histories are genuinely unrelated — drop the record.
+
 Identify a fetched candidate by its captured `oid`, never by `FETCH_HEAD` at
 diff time: each fetch overwrites `FETCH_HEAD` with only that fetch, so after
 several candidates it names whichever was fetched last. The `oid` is also
@@ -228,6 +239,7 @@ reporting a clean review.
 | `--single-branch` clone, no PR, `origin/main` absent | 1b(2), candidate kept | `origin` + `main`, `local_ref: —` | `git fetch origin main` → `<oid>...HEAD` |
 | no remotes at all | 1c | local `main` | `main...HEAD` |
 | `--depth 1`, HEAD has no parent | 1d | none | deepen, retry, else report no scope |
+| `--depth 1` clone of the branch, fetch OK but no merge base | Step 3 retry | same record | `git fetch --unshallow`, retry `<oid>...HEAD` |
 
 ## Phase 2 — Run the review at the resolved level
 
