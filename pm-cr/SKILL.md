@@ -43,13 +43,19 @@ then resolve the level per **Effort persistence** in
 
 ## Phase 1 — Gather the diff
 
-Resolve the base branch first, in order: the remote default branch from
-`git symbolic-ref refs/remotes/origin/HEAD` (strip the
-`refs/remotes/origin/` prefix); else `gh repo view --json defaultBranchRef
--q .defaultBranchRef.name` (the symref is absent after a `git remote add`
-without `git remote set-head`; in a fork checkout, query the `upstream`
-remote's repo); else whichever of `main` or `master` exists as a local head;
-else `@{upstream}` if the branch has one. Then run `git diff <base>...HEAD`
+Resolve the base branch first, in order, keeping it remote-qualified
+wherever the tier names a remote: the remote default branch from
+`git symbolic-ref refs/remotes/origin/HEAD` (strip only the
+`refs/remotes/` prefix, so the base stays `origin/<branch>` — a bare name
+resolves through `refs/heads/`, never `refs/remotes/origin/`); else `gh
+repo view --json defaultBranchRef -q .defaultBranchRef.name`, which returns
+a bare name — qualify it as `origin/<name>`, or `upstream/<name>` in a fork
+checkout, and fall through if that remote-tracking ref isn't present
+locally (the symref is absent after a `git remote add` without `git remote
+set-head`; in a fork checkout, query the `upstream` remote's repo); else
+whichever of `main` or `master` exists as a local head (bare here by
+design — this tier tested for the local branch); else `@{upstream}` if the
+branch has one. Then run `git diff <base>...HEAD`
 — three dots, so the whole branch back to the merge base is under review,
 not just its newest commit. Only if no base resolves at all, fall back to
 `git diff HEAD~1` and state in the report that the scope was narrowed to the
