@@ -38,8 +38,11 @@ if ! git rev-parse --git-dir >/dev/null 2>&1; then
   exit 2
 fi
 
-if ! git fetch --quiet "$remote" "$branch"; then
-  echo "capture-lease: cannot fetch '$branch' from '$remote' — branch missing or remote unreachable" >&2
+# Fully qualified: an unqualified "$branch" is a refspec, and git's
+# ref_rev_parse_rules try refs/tags/ before refs/heads/ — a same-named tag would
+# otherwise win and the anchor would be captured from the wrong ref.
+if ! git fetch --quiet "$remote" "refs/heads/$branch"; then
+  echo "capture-lease: cannot fetch 'refs/heads/$branch' from '$remote' — branch missing or remote unreachable" >&2
   exit 2
 fi
 

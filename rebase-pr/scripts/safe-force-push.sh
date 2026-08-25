@@ -50,8 +50,10 @@ if ! git rev-parse --verify --quiet "$expected^{commit}" >/dev/null; then
   exit 2
 fi
 
-if ! git fetch --quiet "$remote" "$branch"; then
-  echo "safe-force-push: cannot fetch '$branch' from '$remote' — branch missing or remote unreachable" >&2
+# Fully qualified, for the same reason capture-lease.sh is: a same-named tag
+# would otherwise be compared against the anchor instead of the branch.
+if ! git fetch --quiet "$remote" "refs/heads/$branch"; then
+  echo "safe-force-push: cannot fetch 'refs/heads/$branch' from '$remote' — branch missing or remote unreachable" >&2
   exit 2
 fi
 

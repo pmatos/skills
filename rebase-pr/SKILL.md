@@ -138,8 +138,19 @@ skill installs on its own, so they share no library with any other skill in the 
    is whatever the PR says it is, not a hardcoded `main`.**
 5. Resolve the two remotes by matching `git remote -v` URLs (strip `git@github.com:`,
    `https://github.com/`, and a trailing `.git`):
-   - `PUSH_REMOTE` — the remote whose URL resolves to `headRepository.nameWithOwner`, the **full
-     owner/repo pair** of the head repository. This is where the force-push goes; for a fork PR it is
+   - `PUSH_REMOTE` — the remote **both** of whose endpoints resolve to
+     `headRepository.nameWithOwner`, the **full owner/repo pair** of the head repository. Check them
+     separately — `git remote get-url <r>` (fetch) and `git remote get-url --push <r>` (push) — and
+     require both. `git remote -v` prints a `(fetch)` and a `(push)` row per remote, and with
+     `remote.<r>.pushurl` set they name *different* repositories; matching either row alone can
+     select a remote that pushes to the fork but fetches from upstream. The two endpoints are used by
+     different halves of the lease: the scripts fetch the branch through the fetch URL to capture and
+     compare the anchor, while the rewrite goes out through the push URL. A split remote is
+     fail-safe rather than destructive — a missing branch exits 2, a foreign same-named upstream
+     branch exits 3 or 4, and git's own `--force-with-lease=<branch>:<sha>` check rejects a
+     tag-or-stranger-derived anchor as stale info — but the diagnosis is misleading, so validate up
+     front. `BASE_REMOTE` below is fetch-only, so only its normal URL needs to resolve to the base
+     repository. This is where the force-push goes; for a fork PR it is
      the fork, not the base repository. Matching on the owner alone is not enough: the same account
      may have several remotes here, and if two of their repositories carry a branch of this name the
      lease would be captured against — and the push aimed at — the wrong one, safely overwriting a
@@ -177,7 +188,20 @@ stdout is `EXPECTED_REMOTE_SHA`. Act on the exit code:
 - **2** — usage error, missing remote branch, or an unreachable remote. Relay stderr and stop.
 
 Record `EXPECTED_REMOTE_SHA` and `ORIGINAL_HEAD=$(git rev-parse HEAD)`. Then fetch the base:
-`git fetch "$BASE_REMOTE" "$BASE_REF"` and record `BASE_SHA=$(git rev-parse FETCH_HEAD)`.
+
+```bash
+git fetch "$BASE_REMOTE" "refs/heads/$BASE_REF"
+BASE_SHA=$(git rev-parse FETCH_HEAD)
+```
+
+**`refs/heads/` is not optional.** A bare `"$BASE_REF"` is a refspec, and git's ref-resolution rules
+try `refs/tags/` **before** `refs/heads/` — so in a repo carrying a tag named like the base branch,
+`git fetch <remote> main` writes the *tag's* commit to `FETCH_HEAD` (`* tag main -> FETCH_HEAD`;
+reproduced on git 2.55). `BASE_SHA` would then be the tag, Step 4 would rebase the PR onto it, and
+Step 7's lease would raise no objection — the head branch never moved. The PR gets silently rewritten
+onto the wrong history, which is also what would break Step 4's claim that rebasing `$BASE_SHA` pins
+the operation to what Step 2 fetched. Both bundled scripts fetch `refs/heads/<branch>` for the same
+reason.
 
 ### Step 3: Discover the quality gate
 
