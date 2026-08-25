@@ -43,13 +43,21 @@ then resolve the level per **Effort persistence** in
 
 ## Phase 1 — Gather the diff
 
-Run `git diff @{upstream}...HEAD` (or `git diff main...HEAD` / `git diff
-HEAD~1` if there's no upstream) to get the unified diff under review. If
-there are uncommitted changes, or the range diff is empty, also run `git
-diff HEAD` and include the working-tree changes in scope — the review often
-runs before the commit. If a PR number, branch name, or file path was parsed
-as the target in Phase 0, review that target instead. Treat this diff as the
-review scope.
+Resolve the base branch first, in order: the remote default branch from
+`git symbolic-ref refs/remotes/origin/HEAD` (strip the
+`refs/remotes/origin/` prefix); else `gh repo view --json defaultBranchRef
+-q .defaultBranchRef.name` (the symref is absent after a `git remote add`
+without `git remote set-head`; in a fork checkout, query the `upstream`
+remote's repo); else whichever of `main` or `master` exists as a local head;
+else `@{upstream}` if the branch has one. Then run `git diff <base>...HEAD`
+— three dots, so the whole branch back to the merge base is under review,
+not just its newest commit. Only if no base resolves at all, fall back to
+`git diff HEAD~1` and state in the report that the scope was narrowed to the
+last commit. If there are uncommitted changes, or the range diff is empty,
+also run `git diff HEAD` and include the working-tree changes in scope — the
+review often runs before the commit. If a PR number, branch name, or file
+path was parsed as the target in Phase 0, review that target instead. Treat
+this diff as the review scope.
 
 ## Phase 2 — Run the review at the resolved level
 
