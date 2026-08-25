@@ -177,6 +177,18 @@ has_content() {
   fi
 }
 
+is_empty() {
+  # $1: revision, or empty for the working tree. $2: path. A symlink always has
+  # a value, and `-s` would follow it, so answer for the link itself.
+  if [ -n "$1" ]; then
+    [ "$(git cat-file -s "$1:$2" 2>/dev/null || printf 1)" = 0 ]
+  elif [ -L "$2" ]; then
+    return 1
+  else
+    [ ! -s "$2" ]
+  fi
+}
+
 read_blob() {
   # Callers must consume this to completion. Under `set -o pipefail` a reader
   # that exits early (`grep -q`, `head`) sends git SIGPIPE, and the pipeline
@@ -242,16 +254,6 @@ resolve_change_files() {
   # So this flags files as *probably* formatting churn, to be summarised in a
   # line rather than given beats — it never removes them from the story.
   # Indentation-significant languages skip the test entirely.
-  local -A substantive=()
-  # Keyed by the same spelling the candidates loop looks up, so this
-  # enumeration has to be NUL-delimited in the same breath as that one:
-  # convert only one and every non-ASCII path misses its key here and is
-  # wrongly called formatting-only.
-  while IFS= read -r -d '' path; do
-    [ -n "$path" ] || continue
-    substantive["$path"]=1
-  done < <(git diff -z -w --name-only --diff-filter=d "${diff_args[@]}")
-
   for path in ${candidates[@]+"${candidates[@]}"}; do
     case "$path" in
       *.py | *.pyi | *.yaml | *.yml | *.nim | *.hs | *.lhs | *.elm | *.coffee | \
@@ -260,7 +262,17 @@ resolve_change_files() {
         continue
         ;;
     esac
-    [ -n "${substantive["$path"]:-}" ] && continue
+    # Asked per file rather than read off `git diff -w --name-only`, which only
+    # learned to honour -w in git 2.51.1: on anything older every path came
+    # back as substantive and this whole flag silently never fired. `--quiet`
+    # reports the real whitespace-insensitive comparison on every git, so ask
+    # it directly. --no-ext-diff/--no-textconv stop a configured helper
+    # deciding it. Status 0 means whitespace-equivalent; 1 means substantive;
+    # anything higher is an error, and both of those decline the flag, which is
+    # the safe direction — a file wrongly called formatting gets summarised in
+    # a line instead of narrated.
+    git diff --quiet -w --no-ext-diff --no-textconv "${diff_args[@]}" -- "$path" \
+      >/dev/null 2>&1 || continue
     # Whitespace inside a string literal is content, and `-w` hides it. No cheap
     # textual test separates that from churn, so decline to claim "formatting"
     # whenever a changed line carries a quote.
@@ -471,6 +483,16 @@ exclusion_reason() {
       return
       ;;
   esac
+
+  # An empty file is not a binary file, and `grep -I .` cannot tell them apart
+  # — no matching line either way. That called every empty `__init__.py` and
+  # `.nojekyll` binary-or-asset and dropped it from the story, when for a
+  # marker file its existence *is* its content. Zero bytes is narratable, at
+  # loc 0. Extension- and path-based exclusions have already run above, so an
+  # empty .png or an empty vendored file is still excluded on those grounds.
+  if has_content "$ref" "$path" && is_empty "$ref" "$path"; then
+    return
+  fi
 
   # Both sniffs below read the revision being narrated, and both let their
   # reader drain the stream: `grep -q` and `head` stop early, and the SIGPIPE

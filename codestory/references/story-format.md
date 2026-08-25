@@ -156,7 +156,16 @@ three choices:
 
 - *resume anyway* — continue from where it stopped, with a note recorded in the
   file that beats before it describe an older revision
-- *restart* — new story, previous file moved to `.stories/<slug>.<sha>.md`
+- *restart* — new story, previous file moved aside. Name the archive for
+  what it described: `.stories/<slug>.<sha>.md` for a commit-sourced story,
+  `.stories/<slug>.<fingerprint-prefix>.md` for a working-tree one, taking the
+  **outgoing** story's own recorded value, not the target resolved now. Then
+  **never clobber**: if that name exists, append `.2`, `.3`, and so on until
+  one is free. A working-tree story's SHA does not move when its content does,
+  so a second restart used to overwrite the first archive and silently destroy
+  narration the user had asked to keep; content can also cycle A → B → A, so
+  even the fingerprint repeats. The numeric suffix applies to SHA-named
+  archives too — restarting twice at one commit collides the same way.
 - *re-outline* — keep the file, rebuild the outline from the current state
 
 Never resume silently onto moved code. A story confidently describing lines that
