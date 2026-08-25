@@ -42,7 +42,7 @@ Options:
   --help              Show this message.
 
 Output: one JSON object with target, base_sha, head_sha, source_ref,
-content_fingerprint, default_branch, dirty, files (path + loc), excluded
+content_fingerprint, repo_root, default_branch, dirty, files (path + loc), excluded
 (path + reason), deleted, missing, formatting_only, narratable, loc,
 file_count, tier, warnings. `loc` is diff churn for a change target — added and
 removed lines, deletions included — and file lines for a state target.
@@ -51,7 +51,9 @@ a non-empty value that differs from HEAD means the checkout holds something
 else. `content_fingerprint` is set instead when the source is the working tree
 rather than a commit, and is what a resume must compare — no SHA changes when
 an uncommitted edit does. `missing` lists tracked paths that are gone from
-disk. Exits 0 whenever the target resolved, even when nothing is narratable —
+disk. Every path in the output is relative to `repo_root`, which is not
+necessarily where this was invoked — resolve them against it. Exits 0 whenever
+the target resolved, even when nothing is narratable —
 check `narratable`. Exits 1 only when the target could not be resolved at all.
 USAGE
 }
@@ -489,12 +491,26 @@ count_lines() {
 }
 
 json_escape() {
-  local s="$1"
+  # JSON forbids every unescaped byte below 0x20, not just the three with short
+  # names. A form feed in a pathname is legal in git and made the whole
+  # document unparseable, which for a script whose only output is one JSON
+  # object is a total failure. The three below keep their readable spelling;
+  # anything else left in the C0 range becomes \u00XX.
+  local s="$1" ch hex
+  local LC_ALL=C
   s="${s//\\/\\\\}"
   s="${s//\"/\\\"}"
   s="${s//$'\t'/\\t}"
   s="${s//$'\n'/\\n}"
   s="${s//$'\r'/\\r}"
+  # One pass per *distinct* control byte present, not per character: each
+  # substitution replaces every occurrence, and \u00XX contains none itself,
+  # so the loop always terminates.
+  while [[ "$s" =~ [[:cntrl:]] ]]; do
+    ch="${BASH_REMATCH[0]}"
+    printf -v hex '%02X' "'$ch"
+    s="${s//"$ch"/\\u00$hex}"
+  done
   printf '%s' "$s"
 }
 
@@ -590,6 +606,13 @@ content_fingerprint() {
   {
     printf 'kind\0%s\0ref\0%s\0' "$kind" "$ref"
     for i in ${excluded_paths[@]+"${!excluded_paths[@]}"}; do
+      # Exclusion records are in the hash so that a change in *coverage* is
+      # detected — but not the skill's own output. `.stories/` fills up as the
+      # story is written, so hashing those records made narrating a target
+      # change its own fingerprint, and the first resume always reported the
+      # code as moved. The paths stay in `excluded` either way; only the hash
+      # ignores them.
+      [ "${excluded_reasons[$i]}" != codestory-output ] || continue
       printf 'x\0%s\0%s\0' "${excluded_paths[$i]}" "${excluded_reasons[$i]}"
     done
     for path in ${missing[@]+"${missing[@]}"}; do printf 'm\0%s\0' "$path"; done
@@ -649,6 +672,7 @@ printf '{'
 printf '"target":{"kind":"%s","ref":"%s","shape":"%s"},' \
   "$(json_escape "$kind")" "$(json_escape "$ref")" "$shape"
 printf '"default_branch":"%s",' "$(json_escape "$default_branch")"
+printf '"repo_root":"%s",' "$(json_escape "$repo_root")"
 printf '"base_sha":"%s","head_sha":"%s","source_ref":"%s","dirty":%s,' \
   "$(json_escape "$base_sha")" "$(json_escape "$head_sha")" \
   "$(json_escape "$diff_head")" "$dirty"

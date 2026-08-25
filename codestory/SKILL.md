@@ -110,13 +110,14 @@ the same diff against the merge-base without the network.
 | --- | --- |
 | `narratable` | `false` when nothing survives; report the warnings and stop |
 | `target.shape` | `change` or `state` — selects the narration shape (step 6) |
+| `repo_root` | every path below is relative to **this**, not to where you invoked the resolver |
 | `source_ref` | the revision the story describes; when set, read every file **at it** |
 | `content_fingerprint` | set instead when the source is the working tree; what resume must compare, since no SHA moves when an uncommitted edit does |
 | `tier` | `small` / `medium` / `large` — selects the fan-out (step 3) |
 | `loc` | size of what will be narrated: **diff churn** for change targets — added and removed lines, deletions included — file lines for state targets |
 | `files` | the narratable set, each with its own `loc` |
 | `excluded` | dropped, with a reason each |
-| `deleted` | paths the change removes |
+| `deleted` | paths the change removes — narratable too; pass them to the lens agents with `base_sha`, never just a `Removed` line |
 | `missing` | tracked paths gone from disk — report them, they cannot be narrated |
 | `formatting_only` | probably whitespace churn — still narratable |
 | `warnings` | surface every one of these verbatim |
@@ -125,6 +126,14 @@ Warnings are never decorative. In particular, **a dirty working tree while
 narrating a branch or PR is a mandatory callout** — the story describes a SHA
 that is not what is on disk, and the reviewer's editor is showing something
 else.
+
+**Work from `repo_root`, not from where you were invoked.** The resolver
+returns repository-relative paths, and it cannot change your directory — only
+its own. Invoked from a subdirectory, a relative read of `sub/f.py` therefore
+looks for `sub/sub/f.py`, and `.stories/` is created inside the subdirectory,
+silently forking resume into a second story file. So: build every source read,
+every lens-agent path and every `.stories/` path from `repo_root`, or run each
+of those commands from it.
 
 **Symlinks are read as links, never followed.** A symlink's content is its
 link value, which is what the repository stores. Following it would pull an
@@ -158,7 +167,7 @@ asks.
 
 ### 2. Check for an existing story, then find the intent
 
-If `.stories/<slug>.md` exists, follow the resume flow in
+If `<repo_root>/.stories/<slug>.md` exists, follow the resume flow in
 `references/story-format.md` before dispatching any agent — it may make the
 whole gathering step unnecessary. Never resume silently onto code that has
 moved.
@@ -205,8 +214,8 @@ than read all of it — say `read it all` to override."* For a change-shaped
 target `loc` is churn, so the number quoted is the size of the change, not of
 the files it touches.
 
-Every agent writes leads under `.stories/.<slug>/leads/` — **on disk, not
-returned into context**. `references/dispatch.md` gives the file naming per
+Every agent writes leads under `<repo_root>/.stories/.<slug>/leads/` — **on
+disk, not returned into context**. `references/dispatch.md` gives the file naming per
 tier, the prompt templates, and the merge pass that builds the cross-cutting
 lists. Leads must outlive the session for resume to work, and a project-scale
 lead set would otherwise crowd out the narration.
@@ -232,7 +241,8 @@ narration happens: *"34 beats. Which do you want?"* Seeing the cost up front is
 what stops a reviewer abandoning at beat 9.
 
 Write the frontmatter, the cast of characters, the skipped-files line and the
-pruned outline as a table of contents into `.stories/<slug>.md` before beat 1.
+pruned outline as a table of contents into `<repo_root>/.stories/<slug>.md`
+before beat 1.
 
 ### 5. Narrate, beat by beat
 
@@ -242,7 +252,8 @@ For each beat in the pruned outline:
    one. Not the leads: the source.
 2. Write the beat: title naming the idea, prose, one anchored excerpt, markers
    inline where they apply.
-3. Append it to `.stories/<slug>.md` and flip its outline entry to `done`.
+3. Append it to `<repo_root>/.stories/<slug>.md` and flip its outline entry
+   to `done`.
 4. Show it, and checkpoint.
 
 Checkpoint via `AskUserQuestion`:

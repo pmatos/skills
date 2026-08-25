@@ -40,11 +40,17 @@ Target: [one line: PR #142, the working tree, src/auth/, …]
 Read the narrated files at: [the resolver's `source_ref`, or `the working tree`]
 Files to be narrated:
 [the resolver's file list, one path per line]
+Files this change DELETES (read them at [the resolver's `base_sha`]):
+[the resolver's `deleted` list, one path per line, or `none`]
 
-Those files are what the story will cover. To understand them you may read
-anything else in the repository — callers, tests, configuration — and run
-`git log`, `git blame` and `gh`. Only leads that help a reader understand the
-files above belong in your output.
+Both lists are what the story will cover — a deletion is part of the change,
+not a footnote to it, and for a change that only removes code the second list
+is the whole target. Read a deleted file as `git show <base_sha>:<path>`: it is
+gone from the current revision, which is exactly why a reader needs to be told
+what it did and who called it. To understand any of this you may read anything
+else in the repository — callers, tests, configuration — and run `git log`,
+`git blame` and `gh`. Only leads that help a reader understand the files in
+either list above belong in your output.
 
 When a revision is named above, read the narrated files as
 `git show <revision>:<path>` — that revision is not what is checked out, so an
@@ -70,7 +76,9 @@ Rules:
   Your job is to make sure it looks in the right places.
 - Every lead must carry a real path and a real line number you have seen.
 - If your lens finds nothing in this target, write the single line
-  `NO LEADS` and stop. Do not manufacture findings to fill the file.
+  `NO LEADS` and stop. Do not manufacture findings to fill the file. But a
+  deletion list that is not `none` is a target: check who called the removed
+  code before concluding there is nothing to say.
 - Do not modify any file other than your leads file. Nothing you do should
   change the code being narrated.
 
