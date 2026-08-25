@@ -138,10 +138,16 @@ skill installs on its own, so they share no library with any other skill in the 
    is whatever the PR says it is, not a hardcoded `main`.**
 5. Resolve the two remotes by matching `git remote -v` URLs (strip `git@github.com:`,
    `https://github.com/`, and a trailing `.git`):
-   - `PUSH_REMOTE` — the remote **both** of whose endpoints resolve to
-     `headRepository.nameWithOwner`, the **full owner/repo pair** of the head repository. Check them
-     separately — `git remote get-url <r>` (fetch) and `git remote get-url --push <r>` (push) — and
-     require both. `git remote -v` prints a `(fetch)` and a `(push)` row per remote, and with
+   - `PUSH_REMOTE` — the remote **every** endpoint of which resolves to
+     `headRepository.nameWithOwner`, the **full owner/repo pair** of the head repository. Check both
+     sides, and enumerate each — `git remote get-url --all <r>` (fetch) and
+     `git remote get-url --push --all <r>` (push): a remote may have several `remote.<r>.url` or
+     `remote.<r>.pushurl` entries, `git push` writes to **all** of the effective ones, and without
+     `--all` git prints only the first, so a single-URL check inspects one of N destinations while
+     claiming to have validated the remote. Require every listed URL to match, or reject the remote
+     outright. Getting this wrong is not a clean failure: `safe-force-push.sh` pushes by remote name,
+     so the intended repository is rewritten and the *second* destination rejects — Step 7 then
+     reports exit 5 "push rejected" over a rewrite that already published. `git remote -v` prints a `(fetch)` and a `(push)` row per remote, and with
      `remote.<r>.pushurl` set they name *different* repositories; matching either row alone can
      select a remote that pushes to the fork but fetches from upstream. The two endpoints are used by
      different halves of the lease: the scripts fetch the branch through the fetch URL to capture and
@@ -349,13 +355,25 @@ second one:
    | `0` | every check finished successfully | terminal — done |
    | `124` | the chunk elapsed with checks still pending | keep waiting if budget remains |
    | `8` | checks still pending (the non-watch read in item 3 reports this) | keep waiting if budget remains |
-   | any other nonzero (`1` in practice) | checks finished and **at least one failed** | terminal — re-read `gh pr checks "$PR_NUMBER" -R "$PR_REPO"`, report which checks failed, and stop with `exit reason: ci-failed` |
+   | any other nonzero | **unknown — do not guess** | terminal for the wait: re-read `gh pr checks "$PR_NUMBER" -R "$PR_REPO" --json name,state,link` and let *that* decide (see below) |
 
-   Leaving the failure exit unclassified is the trap: the most likely terminal outcome — CI went
-   red on the rebased branch — would otherwise fall through as "not terminal" and be reported as a
-   budget timeout, or abort with no diagnosis at all. (`pm-autofix-pr` can ignore this exit because
-   it treats the watch as a sleep replacement and always re-fetches authoritative state afterwards;
-   Step 8 has no such re-read, so it must read the status.)
+   The nonzero row deliberately does not name a cause, because the status alone cannot distinguish
+   one. `gh help exit-codes` gives `1` for *any* failure and `4` for "authentication required"; `2`
+   is a cancelled command; and since the call is wrapped in `TIMEOUT_BIN`, that binary's own `125` /
+   `126` / `127` surface here too. A repo with no CI at all exits `1` ("no checks reported on the …
+   branch"). So decide from the re-read, not from the number:
+
+   - The re-read lists checks and at least one is failing → **`exit reason: ci-failed`**, naming them.
+   - The re-read lists checks and none are failing → treat as terminal success.
+   - The re-read reports no checks for the branch → **`exit reason: no-checks`**; the rebase and push
+     succeeded, there is simply nothing to wait for.
+   - The re-read itself fails (auth expired, API unreachable, `gh` broken) → **`exit reason:
+     gh-unavailable`**, quoting `gh`'s stderr. Never report failing checks the re-read did not show.
+
+   What must not happen is the wait treating a red CI run as "still pending" and reporting a budget
+   timeout instead. (`pm-autofix-pr` can ignore the exit status because it treats the watch as a pure
+   sleep replacement and always re-fetches authoritative state afterwards; Step 8's re-read plays the
+   same role here — the status only decides *when* to stop waiting, never *what happened*.)
 
    Subtract each wait's actual elapsed time from `CI_BUDGET_REMAINING`.
 3. Without the blocking watch, fall back to one `sleep` per pass plus a
@@ -380,6 +398,8 @@ second one:
 | Remote head moved while the rebase ran | Step 7, exit 4 | `concurrent-writer` |
 | Push rejected despite a valid lease | Step 7, exit 5 | `push-failure` |
 | CI red on the rebased branch | Step 8 | `ci-failed` (failing checks named) |
+| The branch has no CI checks at all | Step 8 | `no-checks` (rebase and push already succeeded) |
+| `gh` cannot report check state (auth, API, broken CLI) | Step 8 | `gh-unavailable` (stderr quoted) |
 | CI still pending when the budget runs out | Step 8 | `ci-timeout` (degraded comment posted) |
 
 ## Consistency With the Sibling PR Skills
