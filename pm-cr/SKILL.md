@@ -83,7 +83,14 @@ commits back reviews those three upstream commits as if the author wrote
 them. The descendant rule gets this right whether the fork's default is
 stale, divergent, or the branch's actual base. Only if no base resolves at all, fall back to
 `git diff HEAD~1` and state in the report that the scope was narrowed to the
-last commit. If there are uncommitted changes, or the range diff is empty,
+last commit — but guard it with `git rev-parse --verify -q HEAD~1` first,
+because HEAD has no parent in a `--depth 1` clone or on a root commit and
+the bare command dies. If the guard fails and `git rev-parse
+--is-shallow-repository` says `true`, run `git fetch --deepen=1` and retry:
+that recovers the real one-commit diff. If there is still no parent, report
+that no scope could be resolved. Do **not** diff against the empty tree to
+manufacture one — that puts every pre-existing file in the repo in scope,
+which breaks the "stay inside the reviewed diff's scope" constraint below. If there are uncommitted changes, or the range diff is empty,
 also run `git diff HEAD` and include the working-tree changes in scope — the
 review often runs before the commit. `git diff` never reports untracked
 files, so always also run `git ls-files --others --exclude-standard` (it
