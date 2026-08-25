@@ -18,13 +18,28 @@ $ARGUMENTS
 
 ## Phase 0 — Gather the diff
 
-Run `git diff @{upstream}...HEAD` (or `git diff main...HEAD` / `git diff
-HEAD~1` if there's no upstream) to get the unified diff under review. If
-there are uncommitted changes, or the range diff is empty, also run `git
-diff HEAD` and include the working-tree changes in scope — this review
-often runs before the commit. If a PR number, branch name, or file path was
-passed as the argument above, review that target instead. Treat this diff
-as the review scope.
+Resolve the base to diff against, in this order:
+
+1. If the current branch has an open PR, use its base: `gh pr view --json
+   baseRefName -q .baseRefName`.
+2. Otherwise use the remote's default branch — `git symbolic-ref
+   refs/remotes/origin/HEAD` with the `refs/remotes/origin/` prefix
+   stripped — falling back to `main` or `master` if that symref is absent.
+
+Diff against the remote-tracking ref for that base: `git diff
+origin/<base>...HEAD`. Not `@{upstream}` — once the branch is pushed that
+resolves to the branch's own remote copy, so the three-dot diff is empty
+and the whole committed PR silently drops out of scope. Not the local base
+branch either: it is often stale, which widens the range to already-merged
+work. With no remote at all, use the local `<base>...HEAD`, and `git diff
+HEAD~1` only as a last resort.
+
+Then also run `git diff HEAD` and include any uncommitted working-tree
+changes in scope — this review often runs before the commit. If a PR
+number, branch name, or file path was passed as the argument above, review
+that target instead. Treat the combined diff as the review scope; if it
+comes out empty, say the scope was empty rather than reporting the code
+clean.
 
 ## Phase 1 — Review (four angles)
 
