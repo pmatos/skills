@@ -147,7 +147,7 @@ npx skills@latest add pmatos/skills/pm-simplify
 Cleans up the changed code without changing behavior. Reviews the diff for reuse, simplification, efficiency, and altitude issues, then fixes what it finds directly. Quality only — it does not hunt for correctness bugs.
 
 What it does:
-- Gathers the diff under review — the PR's base branch (or the remote's default branch) three-dot-diffed against `HEAD`, plus any uncommitted working-tree changes — or reviews an explicit PR/branch/path argument.
+- Gathers the diff under review — the PR's base branch (or the remote's default branch) three-dot-diffed against `HEAD`, plus uncommitted working-tree changes and any untracked files (nothing gets staged) — or reviews an explicit PR/branch/path argument.
 - If a native subagent tool (the `Agent`/`Task` tool) is available, launches four parallel review agents — one per angle: **Reuse** (re-implemented functionality that already exists in the codebase), **Simplification** (redundant state, copy-paste, deep nesting, dead code), **Efficiency** (redundant computation/I/O, sequential independent work, closures that leak large captured scopes), and **Altitude** (special cases bolted onto shared infrastructure instead of a deeper fix).
 - Without a native subagent tool, works through all four angles inline in a single pass instead, and says so in its summary.
 - Dedups overlapping findings and fixes each directly, skipping anything that would change behavior, reach outside the diff, or looks like a false positive — noting the skip rather than arguing with it.

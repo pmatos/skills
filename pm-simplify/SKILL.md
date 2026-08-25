@@ -34,12 +34,16 @@ branch either: it is often stale, which widens the range to already-merged
 work. With no remote at all, use the local `<base>...HEAD`, and `git diff
 HEAD~1` only as a last resort.
 
-Then also run `git diff HEAD` and include any uncommitted working-tree
-changes in scope — this review often runs before the commit. If a PR
-number, branch name, or file path was passed as the argument above, review
-that target instead. Treat the combined diff as the review scope; if it
-comes out empty, say the scope was empty rather than reporting the code
-clean.
+Then pick up the working tree as well — this review often runs before the
+commit. `git diff HEAD` covers modified tracked files; `git ls-files
+--others --exclude-standard` lists the untracked ones, which `git diff
+HEAD` omits entirely. Read each untracked file in full and treat it as
+added lines. Do not stage anything to make a file show up in the diff (no
+`git add`, no `git add -N`) — leave the index exactly as you found it. If
+a PR number, branch name, or file path was passed as the argument above,
+review that target instead. Treat the combined result as the review scope;
+if it comes out empty, say the scope was empty rather than reporting the
+code clean.
 
 ## Phase 1 — Review (four angles)
 
