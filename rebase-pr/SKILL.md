@@ -100,7 +100,11 @@ skill installs on its own, so they share no library with any other skill in the 
 
 ### Step 1: Identify the PR
 
-1. `BRANCH=$(git rev-parse --abbrev-ref HEAD)`. A detached HEAD stops the run.
+1. `BRANCH=$(git rev-parse --abbrev-ref HEAD)`. A detached HEAD stops the run. Also capture the
+   **tracked** head name, which is what GitHub knows the branch as:
+   `TRACKED=$(git rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null)` → strip the
+   leading `<remote>/`. The two differ whenever the local branch was renamed (`review-42` tracking
+   `origin/feature`), a configuration Step 2 explicitly supports.
 2. Parse `git remote get-url origin` into `ORIGIN_OWNER` / `ORIGIN_REPO` (strip `git@github.com:`,
    `https://github.com/`, and a trailing `.git`). If an `upstream` remote exists, parse it the same
    way into `UPSTREAM_OWNER` / `UPSTREAM_REPO`.
@@ -134,9 +138,18 @@ skill installs on its own, so they share no library with any other skill in the 
    discovery would stop as falsely ambiguous on the most ordinary setup there is. Compare the two
    `owner/repo` pairs (case-insensitively — GitHub owner and repository names are not
    case-sensitive) and query the second only if it differs. As a belt-and-braces measure, deduplicate
-   the combined matches by `(base repository, PR number)` before applying the exactly-one rule.
+   the combined matches by `(base repository, PR number)` before applying the exactly-one rule — that
+   same dedupe also absorbs the case where `$BRANCH` and `$TRACKED` both match the one real PR.
+   **Query both branch names, too.** `gh pr list --head` filters on the PR's *head branch* and does
+   not translate a local alias, so a renamed checkout searched by `$BRANCH` alone finds nothing and
+   the run stops — even though the skill supports that configuration. Query `$BRANCH` **and**
+   `$TRACKED` when they differ, and let the same dedupe and exactly-one rule adjudicate. Union rather
+   than replace: `git checkout -b foo origin/main` leaves `@{u}` pointing at `main`, and querying
+   `--head main` *instead of* `foo` could match a stranger's PR against the default branch. The
+   `headRepository.nameWithOwner` filter below still applies to every result.
    - **Origin.** Set `PR_REPO = <ORIGIN_OWNER>/<ORIGIN_REPO>`, then
-     `gh pr list -R "$PR_REPO" --head "$BRANCH" --state open --json number,headRefName,headRepository,headRepositoryOwner,baseRefName,url`,
+     `gh pr list -R "$PR_REPO" --head <name> --state open --json number,headRefName,headRepository,headRepositoryOwner,baseRefName,url`
+     for each of `$BRANCH` / `$TRACKED`,
      then **keep only PRs whose `headRepository.nameWithOwner` equals `PR_REPO`** (compose it from
      `headRepositoryOwner.login` + `headRepository.name` if your `gh` predates `nameWithOwner`). That
      filter is load-bearing, not belt-and-braces: `--head` matches on branch name alone (`gh` rejects
@@ -258,6 +271,15 @@ from the manifests:
 | `go.mod` | `gofmt -l .`, `go vet ./...`, `go test ./...`, `go build ./...` — `gofmt -l` recurses, but exits **0** even when it lists unformatted files, so judge that step by its output, not its exit status |
 | `Makefile` | whichever of `make fmt`, `make lint`, `make test`, `make check`, `make ci` exist |
 | `.pre-commit-config.yaml` | `pre-commit run --all-files` |
+
+**Re-run this discovery after Step 4's rebase** whenever the replayed base brought in a new or
+changed `CLAUDE.md` / `AGENTS.md` (`git diff --name-only "$ORIGINAL_HEAD" HEAD -- '*CLAUDE.md' '*AGENTS.md'`
+is enough to tell). This walk reads the *checked-out* tree, which at Step 3 is still the pre-rebase
+PR branch — so a package's instruction file that the **base** added after the PR diverged is
+invisible here, and the gate would run without the checks that file mandates before the branch is
+force-pushed. That is the same failure the paragraph above argues against, arriving from the other
+direction. Post-rebase discovery is a strict superset: it sees base-added *and* PR-added instruction
+files, which reading them from `BASE_SHA` alone would not.
 
 Record the resulting list as `GATE`. Never assume `npm run *`. Also note any known-failure list the
 project's instructions record — see `references/quality-gate.md` for why that list belongs in the
