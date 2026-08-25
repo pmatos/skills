@@ -80,24 +80,27 @@ bandaid. Special cases layered on shared infrastructure are a sign the fix
 isn't deep enough — prefer generalizing the underlying mechanism over adding
 special cases.
 
-### Conventions (CLAUDE.md)
+### Conventions (CLAUDE.md / AGENTS.md)
 
-Find the CLAUDE.md files that govern the changed code: the user-level
-`~/.claude/CLAUDE.md`, the repo-root `CLAUDE.md`, plus any `CLAUDE.md` or
-`CLAUDE.local.md` in a directory that is an ancestor of a changed file (a
-directory's CLAUDE.md only applies to files at or below it). Read each one
-that exists, then check the diff for clear violations of the rules they
-state. Only flag a violation when you can quote the exact rule and the exact
-line that breaks it — no style preferences, no vague "spirit of the doc"
-inferences. In the finding, name the CLAUDE.md path and quote the rule so the
-report can cite it. If no CLAUDE.md applies, return nothing for this angle.
+Find the instruction files that govern the changed code: the user-level
+`~/.claude/CLAUDE.md`, the repo-root `CLAUDE.md` and `AGENTS.md`, plus any
+`CLAUDE.md`, `CLAUDE.local.md`, or `AGENTS.md` in a directory that is an
+ancestor of a changed file (such a file only applies to files at or below
+its own directory). Many repos symlink `AGENTS.md` to `CLAUDE.md`; when two
+paths are the same file (`test a -ef b`), read it once. Read each one that
+exists, then check the diff for clear violations of the rules they state.
+Only flag a violation when you can quote the exact rule and the exact line
+that breaks it — no style preferences, no vague "spirit of the doc"
+inferences. In the finding, name the instruction-file path and quote the
+rule so the report can cite it. If no instruction file applies, return
+nothing for this angle.
 
 ## Shared candidate shape
 
 Cleanup, altitude, and conventions candidates use the same `file`/`line`/
 `summary` shape as correctness candidates; in `failure_scenario`, state the
 concrete cost (what is duplicated, wasted, harder to maintain, or which
-CLAUDE.md rule is broken) instead of a crash. **Correctness bugs always
+CLAUDE.md/AGENTS.md rule is broken) instead of a crash. **Correctness bugs always
 outrank cleanup, altitude, and conventions findings** when the output cap
 forces a cut.
 
