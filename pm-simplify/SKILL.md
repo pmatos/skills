@@ -68,14 +68,23 @@ last resort.
 Then pick up the working tree as well — this review often runs before the
 commit. `git diff HEAD` covers modified tracked files; `git ls-files
 --others --exclude-standard` lists the untracked ones, which `git diff
-HEAD` omits entirely. Run `readlink <path>` on each untracked path first:
-if it succeeds the path is a symlink, so record the target it prints as
-the single added line and do not read through the link — that is what git
+HEAD` omits entirely. Read through an untracked path only once you have
+positively established it is a regular file. Run `readlink -- <path>`
+first — with the `--`, because the worktree may hold a file literally
+named `-n`, which `readlink` otherwise parses as an option. If it
+succeeds the path is a symlink, so record the target it prints as the
+single added line and do not read through the link — that is what git
 itself stores for a symlink, and dereferencing one pulls whatever it
-points at, possibly a file outside the repository, into the review and its
-subagent prompts. Otherwise read the file in full and treat it as added
-lines. Do not stage anything to make a file show up in the diff (no `git
-add`, no `git add -N`) — leave the index exactly as you found it.
+points at, possibly a file outside the repository, into the review and
+its subagent prompts. A failure proves nothing on its own: `readlink`
+exits 1 alike for "not a symlink" and for a path it could not resolve.
+So read the file only once `test -f ./<path>` succeeds and `test -L
+./<path>` fails — the `./` keeps a leading `-` out of option position,
+which `test` cannot escape with `--` — and prefix `./` on every path you
+hand to a reading command too. Skip and report anything that classifies
+as neither. Then read the file in full and treat it as added lines. Do
+not stage anything to make a file show up in the diff (no `git add`, no
+`git add -N`) — leave the index exactly as you found it.
 
 If a PR number, branch name, or file path was passed as the argument
 above, review that target instead. A PR number or branch name must name
