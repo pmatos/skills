@@ -24,10 +24,13 @@ Resolve the base to diff against, in this order:
    url,baseRefName`. `baseRefName` is only a branch name, so take the base
    *repository* from `url` — a PR URL is always
    `https://github.com/<owner>/<repo>/pull/<n>` in the base repo, never in
-   the fork. The base remote is the local remote whose `git remote -v` URL
-   points at that `<owner>/<repo>` (strip `git@github.com:`,
-   `https://github.com/`, and a trailing `.git` before comparing); if none
-   does — a fork checkout with no `upstream` — use the clone URL
+   the fork. The base remote is the local remote whose *fetch* URL — the
+   `(fetch)` line of `git remote -v`, equivalently `git remote get-url
+   <name>` — points at that `<owner>/<repo>` (strip `git@github.com:`,
+   `https://github.com/`, and a trailing `.git` before comparing). Match
+   the fetch URL specifically: a remote may carry a separate push URL,
+   and `git fetch` uses the fetch one. If no remote matches — a fork
+   checkout with no `upstream` — use the clone URL
    `https://github.com/<owner>/<repo>.git`, which `git fetch` accepts in
    place of a remote name. If `gh pr view` cannot resolve a single
    repository on its own, fall through to rule 2.
