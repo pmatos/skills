@@ -62,9 +62,16 @@ trailing `.git` before comparing); the base is then
 non-default base such as `release/1.x` work: the default-branch tiers below
 would pick `main`, whose merge base sits further back, so `release/1.x`'s
 own commits enter the scope as author changes and `--fix` edits code
-outside the PR. Fall through to those tiers when the branch has no open PR,
-when `gh pr view` cannot resolve a single repository, or when no local
-remote's fetch URL matches the base repo. The fall-through tiers: the
+outside the PR. When no local remote's fetch URL matches — a fork checkout
+carrying only the fork's `origin`, or a URL form those strips miss — fetch
+the base straight from the base repository's clone URL,
+`https://github.com/<owner>/<repo>.git`, which `git fetch` accepts in place
+of a remote name; capture the result as `git rev-parse FETCH_HEAD` and diff
+that OID, because a URL fetch writes no remote-tracking ref and leaves
+`FETCH_HEAD` as the only handle. Fall through to those tiers only when the
+branch has no open PR, when `gh pr view` cannot resolve a single
+repository, or when that URL fetch fails — a URL base leaves no local ref
+for the stale-base fallback below. The fall-through tiers: the
 remote default branch from
 `git symbolic-ref refs/remotes/origin/HEAD` (strip only the
 `refs/remotes/` prefix, so the base stays `origin/<branch>` — a bare name
@@ -97,9 +104,16 @@ a tracking ref that reviews nothing.
 
 What you actually want is the branch point. When the PR base resolved
 above, use it directly — the comparison here only disambiguates
-default-branch candidates. Otherwise run the fall-through tiers once *per
-remote* that `git remote` lists — not once overall — and collect every
-answer as a candidate before selecting one. Stopping at the first answer is
+default-branch candidates. Otherwise run the two *remote* fall-through
+tiers — the `refs/remotes/origin/HEAD` symref and the `gh repo view`
+default branch — once *per remote* that `git remote` lists, not once
+overall, and collect every answer as a candidate before selecting one. The
+local-head tier is not per-remote and stays outside that loop: whenever the
+per-remote passes yield no candidate at all — no remote answered, `gh`
+could not resolve one, the qualified ref was absent locally, or `git
+remote` lists nothing so the loop body never ran — resolve whichever of
+`main` or `master` exists as a local head, once, and use it as the single
+base, diffed `<base>...HEAD` rather than by any `<remote>/<branch>` name. Stopping at the first answer is
 what makes this rule inert: `git clone` sets `refs/remotes/origin/HEAD`
 while `git remote add` never sets `upstream/HEAD`, so in a fork checkout
 the `origin/HEAD` symref tier always answers first and `upstream`'s default
@@ -150,8 +164,10 @@ an untracked `café.py` is listed as `"caf\303\251.py"` and would be
 skipped rather than reviewed. A name holding a quote, tab, or newline is
 still C-quoted onto a single line; that residue does not name an existing
 file, so report it as skipped rather than guessing at the real name. Do not
-reach for `-z` here — NUL separators do not survive into this listing as
-text, so every path boundary is lost. This
+reach for `-z` to read this listing yourself — a NUL arrives in your tool
+output as a space, indistinguishable from the space inside
+`plain space.py`, so every boundary is lost. It is still the correct form
+when a *shell loop* consumes it, which never puts the NUL into text. This
 enumeration is unconditional — an untracked file is invisible to every
 `git diff` form above even when the range diff is non-empty. If a PR number,
 branch name, or file path was parsed as the target in Phase 0, review that
