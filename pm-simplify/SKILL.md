@@ -66,10 +66,19 @@ at all, use the local `<base>...HEAD`, and `git diff HEAD~1` only as a
 last resort.
 
 Then pick up the working tree as well — this review often runs before the
-commit. `git diff HEAD` covers modified tracked files; `git ls-files
---others --exclude-standard` lists the untracked ones, which `git diff
-HEAD` omits entirely. Read through an untracked path only once you have
-positively established it is a regular file. Run `readlink -- <path>`
+commit. `git diff HEAD` covers modified tracked files; `git -c
+core.quotePath=false ls-files --others --exclude-standard` lists the
+untracked ones, which `git diff HEAD` omits entirely. The
+`core.quotePath=false` matters: without it a non-ASCII name is
+octal-escaped into a quoted path that does not exist, so an untracked
+`café.py` would be skipped rather than reviewed. A name holding a quote,
+tab, or newline is still C-quoted onto a single line; that residue fails
+the regular-file check below and is reported as skipped, which is the
+intended fail-closed outcome. Do not reach for `-z` here — NUL separators
+do not survive into this listing as text, so every path boundary is lost.
+
+Read through an untracked path only once you have positively established
+it is a regular file. Run `readlink -- <path>`
 first — with the `--`, because the worktree may hold a file literally
 named `-n`, which `readlink` otherwise parses as an option. If it
 succeeds the path is a symlink, so record the target it prints as the
