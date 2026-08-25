@@ -57,7 +57,20 @@ whichever of `main` or `master` exists as a local head (bare here by
 design — this tier tested for the local branch); else `@{upstream}` if the
 branch has one. Then run `git diff <base>...HEAD`
 — three dots, so the whole branch back to the merge base is under review,
-not just its newest commit. Only if no base resolves at all, fall back to
+not just its newest commit.
+
+What you actually want is the branch point. Where more than one candidate
+base resolves — in a fork checkout `origin`'s and `upstream`'s default
+branches are both candidates, and tier 1 would otherwise always pick
+`origin`'s because `git clone` sets `refs/remotes/origin/HEAD` while `git
+remote add` never sets `upstream/HEAD` — compute `git merge-base <cand>
+HEAD` for each and keep the candidate whose merge base is a *descendant* of
+the others (`git merge-base --is-ancestor`). Three dots only protects you
+from a base that is ahead of the branch point, not one that is behind: a
+branch cut from `upstream/main` while the fork's own default sits three
+commits back reviews those three upstream commits as if the author wrote
+them. The descendant rule gets this right whether the fork's default is
+stale, divergent, or the branch's actual base. Only if no base resolves at all, fall back to
 `git diff HEAD~1` and state in the report that the scope was narrowed to the
 last commit. If there are uncommitted changes, or the range diff is empty,
 also run `git diff HEAD` and include the working-tree changes in scope — the
