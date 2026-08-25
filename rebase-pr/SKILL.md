@@ -117,7 +117,15 @@ skill installs on its own, so they share no library with any other skill in the 
    then validate that `headRepository.nameWithOwner` matches a local remote (item 5); if it matches
    none, stop rather than pushing somewhere unverified.
 
-   **Otherwise** look it up, stopping at the first tier that yields exactly one match:
+   **Otherwise** look it up. Query **both** candidate repositories and require exactly one match
+   across their combined results — do **not** stop at the first that answers. A fork branch can carry
+   a PR against the fork *and* a PR against upstream at the same time; `-R` scopes each query to one
+   repository, so an origin-first-and-stop order silently selects the fork-local PR, takes `BASE_REF`
+   from it, and then Step 7 force-pushes the shared head branch — rewriting the upstream PR onto the
+   wrong base, with the lease raising no objection because the head branch never moved. Combining
+   costs nothing: a PR appears only in its own base repository's list, so the results need no dedupe,
+   and the ordinary upstream-only fork still yields exactly one match. Two matches means genuine
+   ambiguity — stop and say so, as below.
    - **Origin.** Set `PR_REPO = <ORIGIN_OWNER>/<ORIGIN_REPO>`, then
      `gh pr list -R "$PR_REPO" --head "$BRANCH" --state open --json number,headRefName,headRepository,headRepositoryOwner,baseRefName,url`,
      then **keep only PRs whose `headRepository.nameWithOwner` equals `PR_REPO`** (compose it from
@@ -128,12 +136,14 @@ skill installs on its own, so they share no library with any other skill in the 
      shares a name with yours. Rebasing and force-pushing someone else's PR is not a recoverable
      mistake. Match the full `owner/repo` pair, not the owner alone: one account can own several
      repositories with the same branch name, and the owner-only test cannot tell them apart.
-   - **Upstream (fork checkout).** If the filtered origin lookup found nothing and an `upstream`
-     remote exists, set `PR_REPO = <UPSTREAM_OWNER>/<UPSTREAM_REPO>` and repeat the query — but now
-     filter `headRepository.nameWithOwner` against the **origin** pair (`ORIGIN_OWNER/ORIGIN_REPO`),
-     since the head branch lives in your fork, not in the base repository `PR_REPO` now names.
+   - **Upstream (fork checkout).** If an `upstream` remote exists, run this query too — regardless of
+     whether the origin lookup matched. Set `PR_REPO = <UPSTREAM_OWNER>/<UPSTREAM_REPO>` and repeat
+     the query — but now filter `headRepository.nameWithOwner` against the **origin** pair
+     (`ORIGIN_OWNER/ORIGIN_REPO`), since the head branch lives in your fork, not in the base
+     repository `PR_REPO` now names.
 
-   Zero matches after filtering, or more than one, → stop and say so; never guess.
+   Zero matches across both queries, or more than one, → stop and say so; never guess. On exactly one
+   match, set `PR_REPO` to the repository whose query produced it.
 4. Capture `PR_NUMBER`, `HEAD_REF` (`headRefName`), and **`BASE_REF` (`baseRefName`) — the base branch
    is whatever the PR says it is, not a hardcoded `main`.**
 5. Resolve the two remotes by matching `git remote -v` URLs (strip `git@github.com:`,
@@ -355,20 +365,32 @@ second one:
    | `0` | every check finished successfully | terminal — done |
    | `124` | the chunk elapsed with checks still pending | keep waiting if budget remains |
    | `8` | checks still pending (the non-watch read in item 3 reports this) | keep waiting if budget remains |
-   | any other nonzero | **unknown — do not guess** | terminal for the wait: re-read `gh pr checks "$PR_NUMBER" -R "$PR_REPO" --json name,state,link` and let *that* decide (see below) |
+   | any other nonzero | **unknown — do not guess** | terminal for the wait: re-read `gh pr checks "$PR_NUMBER" -R "$PR_REPO" --json name,state,bucket,link` and let *that* decide (see below) |
 
    The nonzero row deliberately does not name a cause, because the status alone cannot distinguish
    one. `gh help exit-codes` gives `1` for *any* failure and `4` for "authentication required"; `2`
    is a cancelled command; and since the call is wrapped in `TIMEOUT_BIN`, that binary's own `125` /
    `126` / `127` surface here too. A repo with no CI at all exits `1` ("no checks reported on the …
-   branch"). So decide from the re-read, not from the number:
+   branch"). So decide from the re-read, not from the number.
+   Classify on the `bucket` field, which `gh` documents as categorizing `state` into `pass`, `fail`,
+   `pending`, `skipping`, or `cancel` — `state` alone carries no pending discriminator, and throwing
+   that signal away is what would let the wait end before CI ran:
 
-   - The re-read lists checks and at least one is failing → **`exit reason: ci-failed`**, naming them.
-   - The re-read lists checks and none are failing → treat as terminal success.
-   - The re-read reports no checks for the branch → **`exit reason: no-checks`**; the rebase and push
-     succeeded, there is simply nothing to wait for.
+   - Any check in `bucket: fail` → **`exit reason: ci-failed`**, naming them.
+   - No failures but any check in `bucket: pending` → **not terminal.** Keep waiting while budget
+     remains; only on exhaustion is this `ci-timeout`. (The exit-`8` row above already treats pending
+     this way; the re-read must agree with it.)
+   - Every check terminal (`pass` / `skipping` / `cancel`) and none failing → terminal success.
+   - No checks reported at all → **not yet conclusive.** This is the ordinary push-to-registration
+     race: `gh` exits 1 with "no checks reported" until the workflows register. Allow a bounded grace
+     period — `min(2 × POLL_INTERVAL, CI_BUDGET_REMAINING)` — re-reading across it, and only declare
+     **`exit reason: no-checks`** if the set is still empty when it elapses. The rebase and push have
+     already succeeded either way; there is simply nothing to wait for.
    - The re-read itself fails (auth expired, API unreachable, `gh` broken) → **`exit reason:
      gh-unavailable`**, quoting `gh`'s stderr. Never report failing checks the re-read did not show.
+
+   Distinguishing pending is also what keeps this aligned with `pm-autofix-pr`, which gates on a
+   terminal `.conclusion` per check run rather than on the absence of failures.
 
    What must not happen is the wait treating a red CI run as "still pending" and reporting a budget
    timeout instead. (`pm-autofix-pr` can ignore the exit status because it treats the watch as a pure
