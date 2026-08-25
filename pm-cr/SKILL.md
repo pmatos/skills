@@ -82,21 +82,31 @@ Take the first rule that produces a record.
 
 **1a. The PR's own base — wins outright.** Run `gh pr view --json
 url,baseRefName,headRefOid` for the current branch, or for the PR parsed as
-the target in Phase 0 (`headRefOid` serves the checkout check above). `baseRefName` is only a branch name, so take the base
-*repository* from `url`: a PR URL is always
-`https://github.com/<owner>/<repo>/pull/<n>` in the base repo, never in the
-fork. The base remote is the local remote whose *fetch* URL points at that
-`<owner>/<repo>` (strip `git@github.com:`, `https://github.com/`, and a
-trailing `.git` before comparing).
+the target in Phase 0 (`headRefOid` serves the checkout check above).
+`baseRefName` is only a branch name, so take the base *repository* from
+`url`, which is always `https://<host>/<owner>/<repo>/pull/<n>` in the base
+repo, never in the fork. Parse `(host, owner, repo)` from it and keep the
+host: it is `github.com` only on public GitHub, and a GitHub Enterprise PR
+carries the enterprise hostname. Identity is all three fields. Normalize
+each remote's *fetch* URL the same way — `git@<host>:<owner>/<repo>.git`,
+`ssh://git@<host>/<owner>/<repo>.git`, `https://<host>/<owner>/<repo>.git`,
+all with an optional trailing `.git` — and match on the triple.
 
 - A remote matches → `{remote, baseRefName}`.
 - None matches — a fork checkout carrying only the fork's `origin`, or a URL
-  form those strips miss → `{https://github.com/<owner>/<repo>.git,
-  baseRefName, local_ref: —}`.
+  form those normalizations miss → `{https://<host>/<owner>/<repo>.git,
+  baseRefName, local_ref: —}`, built from the PR URL's own host, never a
+  hardcoded `github.com`.
 
 Then go straight to Step 3; a PR base never enters the Step 2 comparison.
-Fall through to 1b only when the branch has no open PR, when `gh pr view`
-cannot resolve a single repository, or when the fetch in Step 3 fails.
+Fall through to 1b only when the branch has no open PR, or when `gh pr view`
+cannot resolve a single repository — that is, only when no PR base is known.
+Once 1a has identified one, it is authoritative and 1b must never substitute
+a default branch for it: the fork's default, or any other branch of the base
+repo, is a different range, and reviewing it would report commits outside
+the PR and point `--fix` at them. If Step 3's fetch then fails, use that
+record's own `local_ref` when it has one (with the stale-base warning);
+otherwise report that the PR base could not be fetched and review nothing.
 
 **1b. Default-branch candidates, once per remote.** For each `<remote>` that
 `git remote` lists, take the first of these that answers, substituting that
