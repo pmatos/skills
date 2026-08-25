@@ -67,19 +67,22 @@ was fixed and what was skipped.
 
 ## `--comment`
 
-**Do not post a review whose scope includes unpublished work.** Phase 1's
-Step 5 folds this worktree's uncommitted changes and untracked files into
-the scope, and those exist only on the reviewer's disk. Before posting,
-check whether Step 5 contributed anything: if it did, post nothing from this
-run, report the findings through the normal contract instead, and say in one
-line that `--comment` was skipped because the review includes unpublished
-working-tree state, and that committing or stashing and rerunning will post
-it. Do not try to infer a committed-only subset from the combined findings —
-the report does not record which finding came from which part of the scope,
-and a local edit overlapping a PR hunk can make a finding look commentable
-on a committed line while the defect exists only in the unpushed edit. On
-someone else's PR that publicly attributes code to them that they cannot
-see.
+**Post nothing to the PR about code the PR does not contain.** Phase 1's
+Step 5 folds uncommitted and untracked files into the review scope, so on a
+dirty checkout some findings describe code that exists only on this machine.
+Before posting anything, list the dirty paths once with `git -c
+core.quotePath=false status --porcelain` — it covers staged, unstaged, and
+untracked alike — and treat every path it names, both sides of a rename, as
+dirty. A finding whose `file` is dirty is withheld from the PR entirely: no
+inline comment, no `gh api` fallback, and no file-level or general comment
+either. Withhold a dirty file *whole*, never per hunk: local edits shift
+every line below them, so a finding about a committed line in an edited file
+can carry a line number GitHub accepts against different content, and it
+then reads as a review of code the author never wrote — on someone else's PR
+that publicly attributes code to them they cannot see. Print the withheld
+findings instead and say in one line how many were withheld and why. Nothing
+else changes: the review scope, the report, and `--fix` still cover the
+working tree.
 
 If the review target is a GitHub PR, post each finding as an inline PR
 comment: use `mcp__github_inline_comment__create_inline_comment` (one call

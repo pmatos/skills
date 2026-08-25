@@ -124,8 +124,8 @@ pass's remote for `<remote>` in both:
 Keep every answer as a candidate, including one whose `<remote>/<branch>`
 ref is absent locally. Output: zero or more records.
 
-**1c. Local head — not per-remote.** When 1b produced no records at all, or
-when every record it produced was dropped in Step 3 (each fetch failed and
+**1c. Local head — not per-remote.** When 1a produced no record, and 1b
+produced no records at all or every record it produced was dropped in Step 3 (each fetch failed and
 none had a `local_ref` to fall back on): whichever of `main` or `master`
 exists as a local head → `{remote: —, branch}`. A repository with no remotes
 configured reaches this rule directly, since 1b's loop body never runs.
