@@ -122,8 +122,20 @@ also run `git diff HEAD` and include the working-tree changes in scope — the
 review often runs before the commit. `git diff` never reports untracked
 files, so always also run `git -c core.quotePath=false ls-files --others
 --exclude-standard` (it honors `.gitignore`) and treat every path it lists
-as a new file in scope, reviewing its full contents as an all-additions
-hunk; skip binaries. The `core.quotePath=false` matters: without it a
+as a new file in scope; skip binaries. Bind each listed path to a shell
+variable and expand it double-quoted. Read through a path only once you
+have positively established it is a regular file: run `readlink -- "$p"`
+first — with the `--`, because the worktree may hold a file literally named
+`-n`. If it succeeds the path is a symlink, so record the target it prints
+as the single added line and do not read through the link — that target
+string is what git itself stores for a symlink, and dereferencing one pulls
+whatever it points at, possibly a file outside the repository, into the
+review, its subagent prompts, and any `--comment` output. A `readlink`
+failure proves nothing on its own: it exits 1 alike for "not a symlink" and
+for a path it could not resolve. So read the file in full as an
+all-additions hunk only once `test -f "./$p"` succeeds and `test -L "./$p"`
+fails — `test -f` follows the link, so it is not a symlink check on its
+own. Skip and report anything that classifies as neither. The `core.quotePath=false` matters: without it a
 non-ASCII name is octal-escaped into a quoted path that does not exist, so
 an untracked `café.py` is listed as `"caf\303\251.py"` and would be
 skipped rather than reviewed. A name holding a quote, tab, or newline is
