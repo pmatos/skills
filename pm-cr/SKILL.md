@@ -49,131 +49,179 @@ existing ref or path, add one line saying so alongside the level line.
 
 ## Phase 1 — Gather the diff
 
-Resolve the base branch first, in order, keeping it remote-qualified
-wherever the tier names a remote. **First, if there is a PR, use its
-base**: `gh pr view --json url,baseRefName` for the current branch, or
-resolve the PR parsed as the target in Phase 0. `baseRefName` is only a
-branch name, so take the base *repository* from `url` — a PR URL is always
+Resolve a base commit, diff it against `HEAD`, then add the working tree.
+
+### The base record
+
+Every rule below produces the same shape:
+
+| field | meaning |
+|---|---|
+| `remote` | remote name, a clone URL, or `—` for a local head |
+| `branch` | branch name at that remote/URL |
+| `oid` | commit id from `git rev-parse FETCH_HEAD`, captured immediately after *this record's own* fetch |
+| `local_ref` | `<remote>/<branch>` when that ref exists locally, else `—` |
+
+### Step 1 — Resolve the base
+
+Take the first rule that produces a record.
+
+**1a. The PR's own base — wins outright.** Run `gh pr view --json
+url,baseRefName` for the current branch, or for the PR parsed as the target
+in Phase 0. `baseRefName` is only a branch name, so take the base
+*repository* from `url`: a PR URL is always
 `https://github.com/<owner>/<repo>/pull/<n>` in the base repo, never in the
 fork. The base remote is the local remote whose *fetch* URL points at that
 `<owner>/<repo>` (strip `git@github.com:`, `https://github.com/`, and a
-trailing `.git` before comparing); the base is then
-`<base-remote>/<baseRefName>`. This tier is what makes a PR into a
-non-default base such as `release/1.x` work: the default-branch tiers below
-would pick `main`, whose merge base sits further back, so `release/1.x`'s
-own commits enter the scope as author changes and `--fix` edits code
-outside the PR. When no local remote's fetch URL matches — a fork checkout
-carrying only the fork's `origin`, or a URL form those strips miss — fetch
-the base straight from the base repository's clone URL,
-`https://github.com/<owner>/<repo>.git`, which `git fetch` accepts in place
-of a remote name; capture the result as `git rev-parse FETCH_HEAD` and diff
-that OID, because a URL fetch writes no remote-tracking ref and leaves
-`FETCH_HEAD` as the only handle. Fall through to those tiers only when the
-branch has no open PR, when `gh pr view` cannot resolve a single
-repository, or when that URL fetch fails — a URL base leaves no local ref
-for the stale-base fallback below. The fall-through tiers: the
-remote default branch from
-`git symbolic-ref refs/remotes/origin/HEAD` (strip only the
-`refs/remotes/` prefix, so the base stays `origin/<branch>` — a bare name
-resolves through `refs/heads/`, never `refs/remotes/origin/`); else `gh
-repo view --json defaultBranchRef -q .defaultBranchRef.name`, which returns
-a bare name — qualify it as `<remote>/<name>` for the remote it was queried
-from, and fall through if that remote-tracking ref isn't present
-locally (the symref is absent after a `git remote add` without `git remote
-set-head`; in a fork checkout, query the `upstream` remote's repo); else
-whichever of `main` or `master` exists as a local head (bare here by
-design — this tier tested for the local branch). Refresh that base before
-diffing — `git fetch <remote> <branch>` for the remote-qualified tiers —
-and run `git diff FETCH_HEAD...HEAD`; the local-head tier has no remote to
-refresh, so diff `<base>...HEAD` there. Three dots either way, so the whole
-branch back to the merge base is under review, not just its newest commit.
-Any remote-tracking ref goes stale between fetches, and then the three-dot
-merge base slides backwards and already-merged commits enter the scope as
-if this branch wrote them. Three dots is no protection once the branch has
-merged the base in — or once `gh pr checkout` has fetched only the PR head
-ref and left `origin/<branch>` behind — because `HEAD` already contains the
-newer base commits and the three-dot range collapses to the two-dot one. If
-the fetch fails, fall back to `<remote>/<branch>...HEAD` and say in the
-report that the base may be stale. Never fall back to
-`@{upstream}`: after `git push -u` a branch's tracking ref is
-`origin/<this branch>` — its own tip, not its base — so `@{upstream}...HEAD`
-is empty for every pushed commit. When no tier resolves (a `git clone
---single-branch` checkout has no `origin/HEAD`, no `origin/<default>`, and
-no local `main`), take the disclosed `HEAD~1` last resort below rather than
-a tracking ref that reviews nothing.
+trailing `.git` before comparing).
 
-What you actually want is the branch point. When the PR base resolved
-above, use it directly — the comparison here only disambiguates
-default-branch candidates. Otherwise run the two *remote* fall-through
-tiers — the `refs/remotes/origin/HEAD` symref and the `gh repo view`
-default branch — once *per remote* that `git remote` lists, not once
-overall, and collect every answer as a candidate before selecting one. The
-local-head tier is not per-remote and stays outside that loop: whenever the
-per-remote passes yield no candidate at all — no remote answered, `gh`
-could not resolve one, the qualified ref was absent locally, or `git
-remote` lists nothing so the loop body never ran — resolve whichever of
-`main` or `master` exists as a local head, once, and use it as the single
-base, diffed `<base>...HEAD` rather than by any `<remote>/<branch>` name. Stopping at the first answer is
-what makes this rule inert: `git clone` sets `refs/remotes/origin/HEAD`
-while `git remote add` never sets `upstream/HEAD`, so in a fork checkout
-the `origin/HEAD` symref tier always answers first and `upstream`'s default
-is never considered at all. With one candidate, use it. With more than one,
-refresh each the same way, then name each by its remote-tracking ref
-`<remote>/<branch>` — the fetch updates that ref, and creates it when
-absent — and compute `git merge-base <cand> HEAD` for each, keeping the
-candidate whose merge base is a *descendant* of the others (`git
-merge-base --is-ancestor`); if two merge bases are equal either serves,
-since the three-dot range is identical. Diff the winner as
-`<remote>/<branch>...HEAD`, not `FETCH_HEAD...HEAD`: each fetch overwrites
-`FETCH_HEAD` with only that fetch, so after several candidates it names
-whichever was fetched last rather than the one selected here. Three dots only protects you
-from a base that is ahead of the branch point, not one that is behind: a
-branch cut from `upstream/main` while the fork's own default sits three
-commits back reviews those three upstream commits as if the author wrote
-them. The descendant rule gets this right whether the fork's default is
-stale, divergent, or the branch's actual base. Only if no base resolves at all, fall back to
-`git diff HEAD~1` and state in the report that the scope was narrowed to the
-last commit — but guard it with `git rev-parse --verify -q HEAD~1` first,
-because HEAD has no parent in a `--depth 1` clone or on a root commit and
-the bare command dies. If the guard fails and `git rev-parse
---is-shallow-repository` says `true`, run `git fetch --deepen=1` and retry:
-that recovers the real one-commit diff. If there is still no parent, report
-that no scope could be resolved. Do **not** diff against the empty tree to
-manufacture one — that puts every pre-existing file in the repo in scope,
-which breaks the "stay inside the reviewed diff's scope" constraint below. If there are uncommitted changes, or the range diff is empty,
-also run `git diff HEAD` and include the working-tree changes in scope — the
-review often runs before the commit. `git diff` never reports untracked
-files, so always also run `git -c core.quotePath=false ls-files --others
---exclude-standard` (it honors `.gitignore`) and treat every path it lists
-as a new file in scope; skip binaries. Bind each listed path to a shell
-variable and expand it double-quoted. Read through a path only once you
-have positively established it is a regular file: run `readlink -- "$p"`
-first — with the `--`, because the worktree may hold a file literally named
-`-n`. If it succeeds the path is a symlink, so record the target it prints
-as the single added line and do not read through the link — that target
-string is what git itself stores for a symlink, and dereferencing one pulls
-whatever it points at, possibly a file outside the repository, into the
-review, its subagent prompts, and any `--comment` output. A `readlink`
-failure proves nothing on its own: it exits 1 alike for "not a symlink" and
-for a path it could not resolve. So read the file in full as an
-all-additions hunk only once `test -f "./$p"` succeeds and `test -L "./$p"`
-fails — `test -f` follows the link, so it is not a symlink check on its
-own. Skip and report anything that classifies as neither. The `core.quotePath=false` matters: without it a
-non-ASCII name is octal-escaped into a quoted path that does not exist, so
-an untracked `café.py` is listed as `"caf\303\251.py"` and would be
-skipped rather than reviewed. A name holding a quote, tab, or newline is
-still C-quoted onto a single line; that residue does not name an existing
-file, so report it as skipped rather than guessing at the real name. Do not
-reach for `-z` to read this listing yourself — a NUL arrives in your tool
-output as a space, indistinguishable from the space inside
-`plain space.py`, so every boundary is lost. It is still the correct form
-when a *shell loop* consumes it, which never puts the NUL into text. This
-enumeration is unconditional — an untracked file is invisible to every
-`git diff` form above even when the range diff is non-empty. If a PR number,
-branch name, or file path was parsed as the target in Phase 0, review that
-target instead. Treat this diff as the review scope. If the scope is
-genuinely empty after all of this, say so explicitly rather than reporting a
-clean review.
+- A remote matches → `{remote, baseRefName}`.
+- None matches — a fork checkout carrying only the fork's `origin`, or a URL
+  form those strips miss → `{https://github.com/<owner>/<repo>.git,
+  baseRefName, local_ref: —}`.
+
+Then go straight to Step 3; a PR base never enters the Step 2 comparison.
+Fall through to 1b only when the branch has no open PR, when `gh pr view`
+cannot resolve a single repository, or when the fetch in Step 3 fails.
+
+**1b. Default-branch candidates, once per remote.** For each `<remote>` that
+`git remote` lists, take the first of these that answers, substituting that
+pass's remote for `<remote>` in both:
+
+1. `git symbolic-ref refs/remotes/<remote>/HEAD`, stripping only the
+   `refs/remotes/` prefix → `{remote, branch}`.
+2. `gh repo view --json defaultBranchRef -q .defaultBranchRef.name` against
+   that remote's repo, which returns a bare name → `{remote, name}`.
+
+Keep every answer as a candidate, including one whose `<remote>/<branch>`
+ref is absent locally. Output: zero or more records.
+
+**1c. Local head — not per-remote.** Only when 1b produced no records at
+all: whichever of `main` or `master` exists as a local head →
+`{remote: —, branch}`.
+
+**1d. Nothing resolved** → Step 4.
+
+### Step 2 — Pick the winner
+
+Only when 1b produced more than one record. Fetch each candidate per Step 3
+and capture its `oid`, compute `git merge-base <oid> HEAD` for each, and
+keep the candidate whose merge base is a *descendant* of the others (`git
+merge-base --is-ancestor`). Equal merge bases → either serves, since the
+three-dot range is identical.
+
+### Step 3 — Refresh and diff
+
+| record | command | on success | on fetch failure |
+|---|---|---|---|
+| has a `remote` (a clone URL counts) | `git fetch <remote-or-url> <branch>` | set `oid`, diff `<oid>...HEAD` | `local_ref` present → `<local_ref>...HEAD`, and report the base may be stale; absent → drop the record |
+| local head (1c) | none | diff `<branch>...HEAD` | n/a |
+
+The `<branch>` operand is never optional. `git fetch <url>` with no ref
+fetches that repository's `HEAD`, so `FETCH_HEAD` would name `main` and a PR
+into `release/1.x` would be diffed against the wrong branch.
+
+Identify a fetched candidate by its captured `oid`, never by `FETCH_HEAD` at
+diff time: each fetch overwrites `FETCH_HEAD` with only that fetch, so after
+several candidates it names whichever was fetched last. The `oid` is also
+the only handle a candidate with no local ref has — do not assume the fetch
+creates one, because a `git clone --single-branch` checkout has a narrowed
+refspec and `git fetch origin main` there sets `FETCH_HEAD` without ever
+writing `origin/main`.
+
+### Step 4 — Last resort
+
+Guard first: `git rev-parse --verify -q HEAD~1`. On success, `git diff
+HEAD~1`, and state in the report that the scope was narrowed to the last
+commit. If the guard fails and `git rev-parse --is-shallow-repository` says
+`true`, run `git fetch --deepen=1` and retry — that recovers the real
+one-commit diff. If there is still no parent, report that no scope could be
+resolved.
+
+### Step 5 — Add the working tree
+
+If there are uncommitted changes, or the range diff is empty, also run `git
+diff HEAD` and include the working-tree changes in scope — the review often
+runs before the commit.
+
+`git diff` never reports untracked files, so always also run `git -c
+core.quotePath=false ls-files --others --exclude-standard` (it honors
+`.gitignore`) and treat every path it lists as a new file in scope; skip
+binaries. This enumeration is unconditional — an untracked file is invisible
+to every `git diff` form above even when the range diff is non-empty.
+
+Bind each listed path to a shell variable and expand it double-quoted. Read
+through a path only once you have positively established it is a regular
+file: run `readlink -- "$p"` first — with the `--`, because the worktree may
+hold a file literally named `-n`. If it succeeds the path is a symlink, so
+record the target it prints as the single added line and do not read through
+the link. A `readlink` failure proves nothing on its own: it exits 1 alike
+for "not a symlink" and for a path it could not resolve. So read the file in
+full as an all-additions hunk only once `test -f "./$p"` succeeds and `test
+-L "./$p"` fails — `test -f` follows the link, so it is not a symlink check
+on its own. Skip and report anything that classifies as neither.
+
+If a PR number, branch name, or file path was parsed as the target in Phase
+0, review that target instead. Treat this diff as the review scope. If the
+scope is genuinely empty after all of this, say so explicitly rather than
+reporting a clean review.
+
+### Why these rules are the way they are
+
+- **Three dots, always.** The whole branch back to the merge base is under
+  review, not just its newest commit.
+- **Refresh before diffing.** Any remote-tracking ref goes stale between
+  fetches, and then the three-dot merge base slides backwards and
+  already-merged commits enter the scope as if this branch wrote them. Three
+  dots is no protection once the branch has merged the base in — or once `gh
+  pr checkout` has fetched only the PR head ref — because `HEAD` already
+  contains the newer base commits and the three-dot range collapses to the
+  two-dot one.
+- **A PR base beats a default branch.** A PR into `release/1.x` diffed
+  against `main` starts at an older merge base, so `release/1.x`'s own
+  commits enter the scope as author changes and `--fix` edits code outside
+  the PR.
+- **Per remote, not once overall.** `git clone` sets
+  `refs/remotes/origin/HEAD` while `git remote add` never sets
+  `upstream/HEAD`, so a single pass always answers from `origin` and
+  `upstream`'s default is never considered. Reading the symref tier as a
+  literal `refs/remotes/origin/HEAD` in every pass makes the loop inert the
+  same way.
+- **The descendant rule.** Three dots only protects you from a base that is
+  ahead of the branch point, not one behind it: a branch cut from
+  `upstream/main` while the fork's own default sits three commits back
+  reviews those three upstream commits as if the author wrote them.
+- **Never `@{upstream}`.** After `git push -u` a branch's tracking ref is
+  `origin/<this branch>` — its own tip, not its base — so
+  `@{upstream}...HEAD` is empty for every pushed commit.
+- **Never the empty tree.** Diffing against it to manufacture a scope puts
+  every pre-existing file in the repo in scope, breaking the "stay inside the
+  reviewed diff's scope" constraint below.
+- **`core.quotePath=false`.** Without it a non-ASCII name is octal-escaped
+  into a quoted path that does not exist, so an untracked `café.py` is listed
+  as `"caf\303\251.py"` and would be skipped rather than reviewed. A name
+  holding a quote, tab, or newline is still C-quoted onto a single line; that
+  residue does not name an existing file, so report it as skipped rather than
+  guessing. Do not reach for `-z` to read this listing yourself — a NUL
+  arrives in your tool output as a space, indistinguishable from the space
+  inside `plain space.py`, so every boundary is lost. It is still the correct
+  form when a *shell loop* consumes it, which never puts the NUL into text.
+- **Symlinks.** The target string is what git itself stores for a symlink,
+  and dereferencing one pulls whatever it points at — possibly a file outside
+  the repository — into the review, its subagent prompts, and any
+  `--comment` output.
+
+### Worked scenarios
+
+| scenario | rule | base | diff |
+|---|---|---|---|
+| normal clone, PR into `main` | 1a, remote matches | `origin` + `main` | `git fetch origin main` → `<oid>...HEAD` |
+| PR into `release/1.x`, matching remote | 1a | `origin` + `release/1.x` | `git fetch origin release/1.x` → `<oid>...HEAD` |
+| fork checkout, only the fork's `origin`, PR into `release/1.x` | 1a, URL branch | clone URL + `release/1.x` | `git fetch <url> release/1.x` → `<oid>...HEAD` |
+| fork with `origin` + `upstream`, no PR | 1b: origin via (1), upstream via (2) | two candidates | descendant merge base wins → `<oid>...HEAD` |
+| `--single-branch` clone, no PR, `origin/main` absent | 1b(2), candidate kept | `origin` + `main`, `local_ref: —` | `git fetch origin main` → `<oid>...HEAD` |
+| no remotes at all | 1c | local `main` | `main...HEAD` |
+| `--depth 1`, HEAD has no parent | 1d | none | deepen, retry, else report no scope |
 
 ## Phase 2 — Run the review at the resolved level
 
