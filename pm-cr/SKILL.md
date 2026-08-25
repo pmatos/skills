@@ -55,9 +55,16 @@ not just its newest commit. Only if no base resolves at all, fall back to
 `git diff HEAD~1` and state in the report that the scope was narrowed to the
 last commit. If there are uncommitted changes, or the range diff is empty,
 also run `git diff HEAD` and include the working-tree changes in scope — the
-review often runs before the commit. If a PR number, branch name, or file
-path was parsed as the target in Phase 0, review that target instead. Treat
-this diff as the review scope.
+review often runs before the commit. `git diff` never reports untracked
+files, so always also run `git ls-files --others --exclude-standard` (it
+honors `.gitignore`) and treat every path it lists as a new file in scope,
+reviewing its full contents as an all-additions hunk; skip binaries. This
+enumeration is unconditional — an untracked file is invisible to every
+`git diff` form above even when the range diff is non-empty. If a PR number,
+branch name, or file path was parsed as the target in Phase 0, review that
+target instead. Treat this diff as the review scope. If the scope is
+genuinely empty after all of this, say so explicitly rather than reporting a
+clean review.
 
 ## Phase 2 — Run the review at the resolved level
 
