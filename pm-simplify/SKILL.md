@@ -18,7 +18,9 @@ $ARGUMENTS
 
 ## Phase 0 — Gather the diff
 
-Resolve the base to diff against, in this order:
+Resolve the base to diff against, in this order — but if the argument
+below is a PR number, resolve that PR first and let its `url` and
+`baseRefName` stand in for rule 1's ambient lookup:
 
 1. If the current branch has an open PR, use its base: `gh pr view --json
    url,baseRefName`. `baseRefName` is only a branch name, so take the base
@@ -79,11 +81,15 @@ If a PR number, branch name, or file path was passed as the argument
 above, review that target instead. A PR number or branch name must name
 the current checkout. For a branch name, compare it against `git rev-parse
 --abbrev-ref HEAD`; for a PR number, read `gh pr view <n> --json
-headRefName,headRefOid,isCrossRepository` and compare its `headRefName`
-against that same value. Stop if they differ — `gh pr view` only displays
-a PR, it does not switch checkouts, so Phase 2 would otherwise apply fixes
-to whatever branch is actually checked out. A branch name identifies no
-repository, so when `isCrossRepository` is true additionally require `git
+url,baseRefName,headRefName,headRefOid,isCrossRepository` and compare its
+`headRefName` against that same value. Stop if they differ — `gh pr view`
+only displays a PR, it does not switch checkouts, so Phase 2 would
+otherwise apply fixes to whatever branch is actually checked out. That
+same command supplies the `url` and `baseRefName` rule 1 needs: a branch
+can carry open PRs into two different bases, and diffing against the wrong
+one both drops changes belonging to the requested PR and pulls in changes
+outside it. A branch name identifies no repository, so when
+`isCrossRepository` is true additionally require `git
 merge-base --is-ancestor <headRefOid> HEAD` to exit zero; otherwise a
 fork's same-named branch passes the name check while its code is nowhere
 in this worktree. Any non-zero exit stops, including the exit-128 `fatal:
