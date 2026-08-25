@@ -35,6 +35,21 @@ failure`. Output `(none)` if nothing qualifies.
 
 ## `--fix`
 
+`--fix` writes to the current working tree, so it is only valid when the
+reviewed scope *is* that tree: no target, a path target, or a branch/PR
+target whose head is what's checked out. With a PR or branch target,
+confirm that before applying anything — compare `gh pr view <n> --json
+headRefOid -q .headRefOid` (or `git rev-parse <branch>`) against `git
+rev-parse HEAD`. Compare the commit, not the branch name: a local branch
+of the right name that is stale or behind the PR head still has files on
+disk that the reviewed diff's line numbers don't match. If the two differ,
+report the findings, apply nothing, and say in one line that `--fix` was
+skipped because PR #<n> / `<branch>` isn't checked out, and that `gh pr
+checkout <n>` (or `git switch <branch>`) then a rerun with `--fix` will
+apply them. Never write fixes for one branch's diff into another branch. A
+dirty tree is *not* a blocker — reviewing uncommitted changes is a
+supported mode (Phase 1).
+
 Apply the findings to the working tree instead of stopping at the report:
 fix each one directly — correctness bugs and cleanup/altitude/conventions
 findings alike. Skip any finding whose fix would change intended behavior,
