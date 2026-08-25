@@ -73,13 +73,22 @@ lines. Do not stage anything to make a file show up in the diff (no `git
 add`, no `git add -N`) — leave the index exactly as you found it. If a PR
 number, branch name, or file path was passed as the argument above, review
 that target instead. A PR number or branch name must name the current
-checkout: compare `gh pr view <n> --json headRefName -q .headRefName` (or
-the branch name itself) against `git rev-parse --abbrev-ref HEAD`, and
-stop if they differ — `gh pr view` only displays a PR, it does not switch
-checkouts, so Phase 2 would otherwise apply fixes to whatever branch is
-actually checked out. Ask for the target to be checked out first. Treat
-the combined result as the review scope; if it comes out empty, say the
-scope was empty rather than reporting the code clean.
+checkout. For a branch name, compare it against `git rev-parse
+--abbrev-ref HEAD`; for a PR number, read `gh pr view <n> --json
+headRefName,headRefOid,isCrossRepository` and compare its `headRefName`
+against that same value. Stop if they differ — `gh pr view` only displays
+a PR, it does not switch checkouts, so Phase 2 would otherwise apply fixes
+to whatever branch is actually checked out. A branch name identifies no
+repository, so when `isCrossRepository` is true additionally require `git
+merge-base --is-ancestor <headRefOid> HEAD` to exit zero; otherwise a
+fork's same-named branch passes the name check while its code is nowhere
+in this worktree. Any non-zero exit stops, including the exit-128 `fatal:
+Not a valid commit name` an unfetched fork commit gives. Ancestry rather
+than equality, and only for cross-repository PRs: this skill usually runs
+before the commit, so a same-repo branch is routinely ahead of — or
+rebased off — the PR head. Ask for the target to be checked out first.
+Treat the combined result as the review scope; if it comes out empty, say
+the scope was empty rather than reporting the code clean.
 
 ## Phase 1 — Review (four angles)
 
