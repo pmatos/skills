@@ -399,9 +399,11 @@ second one:
 1. Probe once: `gh pr checks --help 2>&1 | grep -q -- '--watch'`, and `command -v timeout` falling
    back to `command -v gtimeout` (the name Homebrew's coreutils installs on macOS). Both must
    succeed to use the blocking watch; record the binary as `TIMEOUT_BIN`.
-2. Initialize `CI_BUDGET_REMAINING = CI_BUDGET` once, here. Each wait is
+2. Initialize `CI_BUDGET_REMAINING = CI_BUDGET * 60` once, here — **seconds**, since every
+   consumer below is in seconds. `CI_BUDGET` itself is configured in *minutes* (see Configuration),
+   so using it unconverted would expire the 15-minute default after about 15 seconds. Each wait is
    `TIMEOUT_BIN <chunk>s gh pr checks "$PR_NUMBER" -R "$PR_REPO" --watch --interval <POLL_INTERVAL>`
-   where `<chunk>` is `min(CI_BUDGET_REMAINING in seconds, 300)`. Classify **every** exit status —
+   where `<chunk>` is `min(CI_BUDGET_REMAINING, 300)`. Classify **every** exit status —
    `timeout` passes the child's status through unchanged, and here the status *is* the signal:
 
    | Exit | Meaning | Action |
