@@ -120,9 +120,17 @@ manufacture one — that puts every pre-existing file in the repo in scope,
 which breaks the "stay inside the reviewed diff's scope" constraint below. If there are uncommitted changes, or the range diff is empty,
 also run `git diff HEAD` and include the working-tree changes in scope — the
 review often runs before the commit. `git diff` never reports untracked
-files, so always also run `git ls-files --others --exclude-standard` (it
-honors `.gitignore`) and treat every path it lists as a new file in scope,
-reviewing its full contents as an all-additions hunk; skip binaries. This
+files, so always also run `git -c core.quotePath=false ls-files --others
+--exclude-standard` (it honors `.gitignore`) and treat every path it lists
+as a new file in scope, reviewing its full contents as an all-additions
+hunk; skip binaries. The `core.quotePath=false` matters: without it a
+non-ASCII name is octal-escaped into a quoted path that does not exist, so
+an untracked `café.py` is listed as `"caf\303\251.py"` and would be
+skipped rather than reviewed. A name holding a quote, tab, or newline is
+still C-quoted onto a single line; that residue does not name an existing
+file, so report it as skipped rather than guessing at the real name. Do not
+reach for `-z` here — NUL separators do not survive into this listing as
+text, so every path boundary is lost. This
 enumeration is unconditional — an untracked file is invisible to every
 `git diff` form above even when the range diff is non-empty. If a PR number,
 branch name, or file path was parsed as the target in Phase 0, review that
