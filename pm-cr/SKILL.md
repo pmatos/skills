@@ -60,10 +60,15 @@ checkout, and fall through if that remote-tracking ref isn't present
 locally (the symref is absent after a `git remote add` without `git remote
 set-head`; in a fork checkout, query the `upstream` remote's repo); else
 whichever of `main` or `master` exists as a local head (bare here by
-design — this tier tested for the local branch); else `@{upstream}` if the
-branch has one. Then run `git diff <base>...HEAD`
-— three dots, so the whole branch back to the merge base is under review,
-not just its newest commit.
+design — this tier tested for the local branch). Then run
+`git diff <base>...HEAD` — three dots, so the whole branch back to the
+merge base is under review, not just its newest commit. Never fall back to
+`@{upstream}`: after `git push -u` a branch's tracking ref is
+`origin/<this branch>` — its own tip, not its base — so `@{upstream}...HEAD`
+is empty for every pushed commit. When no tier resolves (a `git clone
+--single-branch` checkout has no `origin/HEAD`, no `origin/<default>`, and
+no local `main`), take the disclosed `HEAD~1` last resort below rather than
+a tracking ref that reviews nothing.
 
 What you actually want is the branch point. Where more than one candidate
 base resolves — in a fork checkout `origin`'s and `upstream`'s default
