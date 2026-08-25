@@ -102,11 +102,24 @@ skill installs on its own, so they share no library with any other skill in the 
 
 1. `BRANCH=$(git rev-parse --abbrev-ref HEAD)`. A detached HEAD stops the run.
 2. Parse `git remote get-url origin` into `ORIGIN_OWNER` / `ORIGIN_REPO` (strip `git@github.com:`,
-   `https://github.com/`, and a trailing `.git`) and set `PR_REPO = <ORIGIN_OWNER>/<ORIGIN_REPO>`.
-3. If a PR number was given, read it with
-   `gh pr view <n> -R "$PR_REPO" --json number,headRefName,baseRefName,mergeable,headRepository,headRepositoryOwner,url,title`.
-   Otherwise look it up, stopping at the first tier that yields exactly one match:
-   - **Origin.** `gh pr list -R "$PR_REPO" --head "$BRANCH" --state open --json number,headRefName,headRepository,headRepositoryOwner,baseRefName,url`,
+   `https://github.com/`, and a trailing `.git`). If an `upstream` remote exists, parse it the same
+   way into `UPSTREAM_OWNER` / `UPSTREAM_REPO`.
+3. **If a PR number was given**, resolve which repository it belongs to before reading it. A PR
+   number is scoped to the repository the PR was opened against — the **base** repository, which in
+   a fork checkout is `upstream`, not `origin`. Try candidates in order, taking the first that
+   returns the PR, and set `PR_REPO` to whichever answered: `<UPSTREAM_OWNER>/<UPSTREAM_REPO>` (if an
+   `upstream` remote exists), then `<ORIGIN_OWNER>/<ORIGIN_REPO>`. Querying the fork first is not
+   merely a miss: if the fork carries its own PR of that number, `gh` returns that unrelated PR and
+   every later step binds to *its* `HEAD_REF` / `BASE_REF`. The argument may also be given as
+   `owner/repo#N` or a full PR URL, which names the repository outright and skips the candidate
+   order — prefer it when in doubt. Read the PR with
+   `gh pr view <n> -R "$PR_REPO" --json number,headRefName,baseRefName,mergeable,headRepository,headRepositoryOwner,url,title`,
+   then validate that `headRepository.nameWithOwner` matches a local remote (item 5); if it matches
+   none, stop rather than pushing somewhere unverified.
+
+   **Otherwise** look it up, stopping at the first tier that yields exactly one match:
+   - **Origin.** Set `PR_REPO = <ORIGIN_OWNER>/<ORIGIN_REPO>`, then
+     `gh pr list -R "$PR_REPO" --head "$BRANCH" --state open --json number,headRefName,headRepository,headRepositoryOwner,baseRefName,url`,
      then **keep only PRs whose `headRepository.nameWithOwner` equals `PR_REPO`** (compose it from
      `headRepositoryOwner.login` + `headRepository.name` if your `gh` predates `nameWithOwner`). That
      filter is load-bearing, not belt-and-braces: `--head` matches on branch name alone (`gh` rejects
@@ -115,11 +128,10 @@ skill installs on its own, so they share no library with any other skill in the 
      shares a name with yours. Rebasing and force-pushing someone else's PR is not a recoverable
      mistake. Match the full `owner/repo` pair, not the owner alone: one account can own several
      repositories with the same branch name, and the owner-only test cannot tell them apart.
-   - **Upstream (fork checkout).** If the filtered origin lookup found nothing and
-     `git remote get-url upstream` exists, parse it the same way, set `PR_REPO` to it, and repeat the
-     query — but now filter `headRepository.nameWithOwner` against the **origin** pair
-     (`ORIGIN_OWNER/ORIGIN_REPO`), since the head branch lives in your fork, not in the base
-     repository that `PR_REPO` now names.
+   - **Upstream (fork checkout).** If the filtered origin lookup found nothing and an `upstream`
+     remote exists, set `PR_REPO = <UPSTREAM_OWNER>/<UPSTREAM_REPO>` and repeat the query — but now
+     filter `headRepository.nameWithOwner` against the **origin** pair (`ORIGIN_OWNER/ORIGIN_REPO`),
+     since the head branch lives in your fork, not in the base repository `PR_REPO` now names.
 
    Zero matches after filtering, or more than one, → stop and say so; never guess.
 4. Capture `PR_NUMBER`, `HEAD_REF` (`headRefName`), and **`BASE_REF` (`baseRefName`) — the base branch
