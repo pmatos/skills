@@ -119,6 +119,28 @@ Trigger phrases: `autofix pr`, `fix pr locally`, `fix ci failures`, `fix review 
 
 **Requires**: [GitHub CLI](https://cli.github.com/) (`gh`), authenticated. A GitHub MCP server is optional — used opportunistically for thread resolution and comment posting if already connected, never required.
 
+### `/rebase-pr` — Rebase a PR Safely
+
+```bash
+npx skills@latest add pmatos/skills/rebase-pr
+```
+
+Rebases a PR branch onto its base branch, resolves every conflict by hand, re-runs the project's quality gate, and force-pushes without clobbering a concurrent writer. `gh` CLI only — no GitHub MCP dependency.
+
+What it does:
+- Resolves the PR from the current branch (or accepts a PR number) and reads its real base branch — no hardcoded `main`.
+- Captures the `--force-with-lease` anchor **before** the rebase, so a colleague who pushes mid-rebase is protected rather than overwritten; refreshing the anchor at push time is what silently clobbers them.
+- Stands down, with their commits listed, if the branch already moved before the rebase started.
+- Resolves conflicts file by file — never a bulk `git checkout ORIG_HEAD -- .` — and verifies zero unmerged paths, zero unstaged changes, and zero leftover conflict markers before each `git rebase --continue`.
+- Detects the quality gate from `CLAUDE.md`/`AGENTS.md` or the manifests (npm/pnpm/yarn, uv/hatch, cargo, go, make, pre-commit) and runs each step separately, never `&&`-chained.
+- Classifies each red step as REGRESSION (fix it) or PRE-EXISTING (verified once against the base branch, with evidence) instead of re-chasing known failures every session.
+- Force-pushes through a lease armed with the pre-rebase anchor, then comments on the PR with what was resolved, what was skipped, and the gate results.
+- Optionally waits for post-push CI under a single wall-clock budget, exiting with a resume-pointer comment rather than polling indefinitely (`--watch-ci`).
+
+Trigger phrases: `rebase pr`, `rebase onto main`, `rebase this branch`, `rebase and force push`, `resolve rebase conflicts`, `my PR has conflicts`.
+
+**Requires**: [GitHub CLI](https://cli.github.com/) (`gh`), authenticated.
+
 ### `/pm-plan` — Deep Implementation Planning (dual-harness)
 
 ```bash
