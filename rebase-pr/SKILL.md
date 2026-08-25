@@ -181,9 +181,25 @@ Record `EXPECTED_REMOTE_SHA` and `ORIGINAL_HEAD=$(git rev-parse HEAD)`. Then fet
 
 ### Step 3: Discover the quality gate
 
-Read the project's own instructions first — `CLAUDE.md` / `AGENTS.md`, walking from the working
-directory to the repo root, closest file winning on conflict. Use exactly the commands they state.
-Only if they state none, infer from the manifests:
+Read the project's own instructions first — `CLAUDE.md` / `AGENTS.md`. Collect them from **two**
+directions, because either alone misses real rules:
+
+- **Baseline:** walk from the working directory up to the repo root.
+- **Scoped:** list the paths this PR actually changes,
+  `git diff --name-only "$BASE_SHA"...HEAD`, and for each one walk *its* directory up to the repo
+  root, collecting every `CLAUDE.md` / `AGENTS.md` on the way. Deduplicate (symlink-aware —
+  `AGENTS.md` is frequently a symlink to `CLAUDE.md`).
+
+The upward-only baseline is what misses a monorepo: run from the repo root, it never descends into
+`packages/foo/AGENTS.md`, so a PR touching only that package would be gated by root-level checks
+while the package's own mandated checks never run — and then force-pushed. The changed-path walk is
+what finds them.
+
+Merge with **closest-wins** precedence: the repo-root file is the baseline, a nearer file overrides
+it on conflict and may add checks the baseline omits. When a scoped file changes or adds a command,
+surface a one-line divergence note — which file, which command — so the gate stays auditable rather
+than silently flattened. Use exactly the commands these files state. Only if they state none, infer
+from the manifests:
 
 | Manifest | Gate commands (run in this order, separately) |
 |----------|-----------------------------------------------|

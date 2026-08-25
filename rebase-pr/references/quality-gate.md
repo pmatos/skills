@@ -4,9 +4,14 @@
 
 The gate commands are a property of the repository, not of this skill. Resolution order:
 
-1. **The project's own instructions.** `CLAUDE.md` / `AGENTS.md`, walking from the working directory
-   up to the repo root, with the closest file winning on conflict. If they name a canonical command
-   sequence, that sequence *is* the gate — do not add inferred steps around it.
+1. **The project's own instructions.** `CLAUDE.md` / `AGENTS.md`, with the closest file winning on
+   conflict. Gather them from the working directory upward **and** from each changed path upward —
+   `git diff --name-only "$BASE_SHA"...HEAD` gives the paths. The upward-only walk is sufficient in a
+   single-package repo and actively wrong in a monorepo: invoked at the root, it never sees
+   `packages/foo/AGENTS.md`, so a PR confined to that package gets gated by root-level checks alone
+   while the package's own mandated checks are skipped — and the branch is force-pushed on that
+   basis. If they name a canonical command sequence, that sequence *is* the gate — do not add
+   inferred steps around it.
 2. **Manifests**, only when the instructions state nothing. See the table in `SKILL.md`.
 
 Hardcoding `npm run lint && npm test` breaks on every non-JavaScript repository, and breaks on
