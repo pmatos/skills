@@ -46,9 +46,14 @@ subagent prompts. Otherwise read the file in full and treat it as added
 lines. Do not stage anything to make a file show up in the diff (no `git
 add`, no `git add -N`) — leave the index exactly as you found it. If a PR
 number, branch name, or file path was passed as the argument above, review
-that target instead. Treat the combined result as the review scope; if it
-comes out empty, say the scope was empty rather than reporting the code
-clean.
+that target instead. A PR number or branch name must name the current
+checkout: compare `gh pr view <n> --json headRefName -q .headRefName` (or
+the branch name itself) against `git rev-parse --abbrev-ref HEAD`, and
+stop if they differ — `gh pr view` only displays a PR, it does not switch
+checkouts, so Phase 2 would otherwise apply fixes to whatever branch is
+actually checked out. Ask for the target to be checked out first. Treat
+the combined result as the review scope; if it comes out empty, say the
+scope was empty rather than reporting the code clean.
 
 ## Phase 1 — Review (four angles)
 
