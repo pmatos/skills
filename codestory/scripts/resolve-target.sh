@@ -408,7 +408,7 @@ case "$kind" in
       else
         missing+=("$path")
       fi
-    done < <(git ls-files -z --cached --others --exclude-standard -- "$path_arg")
+    done < <(git ls-files -z --cached --others --exclude-standard -- ":(literal)$path_arg")
     if [ "${#candidates[@]}" -eq 0 ]; then
       warnings+=("'$ref' contains no narratable files (all ignored, or an empty directory)")
     fi
@@ -462,6 +462,26 @@ exclusion_reason() {
   # separate repository and are deliberately not traversed.
   if is_gitlink "$ref" "$path"; then
     printf 'submodule'
+    return
+  fi
+
+  # `git ls-files --others` collapses an untracked embedded repository into one
+  # directory entry with a trailing slash, because git will not descend into
+  # another repository's checkout. That reached `files` as a zero-line entry
+  # and pointed every downstream agent at a directory. It is not a submodule —
+  # nothing here records it — so it gets its own reason rather than borrowing
+  # a submodule's provenance. A real pathname cannot end in `/`.
+  case "$path" in
+    */)
+      printf 'embedded-repo'
+      return
+      ;;
+  esac
+
+  # Backstop for the same invariant: whatever the cause, a candidate with no
+  # file content cannot be narrated and must not be listed as though it could.
+  if [ -z "$ref" ] && [ ! -f "$path" ] && [ ! -L "$path" ]; then
+    printf 'non-file'
     return
   fi
 
@@ -585,6 +605,45 @@ json_escape() {
   printf '%s' "$s"
 }
 
+# Churn for every changed path, from a single pass over the whole diff.
+# Asking `--numstat` for one destination path reports a rename as a wholly new
+# file — `git mv` on a 20k-line file came back as 20k lines of story and a tier
+# promotion — because the rename pair is only visible when both halves are in
+# the same diff. -z because these paths come *out* of git rather than going in,
+# and the newline form C-quotes anything non-ASCII.
+#   ordinary:  added \t removed \t path            NUL
+#   rename:    added \t removed \t <empty>         NUL  old NUL  new NUL
+# Only the first two tabs separate fields; a pathname may itself contain tabs.
+declare -A churn=()
+if [ "$shape" = "change" ] && [ -n "$base_sha" ]; then
+  ns_state=0
+  ns_add=0
+  ns_del=0
+  while IFS= read -r -d '' ns_rec; do
+    case "$ns_state" in
+      0)
+        ns_add="${ns_rec%%$'\t'*}"
+        ns_rest="${ns_rec#*$'\t'}"
+        ns_del="${ns_rest%%$'\t'*}"
+        ns_path="${ns_rest#*$'\t'}"
+        # A binary file's counts are `-`; it contributes no lines.
+        [ "$ns_add" != - ] || ns_add=0
+        [ "$ns_del" != - ] || ns_del=0
+        if [ -z "$ns_path" ]; then
+          ns_state=1
+        else
+          churn["$ns_path"]=$((ns_add + ns_del))
+        fi
+        ;;
+      1) ns_state=2 ;;
+      2)
+        churn["$ns_rec"]=$((ns_add + ns_del))
+        ns_state=0
+        ;;
+    esac
+  done < <(git diff --numstat -z "$base_sha" ${diff_head:+"$diff_head"} 2>/dev/null)
+fi
+
 files_json=""
 excluded_json=""
 total_loc=0
@@ -610,9 +669,9 @@ for path in ${candidates[@]+"${candidates[@]}"}; do
   if [ "$shape" = "change" ] && [ -n "$base_sha" ]; then
     # For a change, the narratable size is the churn, not the file's length —
     # a one-line edit to a 40k-line file is a small story, not a large one.
-    loc="$(git diff --numstat "$base_sha" ${diff_head:+"$diff_head"} -- "$path" 2>/dev/null |
-      awk '{ added += $1; removed += $2 } END { print added + removed + 0 }')" || loc=0
-    [ -n "$loc" ] || loc=0
+    # A pure rename is therefore 0, like a mode-only change: the file is still
+    # listed, which is what makes it visible, but it added no lines to read.
+    loc="${churn["$path"]:-0}"
     # Untracked files have no diff; count them in full. Gated on the untracked
     # set rather than on `loc == 0`, because zero churn is also the honest
     # answer for a mode-only change or a pure rename — and counting one of
