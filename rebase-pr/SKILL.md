@@ -105,97 +105,103 @@ skill installs on its own, so they share no library with any other skill in the 
    `TRACKED=$(git rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null)` → strip the
    leading `<remote>/`. The two differ whenever the local branch was renamed (`review-42` tracking
    `origin/feature`), a configuration Step 2 explicitly supports.
-2. Parse `git remote get-url origin` into `ORIGIN_OWNER` / `ORIGIN_REPO` (strip `git@github.com:`,
-   `https://github.com/`, and a trailing `.git`). If an `upstream` remote exists, parse it the same
-   way into `UPSTREAM_OWNER` / `UPSTREAM_REPO`.
+2. Enumerate the **configured remotes** — `git remote` for the names, then
+   `git remote get-url --all <r>` for each — and reduce their URLs to `owner/repo` pairs (strip
+   `git@github.com:`, `https://github.com/`, and a trailing `.git`). Deduplicate the pairs
+   case-insensitively; GitHub owner and repository names are not case-sensitive. Call that set
+   `REPO_CANDIDATES`, and record which remote each pair came from.
+
+   **Do not require a remote named `origin` or `upstream`.** Git permits any remote name, and item 5
+   below already resolves the push and base remotes by URL match rather than by name. A perfectly
+   ordinary layout — the base repository as `origin`, the fork as `fork` or `<username>`, no
+   `upstream` at all — would otherwise dead-end: the origin query's head-repository filter discards
+   the cross-repository PR, and a bullet keyed on the literal name `upstream` never fires, so a
+   checkout whose only irregularity is its remote *names* gets zero matches and a hard stop.
+
+   Order `REPO_CANDIDATES` **base-repository-first**, since that is where PRs live: a remote named
+   `upstream` first if present, then `origin`, then the remote `TRACKED` tracks, then the rest in
+   `git remote` order. The names only prioritize; none is required.
 3. **If a PR number was given**, resolve which repository it belongs to before reading it. A PR
    number is scoped to the repository the PR was opened against — the **base** repository, which in
-   a fork checkout is `upstream`, not `origin`. Try candidates in order, taking the first that
-   returns the PR, and set `PR_REPO` to whichever answered: `<UPSTREAM_OWNER>/<UPSTREAM_REPO>` (if an
-   `upstream` remote exists), then `<ORIGIN_OWNER>/<ORIGIN_REPO>`. Querying the fork first is not
-   merely a miss: if the fork carries its own PR of that number, `gh` returns that unrelated PR and
-   every later step binds to *its* `HEAD_REF` / `BASE_REF`. The argument may also be given as
-   `owner/repo#N` or a full PR URL, which names the repository outright and skips the candidate
-   order — prefer it when in doubt. Read the PR with
+   a fork checkout is not the fork. Try each pair in `REPO_CANDIDATES` order, take the first that
+   returns the PR, and set `PR_REPO` to it. Ordering matters, not just coverage: if the fork carries
+   its own PR of that number, querying it first returns that unrelated PR and every later step binds
+   to *its* `HEAD_REF` / `BASE_REF`. The argument may also be given as `owner/repo#N` or a full PR
+   URL, which names the repository outright and skips the candidate order — prefer it when in doubt.
+   Read the PR with
    `gh pr view <n> -R "$PR_REPO" --json number,headRefName,baseRefName,mergeable,headRepository,headRepositoryOwner,url,title`,
-   then validate that `headRepository.nameWithOwner` matches a local remote (item 5); if it matches
-   none, stop rather than pushing somewhere unverified.
+   then validate that `headRepository.nameWithOwner` is in `REPO_CANDIDATES` (item 5 resolves it to a
+   specific remote); if it matches none, stop rather than pushing somewhere unverified.
 
-   **Otherwise** look it up. Query **both** candidate repositories and require exactly one match
-   across their combined results — do **not** stop at the first that answers. A fork branch can carry
-   a PR against the fork *and* a PR against upstream at the same time; `-R` scopes each query to one
-   repository, so an origin-first-and-stop order silently selects the fork-local PR, takes `BASE_REF`
-   from it, and then Step 7 force-pushes the shared head branch — rewriting the upstream PR onto the
-   wrong base, with the lease raising no objection because the head branch never moved. Combining
-   costs nothing when the two candidates are distinct repositories — a PR appears only in its own
-   base repository's list — and the ordinary upstream-only fork still yields exactly one match. Two
-   matches from *distinct* base repositories means genuine
-   ambiguity — stop and say so, as below.
+   **Otherwise** look it up. Query **every** pair in `REPO_CANDIDATES` and require exactly one match
+   across the combined results — do **not** stop at the first that answers. A fork branch can carry a
+   PR against the fork *and* a PR against upstream at the same time; `-R` scopes each query to one
+   repository, so a first-answer-wins order can silently select the fork-local PR, take `BASE_REF`
+   from it, and then let Step 7 force-push the shared head branch — rewriting the upstream PR onto
+   the wrong base, with the lease raising no objection because the head branch never moved.
 
-   **Deduplicate the candidates before querying.** `origin` and `upstream` frequently name the *same*
-   repository — a maintainer who cloned the base repo directly and also added an `upstream` alias for
-   it. Both queries would then return the identical PR, the combined count would be two, and
-   discovery would stop as falsely ambiguous on the most ordinary setup there is. Compare the two
-   `owner/repo` pairs (case-insensitively — GitHub owner and repository names are not
-   case-sensitive) and query the second only if it differs. As a belt-and-braces measure, deduplicate
-   the combined matches by `(base repository, PR number)` before applying the exactly-one rule — that
-   same dedupe also absorbs the case where `$BRANCH` and `$TRACKED` both match the one real PR.
-   **Query both branch names, too.** `gh pr list --head` filters on the PR's *head branch* and does
-   not translate a local alias, so a renamed checkout searched by `$BRANCH` alone finds nothing and
-   the run stops — even though the skill supports that configuration. Query `$BRANCH` **and**
-   `$TRACKED` when they differ, and let the same dedupe and exactly-one rule adjudicate. Union rather
-   than replace: `git checkout -b foo origin/main` leaves `@{u}` pointing at `main`, and querying
-   `--head main` *instead of* `foo` could match a stranger's PR against the default branch. The
-   `headRepository.nameWithOwner` filter below still applies to every result.
-   - **Origin.** Set `PR_REPO = <ORIGIN_OWNER>/<ORIGIN_REPO>`, then
-     `gh pr list -R "$PR_REPO" --head <name> --state open --json number,headRefName,headRepository,headRepositoryOwner,baseRefName,url`
-     for each of `$BRANCH` / `$TRACKED`,
-     then **keep only PRs whose `headRepository.nameWithOwner` equals `PR_REPO`** (compose it from
-     `headRepositoryOwner.login` + `headRepository.name` if your `gh` predates `nameWithOwner`). That
-     filter is load-bearing, not belt-and-braces: `--head` matches on branch name alone (`gh` rejects
-     the `owner:branch` qualifier), and a base repository's PR list includes every cross-repository PR
-     opened from a fork — so an unfiltered lookup can return a stranger's PR whose head branch merely
-     shares a name with yours. Rebasing and force-pushing someone else's PR is not a recoverable
-     mistake. Match the full `owner/repo` pair, not the owner alone: one account can own several
-     repositories with the same branch name, and the owner-only test cannot tell them apart.
-   - **Upstream (fork checkout).** If an `upstream` remote exists **and names a different repository
-     than `origin`**, run this query too — regardless of whether the origin lookup matched. Set `PR_REPO = <UPSTREAM_OWNER>/<UPSTREAM_REPO>` and repeat
-     the query — but now filter `headRepository.nameWithOwner` against the **origin** pair
-     (`ORIGIN_OWNER/ORIGIN_REPO`), since the head branch lives in your fork, not in the base
-     repository `PR_REPO` now names.
+   For each candidate pair, run
+   `gh pr list -R <pair> --head <name> --state open --json number,headRefName,headRepository,headRepositoryOwner,baseRefName,url`
+   once per branch name (below), then **keep only PRs whose `headRepository.nameWithOwner` is itself
+   in `REPO_CANDIDATES`** — i.e. the head lives in a repository this checkout actually has a remote
+   for. That filter is load-bearing, not belt-and-braces: `--head` matches on branch name alone (`gh`
+   rejects the `owner:branch` qualifier), and a base repository's PR list includes every
+   cross-repository PR opened from a fork — so an unfiltered lookup can return a stranger's PR whose
+   head branch merely shares a name with yours. Rebasing and force-pushing someone else's PR is not a
+   recoverable mistake. Match the full `owner/repo` pair, never the owner alone: one account can own
+   several repositories carrying the same branch name.
 
-   Zero matches across both queries, or more than one, → stop and say so; never guess. On exactly one
-   match, set `PR_REPO` to the repository whose query produced it.
+   **Query both branch names.** `gh pr list --head` filters on the PR's *head branch* and does not
+   translate a local alias, so a renamed checkout searched by `$BRANCH` alone finds nothing and the
+   run stops — even though the skill supports that configuration. Query `$BRANCH` **and** `$TRACKED`
+   when they differ. Union rather than replace: `git checkout -b foo origin/main` leaves `@{u}`
+   pointing at `main`, and querying `--head main` *instead of* `foo` could match a stranger's PR
+   against the default branch.
+
+   **Deduplicate the combined matches** by `(base repository, PR number)` before applying the
+   exactly-one rule. Two remotes frequently name the same repository — a maintainer who cloned the
+   base directly and also added an `upstream` alias for it — and `$BRANCH` / `$TRACKED` can both match
+   the one real PR; the candidate-set dedupe in item 2 handles the former, this handles the rest.
+   Without it, discovery would stop as falsely ambiguous on entirely ordinary setups.
+
+   Zero matches after filtering, or more than one from *distinct* base repositories, → stop and say
+   so; never guess. On exactly one match, set `PR_REPO` to the repository whose query produced it.
 4. Capture `PR_NUMBER`, `HEAD_REF` (`headRefName`), and **`BASE_REF` (`baseRefName`) — the base branch
    is whatever the PR says it is, not a hardcoded `main`.**
 5. Resolve the two remotes by matching `git remote -v` URLs (strip `git@github.com:`,
    `https://github.com/`, and a trailing `.git`):
    - `PUSH_REMOTE` — the remote **every** endpoint of which resolves to
-     `headRepository.nameWithOwner`, the **full owner/repo pair** of the head repository. Check both
-     sides, and enumerate each — `git remote get-url --all <r>` (fetch) and
-     `git remote get-url --push --all <r>` (push): a remote may have several `remote.<r>.url` or
-     `remote.<r>.pushurl` entries, `git push` writes to **all** of the effective ones, and without
-     `--all` git prints only the first, so a single-URL check inspects one of N destinations while
-     claiming to have validated the remote. Require every listed URL to match, or reject the remote
-     outright. Getting this wrong is not a clean failure: `safe-force-push.sh` pushes by remote name,
-     so the intended repository is rewritten and the *second* destination rejects — Step 7 then
-     reports exit 5 "push rejected" over a rewrite that already published. `git remote -v` prints a `(fetch)` and a `(push)` row per remote, and with
-     `remote.<r>.pushurl` set they name *different* repositories; matching either row alone can
-     select a remote that pushes to the fork but fetches from upstream. The two endpoints are used by
-     different halves of the lease: the scripts fetch the branch through the fetch URL to capture and
-     compare the anchor, while the rewrite goes out through the push URL. A split remote is
-     fail-safe rather than destructive — a missing branch exits 2, a foreign same-named upstream
-     branch exits 3 or 4, and git's own `--force-with-lease=<branch>:<sha>` check rejects a
-     tag-or-stranger-derived anchor as stale info — but the diagnosis is misleading, so validate up
-     front. `BASE_REMOTE` below is fetch-only, so only its normal URL needs to resolve to the base
-     repository. This is where the force-push goes; for a fork PR it is
-     the fork, not the base repository. Matching on the owner alone is not enough: the same account
-     may have several remotes here, and if two of their repositories carry a branch of this name the
-     lease would be captured against — and the push aimed at — the wrong one, safely overwriting a
-     branch that has nothing to do with this PR. If no remote matches the pair, stop rather than
-     guessing; a lease is only as meaningful as the ref it is armed against.
-   - `BASE_REMOTE` — the remote holding the base repository. For a same-repo PR both are `origin`.
-     If no local remote points at the base repository, use its clone URL
+     `headRepository.nameWithOwner`, the full `owner/repo` pair of the head repository. This is where
+     the force-push goes; for a fork PR that is the fork, not the base repository. If no remote
+     matches the pair, stop rather than guessing — a lease is only as meaningful as the ref it is
+     armed against.
+
+     Check **both sides** and **enumerate each**: `git remote get-url --all <r>` for fetch,
+     `git remote get-url --push --all <r>` for push.
+
+     - *Both sides,* because `git remote -v`'s `(fetch)` and `(push)` rows name different
+       repositories once `remote.<r>.pushurl` is set, and matching either alone can select a remote
+       that pushes to the fork but fetches from upstream. The lease uses both halves — the scripts
+       fetch the branch through the fetch URL to capture and compare the anchor, while the rewrite
+       goes out through the push URL.
+     - *Enumerate,* because a remote may carry several `remote.<r>.url` or `remote.<r>.pushurl`
+       entries and `git push` writes to **all** the effective ones, while plain `get-url` prints only
+       the first — so a single-URL check inspects one of N destinations while claiming to have
+       validated the remote. Getting this wrong is not a clean failure: `safe-force-push.sh` pushes
+       by remote name, so the intended repository is rewritten and the *second* destination rejects,
+       and Step 7 then reports exit 5 "push rejected" over a rewrite that already published.
+     - Match the full `owner/repo` pair, never the owner alone: one account can own several
+       repositories carrying a branch of this name, and the owner-only test cannot tell them apart —
+       the lease would be captured against, and the push aimed at, the wrong one, safely overwriting
+       a branch that has nothing to do with this PR.
+
+     A split remote is otherwise fail-safe rather than destructive — a missing branch exits 2, a
+     foreign same-named branch exits 3 or 4, and git's own `--force-with-lease=<branch>:<sha>` check
+     rejects a stranger-derived anchor as stale info — but the diagnosis is misleading, so validate
+     up front.
+   - `BASE_REMOTE` — the remote holding the base repository, resolved the same way by URL. For a
+     same-repo PR it is the same remote as `PUSH_REMOTE`. It is fetch-only, so only its normal URLs
+     need to resolve to the base repository. If no local remote points there, use the clone URL
      `https://github.com/<base_owner>/<base_repo>.git`; `git fetch` accepts a URL in place of a name.
 6. The local branch **name** need not match `HEAD_REF` — a fork checkout often names it differently,
    and Step 7 targets `HEAD_REF` on `PUSH_REMOTE` explicitly. What must be established is that this
