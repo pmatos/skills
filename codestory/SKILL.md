@@ -154,6 +154,13 @@ narrator are the ones that have to be told.
 .stories/pr-99.md (codestory-output)`. Silent omission is the one thing that
 would make this skill dangerous for review.
 
+**A submodule is reported, never traversed.** A gitlink is a commit
+reference, not a file. It is excluded with the reason `submodule`, and the
+skipped line must say so — the reviewer needs to know a whole subtree sits
+outside the story: `Skipped 1 file — vendor/lib (submodule; contents not
+narrated)`. Do not narrate the checked-out submodule: it is a separate
+repository, and its checkout need not match the commit the gitlink records.
+
 **Deletions are not exclusions.** They have no current content to excerpt, but
 the change removes them and the reviewer must be told. Give a removal its own
 beat when something depended on it, and a stated line otherwise: `Removed:

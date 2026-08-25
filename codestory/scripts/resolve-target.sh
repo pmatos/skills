@@ -132,8 +132,15 @@ if [ -z "$default_branch" ]; then
 fi
 [ -n "$default_branch" ] || default_branch="main"
 
+# `.stories/` is this skill's own output, and once the first story is written
+# an unignored one made every later branch or PR story announce that the
+# checkout differs from the narrated SHA while all tracked source was pristine
+# — draining the meaning from a warning the skill calls mandatory. Filtered by
+# pathspec rather than by parsing porcelain lines, which git already gets right
+# for quoted names, renames and directory membership. `top` anchors it to the
+# repository root, so an unrelated nested `.stories` still counts as dirty.
 dirty=false
-if [ -n "$(git status --porcelain 2>/dev/null)" ]; then
+if [ -n "$(git status --porcelain -- . ':(top,exclude).stories' 2>/dev/null)" ]; then
   dirty=true
 fi
 
@@ -175,6 +182,19 @@ has_content() {
   else
     [ -L "$2" ] || [ -f "$2" ]
   fi
+}
+
+is_gitlink() {
+  # $1: revision, or empty for the working tree. $2: path. Mode 160000 is a
+  # gitlink. Asked of the tree or the index rather than `cat-file -t`, because
+  # the submodule's own commit object need not exist in this repository at all.
+  local mode
+  if [ -n "$1" ]; then
+    mode="$(git ls-tree "$1" -- "$2" 2>/dev/null | awk 'NR == 1 { print $1 }')" || mode=""
+  else
+    mode="$(git ls-files --stage -- "$2" 2>/dev/null | awk 'NR == 1 { print $1 }')" || mode=""
+  fi
+  [ "$mode" = 160000 ]
 }
 
 is_empty() {
@@ -354,20 +374,19 @@ case "$kind" in
   path)
     [ -n "$ref" ] || die "--kind path needs --ref <file-or-directory>"
     path_arg="$ref"
-    # Both probes go through `path_exists`, which accepts a symlink whose
-    # destination is gone. A bare `-e` follows the link and calls it absent, so
-    # `--kind path --ref <broken-link>` used to die here on a file that
-    # `--kind project` narrates happily — and a relative one would have skipped
-    # the rebase below before dying on the un-rebased name.
+    # A relative --ref is relative to where the user is standing, always — not
+    # only when something happens to be there. Rebasing conditionally meant
+    # that from a subdirectory, a name absent there but present at the
+    # repository root silently resolved to the root file after the `cd` above:
+    # the user asked for one file and got a different one, with no warning.
+    # `path_exists` rather than `-e` so a broken symlink is still a valid
+    # target, matching what `--kind project` narrates.
     case "$path_arg" in
       /*) ;;
-      *)
-        if path_exists "" "$invocation_cwd/$path_arg"; then
-          path_arg="$invocation_cwd/$path_arg"
-        fi
-        ;;
+      *) path_arg="$invocation_cwd/$path_arg" ;;
     esac
-    path_exists "" "$path_arg" || die "no such file or directory: $ref"
+    path_exists "" "$path_arg" ||
+      die "no such file or directory relative to $invocation_cwd: $ref"
     # `ref` feeds the story slug, so it must name the same target from any
     # directory — otherwise resume silently forks into a second story file.
     # The parent is canonicalised physically, so a symlinked directory on the
@@ -436,6 +455,16 @@ exclusion_reason() {
   local ref="$1" path="$2" name="${2##*/}" lower
   lower="$(printf '%s' "$name" | tr '[:upper:]' '[:lower:]')"
 
+  # A submodule is a commit reference, not a file: `has_content` already
+  # declines it, but it was still emitted as an ordinary narratable file with
+  # zero lines, sending agents to read a commit object and telling the reader
+  # nothing about the subtree the story does not cover. Its contents are a
+  # separate repository and are deliberately not traversed.
+  if is_gitlink "$ref" "$path"; then
+    printf 'submodule'
+    return
+  fi
+
   case "/$path/" in
     */.stories/*)
       printf 'codestory-output'
@@ -498,8 +527,15 @@ exclusion_reason() {
   # reader drain the stream: `grep -q` and `head` stop early, and the SIGPIPE
   # that sends git fails the pipeline under `set -o pipefail` even on a match.
   # `sed -n '1,5p'` prints five lines but keeps reading to the end.
+  # `grep -I .` asked whether any line holds a character, which a file of bare
+  # newlines does not — so a blank marker file was called binary. `^` matches
+  # every line including an empty one, and unterminated final lines too, while
+  # `-I` still rejects NUL-bearing input. Verified against git's own verdict on
+  # zero bytes, one newline, three newlines, text with no trailing newline,
+  # UTF-8, CRLF, NUL-first and NUL-after-text: identical on all but the
+  # zero-byte case, which `is_empty` above has already answered.
   if has_content "$ref" "$path" &&
-    ! read_blob "$ref" "$path" | LC_ALL=C grep -I . >/dev/null; then
+    ! read_blob "$ref" "$path" | LC_ALL=C grep -I '^' >/dev/null; then
     printf 'binary-or-asset'
     return
   fi

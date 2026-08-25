@@ -166,7 +166,19 @@ three choices:
   narration the user had asked to keep; content can also cycle A → B → A, so
   even the fingerprint repeats. The numeric suffix applies to SHA-named
   archives too — restarting twice at one commit collides the same way.
+
+  Then **delete `.stories/.<slug>/`** — the leads and any structural map. Do
+  not archive it: leads are non-authoritative working state, no resume flow
+  reads an archived set, and keeping them around only invites a later pass to
+  build an outline out of pointers into a revision that no longer exists.
 - *re-outline* — keep the file, rebuild the outline from the current state
+
+**The working-state rule, once, for all three choices:** *resume anyway* reuses
+`.stories/.<slug>/` because the leads still point into the revision the story
+was written against. Anything that dispatches a **fresh gathering pass** — both
+*restart* and *re-outline* when it re-dispatches — must start from an empty
+`.stories/.<slug>/`, or agents append to files from the previous revision and
+lens files for lenses no longer being run survive to be read as if current.
 
 Never resume silently onto moved code. A story confidently describing lines that
 no longer exist is the worst output this skill can produce.
