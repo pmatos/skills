@@ -58,6 +58,12 @@ if available. If that tool isn't available in this session, fall back to
 print the findings instead. If the target is not a PR, print the findings to
 the terminal and note that `--comment` was ignored.
 
+GitHub only accepts an inline comment on a line that is part of the PR's
+diff hunks (added, removed, or context lines). Angle A findings can land on
+lines outside every hunk; for those, don't retry the inline call — post the
+finding as a file-level or general PR comment, or include it in the printed
+findings, and say which.
+
 ## `--post` / `--no-post`
 
 These only apply to the cloud `ultra` review (posting its findings to the PR
