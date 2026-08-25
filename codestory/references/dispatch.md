@@ -37,6 +37,7 @@ an agent returning confident prose instead of pointers.
 You are gathering LEADS for a code narration. You are not writing the story.
 
 Target: [one line: PR #142, the working tree, src/auth/, …]
+Read the narrated files at: [the resolver's `source_ref`, or `the working tree`]
 Files to be narrated:
 [the resolver's file list, one path per line]
 
@@ -44,6 +45,11 @@ Those files are what the story will cover. To understand them you may read
 anything else in the repository — callers, tests, configuration — and run
 `git log`, `git blame` and `gh`. Only leads that help a reader understand the
 files above belong in your output.
+
+When a revision is named above, read the narrated files as
+`git show <revision>:<path>` — that revision is not what is checked out, so an
+ordinary read shows you different content, or none where the change adds a file.
+Surrounding context you consult to understand them may be read normally.
 
 Your lens: [lens name]
 [the lens's "what it looks for" and "salient" text from references/lenses.md]

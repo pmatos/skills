@@ -41,9 +41,13 @@ Options:
   --base <ref>        Override the base for change-shaped targets.
   --help              Show this message.
 
-Output: one JSON object with target, base_sha, head_sha, default_branch, dirty,
-files (path + loc), excluded (path + reason), deleted, formatting_only,
-narratable, loc, file_count, tier, warnings. Exits 0 whenever the target
+Output: one JSON object with target, base_sha, head_sha, source_ref,
+default_branch, dirty, files (path + loc), excluded (path + reason), deleted,
+formatting_only, narratable, loc, file_count, tier, warnings. `loc` is diff
+churn for a change target — added and removed lines, deletions included — and
+file lines for a state target. `source_ref` is the revision the story
+describes: read every file at it, since a non-empty value that differs from
+HEAD means the checkout holds something else. Exits 0 whenever the target
 resolved, even when nothing is narratable — check `narratable`. Exits 1 only
 when the target could not be resolved at all.
 USAGE
@@ -130,6 +134,51 @@ fi
 
 head_sha="$(git rev-parse HEAD 2>/dev/null || echo "")"
 [ -n "$head_sha" ] || die "repository has no commits to narrate"
+# --kind pr and --kind branch reassign head_sha below; this keeps what is
+# actually on disk, so the two can be compared and the difference reported.
+checkout_sha="$head_sha"
+
+# --- revision-aware reads ---------------------------------------------------
+
+# A change-shaped target names a revision that need not be the one checked out:
+# `--kind branch other`, run from a clean checkout of `main`, must still see the
+# files `other` adds. Testing for them on disk finds nothing and drops them
+# without a word — the failure this script exists to prevent — and the files
+# that do survive get read at the wrong revision. So every existence test and
+# every content read goes through the three below. An empty revision means the
+# working tree, which is what `working-tree`, `path` and `project` narrate.
+
+path_exists() {
+  # $1: revision, or empty for the working tree. $2: repo-relative path.
+  # Deliberately as permissive as the `[ -e ]` it replaces: a submodule entry
+  # is not narratable, but dropping it here would drop it silently.
+  if [ -n "$1" ]; then
+    git cat-file -e "$1:$2" 2>/dev/null
+  else
+    [ -e "$2" ]
+  fi
+}
+
+has_content() {
+  # The revision-aware form of `[ -f ]`: true only where there are file bytes to
+  # sniff or count, so directories and submodule entries skip those checks.
+  if [ -n "$1" ]; then
+    [ "$(git cat-file -t "$1:$2" 2>/dev/null)" = blob ]
+  else
+    [ -f "$2" ]
+  fi
+}
+
+read_blob() {
+  # Callers must consume this to completion. Under `set -o pipefail` a reader
+  # that exits early (`grep -q`, `head`) sends git SIGPIPE, and the pipeline
+  # then reports failure even though the reader succeeded.
+  if [ -n "$1" ]; then
+    git cat-file blob "$1:$2" 2>/dev/null
+  else
+    cat -- "$2" 2>/dev/null
+  fi
+}
 
 # --- target resolution ------------------------------------------------------
 
@@ -150,19 +199,23 @@ resolve_change_files() {
   [ -z "$head" ] || diff_args+=("$head")
   diff_head="$head"
 
-  while IFS= read -r path; do
+  # -z on every enumeration below. Git C-quotes any path holding a non-ASCII
+  # byte, a newline, a tab or a quote — `café.txt` comes back as the literal
+  # `"caf\303\251.txt"`, which names no file on disk — and NUL is the only
+  # delimiter a pathname cannot itself contain.
+  while IFS= read -r -d '' path; do
     [ -n "$path" ] || continue
-    [ -e "$path" ] || continue
+    path_exists "$head" "$path" || continue
     candidates+=("$path")
-  done < <(git diff --name-only --diff-filter=d "${diff_args[@]}")
+  done < <(git diff -z --name-only --diff-filter=d "${diff_args[@]}")
 
   # Deleted paths have no current content to excerpt, but a reviewer must still
   # be told the change removes them — silence here is the failure this script
   # exists to prevent.
-  while IFS= read -r path; do
+  while IFS= read -r -d '' path; do
     [ -n "$path" ] || continue
     deleted+=("$path")
-  done < <(git diff --name-only --diff-filter=D "${diff_args[@]}")
+  done < <(git diff -z --name-only --diff-filter=D "${diff_args[@]}")
 
   # `git diff -w` is the only cheap whitespace-insensitive test git offers, and
   # it is not safe as an exclusion: a line re-indented into an enclosing block
@@ -172,10 +225,14 @@ resolve_change_files() {
   # line rather than given beats — it never removes them from the story.
   # Indentation-significant languages skip the test entirely.
   local -A substantive=()
-  while IFS= read -r path; do
+  # Keyed by the same spelling the candidates loop looks up, so this
+  # enumeration has to be NUL-delimited in the same breath as that one:
+  # convert only one and every non-ASCII path misses its key here and is
+  # wrongly called formatting-only.
+  while IFS= read -r -d '' path; do
     [ -n "$path" ] || continue
     substantive["$path"]=1
-  done < <(git diff -w --name-only --diff-filter=d "${diff_args[@]}")
+  done < <(git diff -z -w --name-only --diff-filter=d "${diff_args[@]}")
 
   for path in ${candidates[@]+"${candidates[@]}"}; do
     case "$path" in
@@ -189,8 +246,12 @@ resolve_change_files() {
     # Whitespace inside a string literal is content, and `-w` hides it. No cheap
     # textual test separates that from churn, so decline to claim "formatting"
     # whenever a changed line carries a quote.
+    # Not `grep -q`: it exits on the first match, and the SIGPIPE that sends
+    # git makes the pipeline fail under `set -o pipefail` — so a diff larger
+    # than the pipe buffer takes the *false* branch precisely when a quote was
+    # found, inverting this guard. Consuming the diff keeps git's status 0.
     if git diff -U0 "${diff_args[@]}" -- "$path" 2>/dev/null |
-      LC_ALL=C grep -qE "^[+-][^+-].*[\"'\`]"; then
+      LC_ALL=C grep -E "^[+-][^+-].*[\"'\`]" >/dev/null; then
       continue
     fi
     formatting+=("$path")
@@ -203,10 +264,10 @@ case "$kind" in
     base_sha="$head_sha"
     resolve_change_files HEAD ""
     # Untracked files are new in full; they cannot be formatting-only.
-    while IFS= read -r path; do
+    while IFS= read -r -d '' path; do
       [ -n "$path" ] || continue
       candidates+=("$path")
-    done < <(git ls-files --others --exclude-standard)
+    done < <(git ls-files -z --others --exclude-standard)
     if [ "${#candidates[@]}" -eq 0 ] && [ "${#deleted[@]}" -eq 0 ]; then
       warnings+=("working tree is clean; nothing to narrate")
     fi
@@ -277,20 +338,20 @@ case "$kind" in
       ref="$resolved"
     fi
     [ "$ref" != "." ] || ref=""
-    while IFS= read -r path; do
+    while IFS= read -r -d '' path; do
       [ -n "$path" ] || continue
       candidates+=("$path")
-    done < <(git ls-files --cached --others --exclude-standard -- "$path_arg")
+    done < <(git ls-files -z --cached --others --exclude-standard -- "$path_arg")
     if [ "${#candidates[@]}" -eq 0 ]; then
       warnings+=("'$ref' contains no narratable files (all ignored, or an empty directory)")
     fi
     ;;
 
   project)
-    while IFS= read -r path; do
+    while IFS= read -r -d '' path; do
       [ -n "$path" ] || continue
       candidates+=("$path")
-    done < <(git ls-files)
+    done < <(git ls-files -z)
     ;;
 esac
 
@@ -298,11 +359,19 @@ if [ "$shape" = "change" ] && [ "$dirty" = true ] && [ "$kind" != "working-tree"
   warnings+=("working tree is dirty; the story describes ${head_sha:0:12}, which is not what is currently on disk")
 fi
 
+# This resolver reads blobs, but the lens agents and the narrator read files —
+# and an ordinary read returns the checkout, which for another branch is the
+# wrong revision, or for a file that branch adds is nothing at all.
+if [ -n "$diff_head" ] && [ "$diff_head" != "$checkout_sha" ]; then
+  warnings+=("narrating ${diff_head:0:12}, which is not what is checked out; read every file as 'git show ${diff_head:0:12}:<path>' — a plain read shows the checkout instead")
+fi
+
 # --- exclusions -------------------------------------------------------------
 
 # Returns the exclusion reason on stdout, or nothing if the file is narratable.
 exclusion_reason() {
-  local path="$1" name="${1##*/}" lower
+  # $1: revision to read content at, or empty for the working tree. $2: path.
+  local ref="$1" path="$2" name="${2##*/}" lower
   lower="$(printf '%s' "$name" | tr '[:upper:]' '[:lower:]')"
 
   case "/$path/" in
@@ -353,14 +422,20 @@ exclusion_reason() {
       ;;
   esac
 
-  if [ -f "$path" ] && ! LC_ALL=C grep -qI . "$path" 2>/dev/null; then
+  # Both sniffs below read the revision being narrated, and both let their
+  # reader drain the stream: `grep -q` and `head` stop early, and the SIGPIPE
+  # that sends git fails the pipeline under `set -o pipefail` even on a match.
+  # `sed -n '1,5p'` prints five lines but keeps reading to the end.
+  if has_content "$ref" "$path" &&
+    ! read_blob "$ref" "$path" | LC_ALL=C grep -I . >/dev/null; then
     printf 'binary-or-asset'
     return
   fi
 
   # Machine-generated files conventionally announce themselves in a header.
-  if [ -f "$path" ] &&
-    head -n 5 "$path" 2>/dev/null | LC_ALL=C grep -qiE 'DO NOT EDIT|@generated|Code generated by|autogenerated|auto-generated'; then
+  if has_content "$ref" "$path" &&
+    read_blob "$ref" "$path" | sed -n '1,5p' |
+    LC_ALL=C grep -iE 'DO NOT EDIT|@generated|Code generated by|autogenerated|auto-generated' >/dev/null; then
     printf 'generated'
     return
   fi
@@ -369,9 +444,11 @@ exclusion_reason() {
 # --- JSON assembly ----------------------------------------------------------
 
 # `wc -l` counts newlines, so a file with no trailing newline is short by one.
+# $1: revision, or empty for the working tree. $2: path. awk drains its input,
+# so git is never SIGPIPEd here; a read that fails outright falls back to 0.
 count_lines() {
   local n
-  n="$(awk 'END { print NR }' "$1" 2>/dev/null)"
+  n="$(read_blob "$1" "$2" | awk 'END { print NR }')" || n=0
   [ -n "$n" ] || n=0
   printf '%s' "$n"
 }
@@ -393,7 +470,7 @@ file_count=0
 excluded_count=0
 
 for path in ${candidates[@]+"${candidates[@]}"}; do
-  reason="$(exclusion_reason "$path")"
+  reason="$(exclusion_reason "$diff_head" "$path")"
   if [ -n "$reason" ]; then
     [ -z "$excluded_json" ] || excluded_json+=","
     excluded_json+="$(printf '{"path":"%s","reason":"%s"}' "$(json_escape "$path")" "$reason")"
@@ -405,14 +482,14 @@ for path in ${candidates[@]+"${candidates[@]}"}; do
     # For a change, the narratable size is the churn, not the file's length —
     # a one-line edit to a 40k-line file is a small story, not a large one.
     loc="$(git diff --numstat "$base_sha" ${diff_head:+"$diff_head"} -- "$path" 2>/dev/null |
-      awk '{ added += $1; removed += $2 } END { print added + removed + 0 }')"
+      awk '{ added += $1; removed += $2 } END { print added + removed + 0 }')" || loc=0
     [ -n "$loc" ] || loc=0
     # Untracked files have no diff; count them in full.
-    if [ "$loc" -eq 0 ] && [ -f "$path" ]; then
-      loc="$(count_lines "$path")"
+    if [ "$loc" -eq 0 ] && has_content "$diff_head" "$path"; then
+      loc="$(count_lines "$diff_head" "$path")"
     fi
-  elif [ -f "$path" ]; then
-    loc="$(count_lines "$path")"
+  elif has_content "$diff_head" "$path"; then
+    loc="$(count_lines "$diff_head" "$path")"
   fi
   [ -z "$files_json" ] || files_json+=","
   files_json+="$(printf '{"path":"%s","loc":%s}' "$(json_escape "$path")" "$loc")"
@@ -426,10 +503,18 @@ for path in ${formatting[@]+"${formatting[@]}"}; do
   formatting_json+="\"$(json_escape "$path")\""
 done
 
+# A deletion never reaches the loop above — it has no surviving content — but
+# its removed lines are review cost all the same, and leaving them out of the
+# total reported a 12k-line removal as `loc: 0, tier: small`. Deletions are not
+# exclusions, so every one of them counts, lockfiles and generated files too.
 deleted_json=""
 for path in ${deleted[@]+"${deleted[@]}"}; do
   [ -z "$deleted_json" ] || deleted_json+=","
   deleted_json+="\"$(json_escape "$path")\""
+  deleted_loc="$(git diff --numstat "$base_sha" ${diff_head:+"$diff_head"} -- "$path" 2>/dev/null |
+    awk '{ removed += $2 } END { print removed + 0 }')" || deleted_loc=0
+  [ -n "$deleted_loc" ] || deleted_loc=0
+  total_loc=$((total_loc + deleted_loc))
 done
 
 narratable=true
@@ -460,8 +545,9 @@ printf '{'
 printf '"target":{"kind":"%s","ref":"%s","shape":"%s"},' \
   "$(json_escape "$kind")" "$(json_escape "$ref")" "$shape"
 printf '"default_branch":"%s",' "$(json_escape "$default_branch")"
-printf '"base_sha":"%s","head_sha":"%s","dirty":%s,' \
-  "$(json_escape "$base_sha")" "$(json_escape "$head_sha")" "$dirty"
+printf '"base_sha":"%s","head_sha":"%s","source_ref":"%s","dirty":%s,' \
+  "$(json_escape "$base_sha")" "$(json_escape "$head_sha")" \
+  "$(json_escape "$diff_head")" "$dirty"
 printf '"narratable":%s,"tier":"%s","loc":%s,"file_count":%s,' \
   "$narratable" "$tier" "$total_loc" "$file_count"
 printf '"excluded_count":%s,"deleted_count":%s,"formatting_only_count":%s,' \

@@ -110,8 +110,9 @@ the same diff against the merge-base without the network.
 | --- | --- |
 | `narratable` | `false` when nothing survives; report the warnings and stop |
 | `target.shape` | `change` or `state` — selects the narration shape (step 6) |
+| `source_ref` | the revision the story describes; when set, read every file **at it** |
 | `tier` | `small` / `medium` / `large` — selects the fan-out (step 3) |
-| `loc` | size of what will be narrated: **diff churn** for change targets, file lines for state targets |
+| `loc` | size of what will be narrated: **diff churn** for change targets — added and removed lines, deletions included — file lines for state targets |
 | `files` | the narratable set, each with its own `loc` |
 | `excluded` | dropped, with a reason each |
 | `deleted` | paths the change removes |
@@ -122,6 +123,14 @@ Warnings are never decorative. In particular, **a dirty working tree while
 narrating a branch or PR is a mandatory callout** — the story describes a SHA
 that is not what is on disk, and the reviewer's editor is showing something
 else.
+
+**`source_ref` decides where every read comes from.** A branch or PR target can
+name a commit that is not the one checked out, and then reading a path the
+ordinary way returns the wrong revision — or, for a file the change adds,
+nothing at all. Whenever `source_ref` is non-empty and differs from `git
+rev-parse HEAD`, read source as `git show <source_ref>:<path>`, and say so in
+every lens-agent prompt. The resolver already reads blobs; the agents and the
+narrator are the ones that have to be told.
 
 **Report the exclusions.** Near the top of the story, before the first beat:
 `Skipped 3 files — uv.lock (lockfile), src/api.pb.go (generated),
@@ -221,7 +230,8 @@ pruned outline as a table of contents into `.stories/<slug>.md` before beat 1.
 
 For each beat in the pruned outline:
 
-1. **Read the source** for this beat. Not the leads — the source.
+1. **Read the source** for this beat — at `source_ref` when the resolver set
+   one. Not the leads: the source.
 2. Write the beat: title naming the idea, prose, one anchored excerpt, markers
    inline where they apply.
 3. Append it to `.stories/<slug>.md` and flip its outline entry to `done`.
