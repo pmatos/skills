@@ -390,6 +390,11 @@ second one:
      remains; only on exhaustion is this `ci-timeout`. (The exit-`8` row above already treats pending
      this way; the re-read must agree with it.)
    - Every check terminal (`pass` / `skipping` / `cancel`) and none failing → terminal success.
+     `cancel` groups here deliberately: `gh` exits nonzero only on failed or pending counts, so a
+     cancel-only rollup already exits `0` and ends the wait via the table's exit-`0` row without ever
+     reaching this re-read — classifying it as unsuccessful here would make the two paths contradict
+     each other. It also matches `pm-autofix-pr`, where `cancelled` is the one non-success conclusion
+     treated as informational. This wait decides terminality, not merge-readiness.
    - No checks reported at all → **not yet conclusive.** This is the ordinary push-to-registration
      race: `gh` exits 1 with "no checks reported" until the workflows register. Allow a bounded grace
      period — `min(2 × POLL_INTERVAL, CI_BUDGET_REMAINING)` — re-reading across it, and only declare
