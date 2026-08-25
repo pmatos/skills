@@ -123,9 +123,18 @@ skill installs on its own, so they share no library with any other skill in the 
    repository, so an origin-first-and-stop order silently selects the fork-local PR, takes `BASE_REF`
    from it, and then Step 7 force-pushes the shared head branch — rewriting the upstream PR onto the
    wrong base, with the lease raising no objection because the head branch never moved. Combining
-   costs nothing: a PR appears only in its own base repository's list, so the results need no dedupe,
-   and the ordinary upstream-only fork still yields exactly one match. Two matches means genuine
+   costs nothing when the two candidates are distinct repositories — a PR appears only in its own
+   base repository's list — and the ordinary upstream-only fork still yields exactly one match. Two
+   matches from *distinct* base repositories means genuine
    ambiguity — stop and say so, as below.
+
+   **Deduplicate the candidates before querying.** `origin` and `upstream` frequently name the *same*
+   repository — a maintainer who cloned the base repo directly and also added an `upstream` alias for
+   it. Both queries would then return the identical PR, the combined count would be two, and
+   discovery would stop as falsely ambiguous on the most ordinary setup there is. Compare the two
+   `owner/repo` pairs (case-insensitively — GitHub owner and repository names are not
+   case-sensitive) and query the second only if it differs. As a belt-and-braces measure, deduplicate
+   the combined matches by `(base repository, PR number)` before applying the exactly-one rule.
    - **Origin.** Set `PR_REPO = <ORIGIN_OWNER>/<ORIGIN_REPO>`, then
      `gh pr list -R "$PR_REPO" --head "$BRANCH" --state open --json number,headRefName,headRepository,headRepositoryOwner,baseRefName,url`,
      then **keep only PRs whose `headRepository.nameWithOwner` equals `PR_REPO`** (compose it from
@@ -136,8 +145,8 @@ skill installs on its own, so they share no library with any other skill in the 
      shares a name with yours. Rebasing and force-pushing someone else's PR is not a recoverable
      mistake. Match the full `owner/repo` pair, not the owner alone: one account can own several
      repositories with the same branch name, and the owner-only test cannot tell them apart.
-   - **Upstream (fork checkout).** If an `upstream` remote exists, run this query too — regardless of
-     whether the origin lookup matched. Set `PR_REPO = <UPSTREAM_OWNER>/<UPSTREAM_REPO>` and repeat
+   - **Upstream (fork checkout).** If an `upstream` remote exists **and names a different repository
+     than `origin`**, run this query too — regardless of whether the origin lookup matched. Set `PR_REPO = <UPSTREAM_OWNER>/<UPSTREAM_REPO>` and repeat
      the query — but now filter `headRepository.nameWithOwner` against the **origin** pair
      (`ORIGIN_OWNER/ORIGIN_REPO`), since the head branch lives in your fork, not in the base
      repository `PR_REPO` now names.
