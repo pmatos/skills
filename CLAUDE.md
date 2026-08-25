@@ -62,3 +62,7 @@ Slash command `/is-skill` that analyzes the current session's conversation, cont
 ## upscale
 
 Skill that upscales raster images with a local OpenCV EDSR super-resolution model, writes an exact requested pixel size, and verifies the final dimensions.
+
+## codestory
+
+Slash command `/codestory` that turns a PR, branch, working-tree diff, file, path or whole project into a flow-ordered story told beat by beat, pausing after each beat so the reader can ask for more detail or move on. Built for code review: it explains so the human can judge and never issues verdicts itself. Lens subagents (interfaces, control flow, dependencies, IO, error handling, situating context, tests-as-spec) gather leads only — the narrator re-reads the source before every beat, and every excerpt carries a `path:line` anchor. Fan-out shape follows a size tier computed by `scripts/resolve-target.sh`. The story accumulates at `.stories/<slug>.md` and is resumable.
