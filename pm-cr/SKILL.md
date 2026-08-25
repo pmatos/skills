@@ -75,9 +75,19 @@ checkout, and fall through if that remote-tracking ref isn't present
 locally (the symref is absent after a `git remote add` without `git remote
 set-head`; in a fork checkout, query the `upstream` remote's repo); else
 whichever of `main` or `master` exists as a local head (bare here by
-design — this tier tested for the local branch). Then run
-`git diff <base>...HEAD` — three dots, so the whole branch back to the
-merge base is under review, not just its newest commit. Never fall back to
+design — this tier tested for the local branch). Refresh that base before
+diffing — `git fetch <remote> <branch>` for the remote-qualified tiers —
+and run `git diff FETCH_HEAD...HEAD`; the local-head tier has no remote to
+refresh, so diff `<base>...HEAD` there. Three dots either way, so the whole
+branch back to the merge base is under review, not just its newest commit.
+Any remote-tracking ref goes stale between fetches, and then the three-dot
+merge base slides backwards and already-merged commits enter the scope as
+if this branch wrote them. Three dots is no protection once the branch has
+merged the base in — or once `gh pr checkout` has fetched only the PR head
+ref and left `origin/<branch>` behind — because `HEAD` already contains the
+newer base commits and the three-dot range collapses to the two-dot one. If
+the fetch fails, fall back to `<remote>/<branch>...HEAD` and say in the
+report that the base may be stale. Never fall back to
 `@{upstream}`: after `git push -u` a branch's tracking ref is
 `origin/<this branch>` — its own tip, not its base — so `@{upstream}...HEAD`
 is empty for every pushed commit. When no tier resolves (a `git clone
@@ -91,8 +101,8 @@ disambiguate default-branch candidates. Where more than one candidate
 base resolves — in a fork checkout `origin`'s and `upstream`'s default
 branches are both candidates, and tier 1 would otherwise always pick
 `origin`'s because `git clone` sets `refs/remotes/origin/HEAD` while `git
-remote add` never sets `upstream/HEAD` — compute `git merge-base <cand>
-HEAD` for each and keep the candidate whose merge base is a *descendant* of
+remote add` never sets `upstream/HEAD` — refresh each candidate the same way, then compute
+`git merge-base <cand> HEAD` for each and keep the candidate whose merge base is a *descendant* of
 the others (`git merge-base --is-ancestor`). Three dots only protects you
 from a base that is ahead of the branch point, not one that is behind: a
 branch cut from `upstream/main` while the fork's own default sits three
