@@ -31,10 +31,14 @@ Resolve the base to diff against, in this order:
    `https://github.com/<owner>/<repo>.git`, which `git fetch` accepts in
    place of a remote name. If `gh pr view` cannot resolve a single
    repository on its own, fall through to rule 2.
-2. Otherwise use the remote's default branch — `git symbolic-ref
-   refs/remotes/origin/HEAD` with the `refs/remotes/origin/` prefix
-   stripped — falling back to `main` or `master` if that symref is absent.
-   Here the base remote is `origin`.
+2. Otherwise derive both the remote and the branch — do not assume a
+   remote is named `origin`. The base remote is `origin` if `git remote`
+   lists it, else the sole remote it lists, else the one the current
+   branch tracks (`git config --get branch.<branch>.remote`). The base is
+   that remote's default branch — `git symbolic-ref
+   refs/remotes/<base-remote>/HEAD` with the
+   `refs/remotes/<base-remote>/` prefix stripped — falling back to `main`
+   or `master` if that symref is absent.
 
 Refresh that base before diffing — `git fetch <base-remote> <base>` — and
 diff `FETCH_HEAD...HEAD`. Both halves matter: hard-coding `origin/<base>`
