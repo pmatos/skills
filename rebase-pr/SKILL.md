@@ -316,12 +316,28 @@ second one:
    back to `command -v gtimeout` (the name Homebrew's coreutils installs on macOS). Both must
    succeed to use the blocking watch; record the binary as `TIMEOUT_BIN`.
 2. Initialize `CI_BUDGET_REMAINING = CI_BUDGET` once, here. Each wait is
-   `TIMEOUT_BIN <chunk>s gh pr checks "$PR_NUMBER" -R "$PR_REPO" --watch --interval <POLL_INTERVAL>` where
-   `<chunk>` is `min(CI_BUDGET_REMAINING in seconds, 300)`. Exit 124 means the chunk elapsed with
-   checks still pending; exit 0 means they reached a terminal state. Subtract each wait's actual
-   elapsed time from `CI_BUDGET_REMAINING`.
-3. Without the blocking watch, fall back to `sleep <POLL_INTERVAL>` once per pass plus a
-   `gh pr checks "$PR_NUMBER" -R "$PR_REPO"` re-read, bounded by the same budget.
+   `TIMEOUT_BIN <chunk>s gh pr checks "$PR_NUMBER" -R "$PR_REPO" --watch --interval <POLL_INTERVAL>`
+   where `<chunk>` is `min(CI_BUDGET_REMAINING in seconds, 300)`. Classify **every** exit status —
+   `timeout` passes the child's status through unchanged, and here the status *is* the signal:
+
+   | Exit | Meaning | Action |
+   |------|---------|--------|
+   | `0` | every check finished successfully | terminal — done |
+   | `124` | the chunk elapsed with checks still pending | keep waiting if budget remains |
+   | `8` | checks still pending (the non-watch read in item 3 reports this) | keep waiting if budget remains |
+   | any other nonzero (`1` in practice) | checks finished and **at least one failed** | terminal — re-read `gh pr checks "$PR_NUMBER" -R "$PR_REPO"`, report which checks failed, and stop with `exit reason: ci-failed` |
+
+   Leaving the failure exit unclassified is the trap: the most likely terminal outcome — CI went
+   red on the rebased branch — would otherwise fall through as "not terminal" and be reported as a
+   budget timeout, or abort with no diagnosis at all. (`pm-autofix-pr` can ignore this exit because
+   it treats the watch as a sleep replacement and always re-fetches authoritative state afterwards;
+   Step 8 has no such re-read, so it must read the status.)
+
+   Subtract each wait's actual elapsed time from `CI_BUDGET_REMAINING`.
+3. Without the blocking watch, fall back to one `sleep` per pass plus a
+   `gh pr checks "$PR_NUMBER" -R "$PR_REPO"` re-read, applying the same exit classification as the
+   table above. Sleep `min(POLL_INTERVAL, CI_BUDGET_REMAINING)`, not a flat `POLL_INTERVAL` — an
+   unclamped final sleep overshoots the advertised ceiling by up to one interval.
 4. **On budget exhaustion, exit degraded, not silently:** post a PR comment naming what was rebased,
    which checks are still pending, and the exact resume command (`/rebase-pr <n> --watch-ci`), then
    stop with `exit reason: ci-timeout`.
@@ -339,6 +355,7 @@ second one:
 | Gate red from a regression that resists fixing | Step 6 | `gate-failure` (no push) |
 | Remote head moved while the rebase ran | Step 7, exit 4 | `concurrent-writer` |
 | Push rejected despite a valid lease | Step 7, exit 5 | `push-failure` |
+| CI red on the rebased branch | Step 8 | `ci-failed` (failing checks named) |
 | CI still pending when the budget runs out | Step 8 | `ci-timeout` (degraded comment posted) |
 
 ## Consistency With the Sibling PR Skills
