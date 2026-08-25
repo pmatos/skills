@@ -32,10 +32,14 @@ From the task arguments above, extract:
 - **Target**: whatever tokens remain (a PR number, branch name, or file
   path). Empty if none.
 
-If the first remaining token looks like an attempted level (short, alphabetic,
-no path separators, no digits) but doesn't match any valid level, tell the
-user in one line that you're ignoring the unrecognized effort and list the
-valid ones, then fall back to the resolved level as if none had been typed.
+A token that isn't consumed as a flag or as a valid effort level is never
+discarded — it stays part of the Target. Common branch names (`main`,
+`develop`, `staging`, `master`) are targets, not efforts. If no level was
+consumed and the first remaining token is a near-miss for one (short,
+alphabetic, no path separators, no digits), note in one line that you're
+reading it as the target rather than an effort level, list the valid levels,
+then resolve the level per **Effort persistence** in
+`references/output-and-flags.md`.
 
 ## Phase 1 — Gather the diff
 
