@@ -70,8 +70,8 @@ remote default branch from
 `refs/remotes/` prefix, so the base stays `origin/<branch>` — a bare name
 resolves through `refs/heads/`, never `refs/remotes/origin/`); else `gh
 repo view --json defaultBranchRef -q .defaultBranchRef.name`, which returns
-a bare name — qualify it as `origin/<name>`, or `upstream/<name>` in a fork
-checkout, and fall through if that remote-tracking ref isn't present
+a bare name — qualify it as `<remote>/<name>` for the remote it was queried
+from, and fall through if that remote-tracking ref isn't present
 locally (the symref is absent after a `git remote add` without `git remote
 set-head`; in a fork checkout, query the `upstream` remote's repo); else
 whichever of `main` or `master` exists as a local head (bare here by
@@ -96,14 +96,23 @@ no local `main`), take the disclosed `HEAD~1` last resort below rather than
 a tracking ref that reviews nothing.
 
 What you actually want is the branch point. When the PR base resolved
-above, use it directly — the candidate comparison here exists to
-disambiguate default-branch candidates. Where more than one candidate
-base resolves — in a fork checkout `origin`'s and `upstream`'s default
-branches are both candidates, and tier 1 would otherwise always pick
-`origin`'s because `git clone` sets `refs/remotes/origin/HEAD` while `git
-remote add` never sets `upstream/HEAD` — refresh each candidate the same way, then compute
-`git merge-base <cand> HEAD` for each and keep the candidate whose merge base is a *descendant* of
-the others (`git merge-base --is-ancestor`). Three dots only protects you
+above, use it directly — the comparison here only disambiguates
+default-branch candidates. Otherwise run the fall-through tiers once *per
+remote* that `git remote` lists — not once overall — and collect every
+answer as a candidate before selecting one. Stopping at the first answer is
+what makes this rule inert: `git clone` sets `refs/remotes/origin/HEAD`
+while `git remote add` never sets `upstream/HEAD`, so in a fork checkout
+the `origin/HEAD` symref tier always answers first and `upstream`'s default
+is never considered at all. With one candidate, use it. With more than one,
+refresh each the same way, then name each by its remote-tracking ref
+`<remote>/<branch>` — the fetch updates that ref, and creates it when
+absent — and compute `git merge-base <cand> HEAD` for each, keeping the
+candidate whose merge base is a *descendant* of the others (`git
+merge-base --is-ancestor`); if two merge bases are equal either serves,
+since the three-dot range is identical. Diff the winner as
+`<remote>/<branch>...HEAD`, not `FETCH_HEAD...HEAD`: each fetch overwrites
+`FETCH_HEAD` with only that fetch, so after several candidates it names
+whichever was fetched last rather than the one selected here. Three dots only protects you
 from a base that is ahead of the branch point, not one that is behind: a
 branch cut from `upstream/main` while the fork's own default sits three
 commits back reviews those three upstream commits as if the author wrote
