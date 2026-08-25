@@ -42,14 +42,17 @@ Options:
   --help              Show this message.
 
 Output: one JSON object with target, base_sha, head_sha, source_ref,
-default_branch, dirty, files (path + loc), excluded (path + reason), deleted,
-formatting_only, narratable, loc, file_count, tier, warnings. `loc` is diff
-churn for a change target — added and removed lines, deletions included — and
-file lines for a state target. `source_ref` is the revision the story
-describes: read every file at it, since a non-empty value that differs from
-HEAD means the checkout holds something else. Exits 0 whenever the target
-resolved, even when nothing is narratable — check `narratable`. Exits 1 only
-when the target could not be resolved at all.
+content_fingerprint, default_branch, dirty, files (path + loc), excluded
+(path + reason), deleted, missing, formatting_only, narratable, loc,
+file_count, tier, warnings. `loc` is diff churn for a change target — added and
+removed lines, deletions included — and file lines for a state target.
+`source_ref` is the revision the story describes: read every file at it, since
+a non-empty value that differs from HEAD means the checkout holds something
+else. `content_fingerprint` is set instead when the source is the working tree
+rather than a commit, and is what a resume must compare — no SHA changes when
+an uncommitted edit does. `missing` lists tracked paths that are gone from
+disk. Exits 0 whenever the target resolved, even when nothing is narratable —
+check `narratable`. Exits 1 only when the target could not be resolved at all.
 USAGE
 }
 
@@ -151,21 +154,24 @@ checkout_sha="$head_sha"
 path_exists() {
   # $1: revision, or empty for the working tree. $2: repo-relative path.
   # Deliberately as permissive as the `[ -e ]` it replaces: a submodule entry
-  # is not narratable, but dropping it here would drop it silently.
+  # is not narratable, but dropping it here would drop it silently. `-L` covers
+  # a broken symlink, which `-e` reports as absent because it follows the link.
   if [ -n "$1" ]; then
     git cat-file -e "$1:$2" 2>/dev/null
   else
-    [ -e "$2" ]
+    [ -e "$2" ] || [ -L "$2" ]
   fi
 }
 
 has_content() {
   # The revision-aware form of `[ -f ]`: true only where there are file bytes to
-  # sniff or count, so directories and submodule entries skip those checks.
+  # sniff or count, so directories and submodule entries skip those checks. A
+  # symlink has content — its link value — and `-L` is tested first so that
+  # answer does not depend on whether the link currently resolves.
   if [ -n "$1" ]; then
     [ "$(git cat-file -t "$1:$2" 2>/dev/null)" = blob ]
   else
-    [ -f "$2" ]
+    [ -L "$2" ] || [ -f "$2" ]
   fi
 }
 
@@ -173,8 +179,14 @@ read_blob() {
   # Callers must consume this to completion. Under `set -o pipefail` a reader
   # that exits early (`grep -q`, `head`) sends git SIGPIPE, and the pipeline
   # then reports failure even though the reader succeeded.
+  # A symlink's content is its link value, which is what git stores and what
+  # the ref branch below returns. Following it instead would pull an outside
+  # file's bytes into the story under a repository path, and count and classify
+  # the story's subject by content the repository does not contain.
   if [ -n "$1" ]; then
     git cat-file blob "$1:$2" 2>/dev/null
+  elif [ -L "$2" ]; then
+    readlink -- "$2" 2>/dev/null
   else
     cat -- "$2" 2>/dev/null
   fi
@@ -188,6 +200,10 @@ diff_head=""
 candidates=()
 deleted=()
 formatting=()
+missing=()
+# Only a genuinely untracked path may fall back to counting its whole length;
+# see the loc fallback far below for why `loc == 0` alone is not the same test.
+declare -A untracked_set=()
 
 resolve_change_files() {
   # $1: base ref, $2: head ref (empty head means "against the working tree").
@@ -267,6 +283,7 @@ case "$kind" in
     while IFS= read -r -d '' path; do
       [ -n "$path" ] || continue
       candidates+=("$path")
+      untracked_set["$path"]=1
     done < <(git ls-files -z --others --exclude-standard)
     if [ "${#candidates[@]}" -eq 0 ] && [ "${#deleted[@]}" -eq 0 ]; then
       warnings+=("working tree is clean; nothing to narrate")
@@ -340,7 +357,11 @@ case "$kind" in
     [ "$ref" != "." ] || ref=""
     while IFS= read -r -d '' path; do
       [ -n "$path" ] || continue
-      candidates+=("$path")
+      if path_exists "" "$path"; then
+        candidates+=("$path")
+      else
+        missing+=("$path")
+      fi
     done < <(git ls-files -z --cached --others --exclude-standard -- "$path_arg")
     if [ "${#candidates[@]}" -eq 0 ]; then
       warnings+=("'$ref' contains no narratable files (all ignored, or an empty directory)")
@@ -348,15 +369,29 @@ case "$kind" in
     ;;
 
   project)
+    # `git ls-files` alone is the index, which is not the project: it omits
+    # every untracked source file and keeps files already deleted from disk,
+    # so the story would miss new code and send agents to read absent paths.
     while IFS= read -r -d '' path; do
       [ -n "$path" ] || continue
-      candidates+=("$path")
-    done < <(git ls-files -z)
+      if path_exists "" "$path"; then
+        candidates+=("$path")
+      else
+        missing+=("$path")
+      fi
+    done < <(git ls-files -z --cached --others --exclude-standard)
     ;;
 esac
 
 if [ "$shape" = "change" ] && [ "$dirty" = true ] && [ "$kind" != "working-tree" ]; then
   warnings+=("working tree is dirty; the story describes ${head_sha:0:12}, which is not what is currently on disk")
+fi
+
+# Tracked but gone from disk. Not a deletion the target makes — a state-shaped
+# target has no diff — but dropping them without a word is the one thing this
+# script may not do.
+if [ "${#missing[@]}" -gt 0 ]; then
+  warnings+=("${#missing[@]} tracked file(s) are missing from the working tree and cannot be narrated: ${missing[*]}")
 fi
 
 # This resolver reads blobs, but the lens agents and the narrator read files —
@@ -468,12 +503,19 @@ excluded_json=""
 total_loc=0
 file_count=0
 excluded_count=0
+# Kept alongside the JSON so the fingerprint below can hash the resolved
+# inventory without re-deriving any of it.
+kept_paths=()
+excluded_paths=()
+excluded_reasons=()
 
 for path in ${candidates[@]+"${candidates[@]}"}; do
   reason="$(exclusion_reason "$diff_head" "$path")"
   if [ -n "$reason" ]; then
     [ -z "$excluded_json" ] || excluded_json+=","
     excluded_json+="$(printf '{"path":"%s","reason":"%s"}' "$(json_escape "$path")" "$reason")"
+    excluded_paths+=("$path")
+    excluded_reasons+=("$reason")
     excluded_count=$((excluded_count + 1))
     continue
   fi
@@ -484,8 +526,13 @@ for path in ${candidates[@]+"${candidates[@]}"}; do
     loc="$(git diff --numstat "$base_sha" ${diff_head:+"$diff_head"} -- "$path" 2>/dev/null |
       awk '{ added += $1; removed += $2 } END { print added + removed + 0 }')" || loc=0
     [ -n "$loc" ] || loc=0
-    # Untracked files have no diff; count them in full.
-    if [ "$loc" -eq 0 ] && has_content "$diff_head" "$path"; then
+    # Untracked files have no diff; count them in full. Gated on the untracked
+    # set rather than on `loc == 0`, because zero churn is also the honest
+    # answer for a mode-only change or a pure rename — and counting one of
+    # those in full reported `chmod +x` on a 20k-line file as 20k lines of
+    # story. For pr and branch targets the set is empty and this never fires.
+    if [ "$loc" -eq 0 ] && [ -n "${untracked_set["$path"]:-}" ] &&
+      has_content "$diff_head" "$path"; then
       loc="$(count_lines "$diff_head" "$path")"
     fi
   elif has_content "$diff_head" "$path"; then
@@ -493,6 +540,7 @@ for path in ${candidates[@]+"${candidates[@]}"}; do
   fi
   [ -z "$files_json" ] || files_json+=","
   files_json+="$(printf '{"path":"%s","loc":%s}' "$(json_escape "$path")" "$loc")"
+  kept_paths+=("$path")
   total_loc=$((total_loc + loc))
   file_count=$((file_count + 1))
 done
@@ -516,6 +564,62 @@ for path in ${deleted[@]+"${deleted[@]}"}; do
   [ -n "$deleted_loc" ] || deleted_loc=0
   total_loc=$((total_loc + deleted_loc))
 done
+
+missing_json=""
+for path in ${missing[@]+"${missing[@]}"}; do
+  [ -z "$missing_json" ] || missing_json+=","
+  missing_json+="\"$(json_escape "$path")\""
+done
+
+# --- content fingerprint ----------------------------------------------------
+
+# A target resolved from a commit is identified by its SHA, but working-tree,
+# path and project stories are told against content no commit names: edit a
+# file and head_sha is still the same, so a resume compares equal and appends
+# fresh beats onto beats describing content that has since moved. This hashes
+# what was actually resolved — the classification of every path, and the
+# current bytes of every kept one — giving resume something that does change.
+# NUL framing for the same reason the enumerations use it: a pathname can
+# contain anything but NUL. Errs toward reporting a change, never away from it.
+content_fingerprint() {
+  local path i
+  local -a regular=() links=() batch=()
+  for path in ${kept_paths[@]+"${kept_paths[@]}"}; do
+    if [ -L "$path" ]; then links+=("$path"); else regular+=("$path"); fi
+  done
+  {
+    printf 'kind\0%s\0ref\0%s\0' "$kind" "$ref"
+    for i in ${excluded_paths[@]+"${!excluded_paths[@]}"}; do
+      printf 'x\0%s\0%s\0' "${excluded_paths[$i]}" "${excluded_reasons[$i]}"
+    done
+    for path in ${missing[@]+"${missing[@]}"}; do printf 'm\0%s\0' "$path"; done
+    for path in ${deleted[@]+"${deleted[@]}"}; do printf 'd\0%s\0' "$path"; done
+    # A symlink is hashed by its link value, never by what it points at.
+    for path in ${links[@]+"${links[@]}"}; do
+      printf 'l\0%s\0%s\0' "$path" "$(readlink -- "$path" 2>/dev/null)"
+    done
+    for path in ${regular[@]+"${regular[@]}"}; do printf 'f\0%s\0' "$path"; done
+    # Blob hashes for those regular files, in the order just listed. Batched so
+    # a whole-project target costs a handful of git processes, not one per file.
+    for path in ${regular[@]+"${regular[@]}"}; do
+      batch+=("$path")
+      if [ "${#batch[@]}" -ge 200 ]; then
+        git hash-object -- "${batch[@]}" 2>/dev/null || printf 'unreadable\n'
+        batch=()
+      fi
+    done
+    if [ "${#batch[@]}" -gt 0 ]; then
+      git hash-object -- "${batch[@]}" 2>/dev/null || printf 'unreadable\n'
+    fi
+  } | git hash-object --stdin
+}
+
+# Only for targets whose source is not a commit; a change-shaped target
+# resolved from a revision is already identified by base_sha and head_sha.
+content_hash=""
+if [ -z "$diff_head" ]; then
+  content_hash="$(content_fingerprint)" || content_hash=""
+fi
 
 narratable=true
 if [ "$file_count" -eq 0 ] && [ "${#deleted[@]}" -eq 0 ]; then
@@ -548,13 +652,16 @@ printf '"default_branch":"%s",' "$(json_escape "$default_branch")"
 printf '"base_sha":"%s","head_sha":"%s","source_ref":"%s","dirty":%s,' \
   "$(json_escape "$base_sha")" "$(json_escape "$head_sha")" \
   "$(json_escape "$diff_head")" "$dirty"
+printf '"content_fingerprint":"%s",' "$(json_escape "$content_hash")"
 printf '"narratable":%s,"tier":"%s","loc":%s,"file_count":%s,' \
   "$narratable" "$tier" "$total_loc" "$file_count"
 printf '"excluded_count":%s,"deleted_count":%s,"formatting_only_count":%s,' \
   "$excluded_count" "${#deleted[@]}" "${#formatting[@]}"
+printf '"missing_count":%s,' "${#missing[@]}"
 printf '"files":[%s],' "$files_json"
 printf '"excluded":[%s],' "$excluded_json"
 printf '"deleted":[%s],' "$deleted_json"
+printf '"missing":[%s],' "$missing_json"
 printf '"formatting_only":[%s],' "$formatting_json"
 printf '"warnings":[%s]' "$warnings_json"
 printf '}\n'

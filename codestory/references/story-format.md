@@ -26,6 +26,7 @@ ref: "142"
 shape: change
 base_sha: 3f9a1c4e8b2d5a7f0c1e6b9d4a2f8c3e5b7d9a1f
 head_sha: 8c2e5b7d9a1f3f9a1c4e8b2d5a7f0c1e6b9d4a2f
+content_fingerprint: ""
 default_branch: main
 tier: small
 lenses: [interfaces, flow, dependencies, io, errors, context, tests]
@@ -130,12 +131,28 @@ It is a constructor argument on `WebhookClient` defaulting to 3
 
 ## Resume
 
-When `.stories/<slug>.md` exists, compare its `head_sha` (and `base_sha` for
-change-shaped targets) against the target resolved now.
+When `.stories/<slug>.md` exists, compare it against the target resolved now.
+**Which field decides is not a detail** — it depends on where the story's source
+came from:
+
+| Story's source | Compare | Why |
+| --- | --- | --- |
+| a commit — `pr`, `branch`, and any target with a non-empty `source_ref` | `head_sha` and `base_sha` | the SHAs name the content exactly |
+| the working tree — `working-tree`, `path`, `project` | `content_fingerprint` | **no SHA moves when an uncommitted edit does**, so comparing SHAs here reports every edited target as unchanged |
+
+Comparing SHAs for a working-tree story is the failure this section exists to
+prevent: `head_sha` stays at the checkout commit through any number of
+uncommitted edits, so the story silently appends new beats onto beats
+describing content that has since changed. `content_fingerprint` covers the
+resolved inventory and the current bytes of every file in it, and is
+deliberately conservative — it may report a change that does not matter, and
+the *resume anyway* choice below exists for exactly that.
 
 **Unchanged** — offer to resume from the first outline entry that is not `done`.
 
-**Changed** — say so explicitly, naming both SHAs, and offer three choices:
+**Changed** — say so explicitly, naming both SHAs (or, for a working-tree
+story, saying the content has changed since the story was written), and offer
+three choices:
 
 - *resume anyway* — continue from where it stopped, with a note recorded in the
   file that beats before it describe an older revision

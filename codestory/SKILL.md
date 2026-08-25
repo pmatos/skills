@@ -111,11 +111,13 @@ the same diff against the merge-base without the network.
 | `narratable` | `false` when nothing survives; report the warnings and stop |
 | `target.shape` | `change` or `state` — selects the narration shape (step 6) |
 | `source_ref` | the revision the story describes; when set, read every file **at it** |
+| `content_fingerprint` | set instead when the source is the working tree; what resume must compare, since no SHA moves when an uncommitted edit does |
 | `tier` | `small` / `medium` / `large` — selects the fan-out (step 3) |
 | `loc` | size of what will be narrated: **diff churn** for change targets — added and removed lines, deletions included — file lines for state targets |
 | `files` | the narratable set, each with its own `loc` |
 | `excluded` | dropped, with a reason each |
 | `deleted` | paths the change removes |
+| `missing` | tracked paths gone from disk — report them, they cannot be narrated |
 | `formatting_only` | probably whitespace churn — still narratable |
 | `warnings` | surface every one of these verbatim |
 
@@ -123,6 +125,12 @@ Warnings are never decorative. In particular, **a dirty working tree while
 narrating a branch or PR is a mandatory callout** — the story describes a SHA
 that is not what is on disk, and the reviewer's editor is showing something
 else.
+
+**Symlinks are read as links, never followed.** A symlink's content is its
+link value, which is what the repository stores. Following it would pull an
+outside file's bytes into the story under a repository path. Read one with
+`readlink <path>` (or `git show <source_ref>:<path>`), and say so when a beat
+covers one.
 
 **`source_ref` decides where every read comes from.** A branch or PR target can
 name a commit that is not the one checked out, and then reading a path the

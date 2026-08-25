@@ -51,6 +51,10 @@ When a revision is named above, read the narrated files as
 ordinary read shows you different content, or none where the change adds a file.
 Surrounding context you consult to understand them may be read normally.
 
+If a narrated path is a symlink, its content is the link value: read it with
+`readlink <path>` rather than following it. What it points at may be outside the
+repository, and is not this story's subject.
+
 Your lens: [lens name]
 [the lens's "what it looks for" and "salient" text from references/lenses.md]
 
