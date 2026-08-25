@@ -53,6 +53,7 @@ need to be redone from their tip.
 |------------------|------|-----|
 | Equal | 0 | The normal case; the anchor is the shared tip. |
 | Local strictly ahead | 3 | Unpushed local commits. Safe to rebase, but the force-push publishes them too, so it is called out in the PR comment. |
+| Local ahead, but not tracking the PR branch | 5 | A follow-up branch cut from the PR tip descends from the PR head, so an ancestry test alone calls it "ahead". Pushing it would publish commits the PR never contained, and the lease would not object — the remote has not moved. Identity comes from the tracked upstream, not from ancestry. |
 | Local behind, or diverged | 4 | Someone else already pushed before the rebase even began. Rebasing now and force-pushing would drop their commits. |
 
 The "behind" case is deliberately not auto-resolved with a fast-forward: from the outside it is

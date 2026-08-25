@@ -136,9 +136,12 @@ skill installs on its own, so they share no library with any other skill in the 
    - `BASE_REMOTE` — the remote holding the base repository. For a same-repo PR both are `origin`.
      If no local remote points at the base repository, use its clone URL
      `https://github.com/<base_owner>/<base_repo>.git`; `git fetch` accepts a URL in place of a name.
-6. If `git rev-parse --abbrev-ref HEAD` differs from `HEAD_REF` (a fork checkout may name the local
-   branch differently), note it — the push in Step 7 targets `HEAD_REF` on `PUSH_REMOTE` explicitly,
-   so the local name never has to match.
+6. The local branch **name** need not match `HEAD_REF` — a fork checkout often names it differently,
+   and Step 7 targets `HEAD_REF` on `PUSH_REMOTE` explicitly. What must be established is that this
+   checkout **is** the PR branch, which Step 2 verifies: descending from the PR head is not proof of
+   being it. A follow-up branch cut from the PR tip descends from it too, and force-pushing that HEAD
+   would publish commits the PR never contained — with the lease raising no objection, since the
+   remote has not moved.
 
 ### Step 2: Capture the lease anchor, then fetch the base
 
@@ -149,8 +152,13 @@ scripts/capture-lease.sh "$PUSH_REMOTE" "$HEAD_REF"
 stdout is `EXPECTED_REMOTE_SHA`. Act on the exit code:
 
 - **0** — the local tip equals the remote head. Proceed.
-- **3** — the local branch is strictly ahead (unpushed local commits). Proceed, and say in Step 7's
-  comment that the push also published those commits.
+- **3** — the local branch is strictly ahead (unpushed local commits) **and** tracks
+  `<PUSH_REMOTE>/<HEAD_REF>`, so it really is the PR branch. Proceed, and say in Step 7's comment
+  that the push also published those commits.
+- **5** — HEAD is ahead of the PR head but this checkout does not track it: it is a different branch
+  that merely descends from the PR tip. **Stop** with `exit reason: branch-mismatch`. Check out the
+  PR head first (`gh pr checkout <n>`) and re-run; do not push a HEAD whose identity as the PR branch
+  was never established.
 - **4** — the local branch is behind or has diverged: another writer pushed to this branch. **Stand
   down.** Report their commits (the script prints the range) and stop. Do not reset, do not
   fast-forward silently — reconciling someone else's commits with the local ones is the user's call.
@@ -298,6 +306,7 @@ second one:
 | Dirty worktree, or a rebase already in progress | Step 0 | `dirty-worktree` |
 | No open PR for the branch, or several | Step 1 | stop, no guess |
 | Another writer pushed before the rebase started | Step 2, exit 4 | `concurrent-writer` |
+| HEAD descends from the PR head but is not the PR branch | Step 2, exit 5 | `branch-mismatch` |
 | Conflict cannot be resolved confidently | Step 4 | `rebase-conflict` (after `git rebase --abort`) |
 | Gate red from a regression that resists fixing | Step 6 | `gate-failure` (no push) |
 | Remote head moved while the rebase ran | Step 7, exit 4 | `concurrent-writer` |

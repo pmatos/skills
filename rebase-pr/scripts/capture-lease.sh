@@ -14,9 +14,12 @@
 # Exit codes:
 #   0  local tip == remote head; safe to rebase
 #   2  usage error, not a repository, missing remote branch, or remote unreachable
-#   3  local is strictly ahead of the remote (unpushed local commits); safe to
-#      rebase, but the eventual force-push will also publish those commits
+#   3  local is strictly ahead of the remote (unpushed local commits) AND this
+#      checkout tracks <remote>/<branch>; safe to rebase, but the eventual
+#      force-push will also publish those commits
 #   4  local is behind, or has diverged from, the remote: another writer is active
+#   5  local is ahead of the remote, but this checkout is NOT the PR branch --
+#      pushing it would publish commits that do not belong to the PR
 
 set -euo pipefail
 
@@ -53,6 +56,16 @@ fi
 
 if git merge-base --is-ancestor "$remote_sha" "$local_sha"; then
   ahead=$(git rev-list --count "$remote_sha..$local_sha")
+  # Descending from the PR head is NOT proof of being the PR branch: a follow-up
+  # branch cut from the PR tip descends from it too, and force-pushing that HEAD
+  # would publish commits the PR never contained. The lease cannot catch it --
+  # the remote has not moved. Require a tracked identity instead.
+  upstream=$(git rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null || true)
+  if [ "$upstream" != "$remote/$branch" ]; then
+    echo "capture-lease: HEAD is $ahead commit(s) ahead of $remote/$branch, but this checkout does not track it (upstream: ${upstream:-none})." >&2
+    echo "capture-lease: refusing to treat it as the PR branch. Check out the PR head first, e.g. 'gh pr checkout <n>'." >&2
+    exit 5
+  fi
   echo "capture-lease: local branch is ahead of $remote/$branch by $ahead commit(s); the force-push will publish them" >&2
   exit 3
 fi
