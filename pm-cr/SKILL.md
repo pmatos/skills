@@ -88,8 +88,12 @@ cannot resolve a single repository, or when the fetch in Step 3 fails.
 `git remote` lists, take the first of these that answers, substituting that
 pass's remote for `<remote>` in both:
 
-1. `git symbolic-ref refs/remotes/<remote>/HEAD`, stripping only the
-   `refs/remotes/` prefix → `{remote, branch}`.
+1. `git symbolic-ref refs/remotes/<remote>/HEAD`, stripping the whole
+   `refs/remotes/<remote>/` prefix so `branch` is bare, the shape the record
+   declares — `refs/remotes/origin/main` → `main`,
+   `refs/remotes/origin/release/v2` → `release/v2`. Step 3 fetches it as
+   `git fetch <remote> <branch>`, and `local_ref` re-qualifies it as
+   `<remote>/<branch>` → `{remote, branch}`.
 2. `gh repo view --json defaultBranchRef -q .defaultBranchRef.name` against
    that remote's repo, which returns a bare name → `{remote, name}`.
 
