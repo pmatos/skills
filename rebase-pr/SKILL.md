@@ -123,12 +123,19 @@ skill installs on its own, so they share no library with any other skill in the 
    `git remote` order. The names only prioritize; none is required.
 3. **If a PR number was given**, resolve which repository it belongs to before reading it. A PR
    number is scoped to the repository the PR was opened against — the **base** repository, which in
-   a fork checkout is not the fork. Try each pair in `REPO_CANDIDATES` order, take the first that
-   returns the PR, and set `PR_REPO` to it. Ordering matters, not just coverage: if the fork carries
-   its own PR of that number, querying it first returns that unrelated PR and every later step binds
-   to *its* `HEAD_REF` / `BASE_REF`. The argument may also be given as `owner/repo#N` or a full PR
-   URL, which names the repository outright and skips the candidate order — prefer it when in doubt.
-   Read the PR with
+   a fork checkout is not the fork. Query **every** pair in `REPO_CANDIDATES` for that number and
+   require exactly one *distinct base repository* to answer — the same rule the auto-detect path
+   below applies, for the same reason. Do **not** take the first that answers: PR numbers are
+   per-repository, so a fork and its base can both have a PR *N*, and item 2's ordering is only a
+   heuristic over remote names — with the base remote named something like `central` and the fork as
+   `origin`, the fork is queried first and `PR_REPO` / `BASE_REF` would bind to its unrelated PR.
+   Head-repository validation does not catch that, because the fork legitimately *is* in
+   `REPO_CANDIDATES`; and if both PRs share the fork's head branch, Step 2 exits 0, Step 4 rebases
+   onto the wrong base, and Step 7 force-pushes with the lease raising no objection. Item 2 already
+   deduplicates the candidate pairs, so a remote aliasing the same repository does not trip the
+   exactly-one rule. More than one distinct base repository answering → stop and say so; the
+   argument may then be given as `owner/repo#N` or a full PR URL, which names the repository outright
+   and resolves the ambiguity. Read the PR with
    `gh pr view <n> -R "$PR_REPO" --json number,headRefName,baseRefName,mergeable,headRepository,headRepositoryOwner,url,title`,
    then validate that `headRepository.nameWithOwner` is in `REPO_CANDIDATES` (item 5 resolves it to a
    specific remote); if it matches none, stop rather than pushing somewhere unverified.
@@ -357,9 +364,14 @@ For each failing command, classify it once (see `references/quality-gate.md`):
 
   (On git older than 2.45, `--autosquash` needs `--interactive` alongside it; with
   `GIT_SEQUENCE_EDITOR=true` accepting the already-reordered todo list, that stays non-interactive.)
-  Squashing into an earlier commit replays the branch, so re-run the failing gate command afterwards
-  — and if it conflicts, Step 4's conflict rules apply unchanged. Adding a plain follow-up commit is
-  always an acceptable alternative when the fix does not belong to any single commit.
+  **After any fix — amend, autosquash, or follow-up commit — re-run every command in `GATE`, not
+  just the one that failed.** A fix that satisfies the failing step can break a step that passed
+  earlier: a lint fix that reformats a file the build reads, an autosquash that replays every later
+  commit onto new content. Re-running only the failing command leaves that breakage unobserved, and
+  Step 7 would then force-push it — contradicting this step's own closing rule, since the skill would
+  not *know* the gate was broken. If the replay conflicts, Step 4's conflict rules apply unchanged.
+  Adding a plain follow-up commit is always an acceptable alternative when the fix does not belong to
+  any single commit.
 - **PRE-EXISTING** — it fails on the base branch too. Do not chase it. Verify **once**, with
   evidence: on a clean worktree `git switch --detach "$BASE_SHA"`, run only the failing command,
   then `git switch -` back to the branch. Record the evidence (command, exit status, one-line
