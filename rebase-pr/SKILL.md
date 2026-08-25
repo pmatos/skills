@@ -54,8 +54,8 @@ Override via prompt arguments (e.g. `/rebase-pr 42 --watch-ci --ci-budget 20`).
 | Operation | Command |
 |-----------|---------|
 | Preflight | `gh auth status` |
-| Resolve the PR for the current branch | `gh pr list -R "$PR_REPO" --head <branch> --state open --json number,headRefName,headRepositoryOwner,baseRefName,url` |
-| Read PR head/base/mergeability | `gh pr view <n> -R "$PR_REPO" --json number,headRefName,baseRefName,mergeable,headRepositoryOwner,url,title` |
+| Resolve the PR for the current branch | `gh pr list -R "$PR_REPO" --head <branch> --state open --json number,headRefName,headRepository,headRepositoryOwner,baseRefName,url` |
+| Read PR head/base/mergeability | `gh pr view <n> -R "$PR_REPO" --json number,headRefName,baseRefName,mergeable,headRepository,headRepositoryOwner,url,title` |
 | Report what was rebased | `gh pr comment <n> -R "$PR_REPO" --body-file <tmpfile>` |
 | Wait for post-push CI (opt-in) | `gh pr checks <n> -R "$PR_REPO" --watch --interval <POLL_INTERVAL>` |
 
@@ -104,27 +104,35 @@ skill installs on its own, so they share no library with any other skill in the 
 2. Parse `git remote get-url origin` into `ORIGIN_OWNER` / `ORIGIN_REPO` (strip `git@github.com:`,
    `https://github.com/`, and a trailing `.git`) and set `PR_REPO = <ORIGIN_OWNER>/<ORIGIN_REPO>`.
 3. If a PR number was given, read it with
-   `gh pr view <n> -R "$PR_REPO" --json number,headRefName,baseRefName,mergeable,headRepositoryOwner,url,title`.
+   `gh pr view <n> -R "$PR_REPO" --json number,headRefName,baseRefName,mergeable,headRepository,headRepositoryOwner,url,title`.
    Otherwise look it up, stopping at the first tier that yields exactly one match:
-   - **Origin.** `gh pr list -R "$PR_REPO" --head "$BRANCH" --state open --json number,headRefName,headRepositoryOwner,baseRefName,url`,
-     then **keep only PRs whose `headRepositoryOwner.login` equals `ORIGIN_OWNER`**. That filter is
-     load-bearing, not belt-and-braces: `--head` matches on branch name alone (`gh` rejects the
-     `owner:branch` qualifier), and a base repository's PR list includes every cross-repository PR
+   - **Origin.** `gh pr list -R "$PR_REPO" --head "$BRANCH" --state open --json number,headRefName,headRepository,headRepositoryOwner,baseRefName,url`,
+     then **keep only PRs whose `headRepository.nameWithOwner` equals `PR_REPO`** (compose it from
+     `headRepositoryOwner.login` + `headRepository.name` if your `gh` predates `nameWithOwner`). That
+     filter is load-bearing, not belt-and-braces: `--head` matches on branch name alone (`gh` rejects
+     the `owner:branch` qualifier), and a base repository's PR list includes every cross-repository PR
      opened from a fork — so an unfiltered lookup can return a stranger's PR whose head branch merely
      shares a name with yours. Rebasing and force-pushing someone else's PR is not a recoverable
-     mistake.
+     mistake. Match the full `owner/repo` pair, not the owner alone: one account can own several
+     repositories with the same branch name, and the owner-only test cannot tell them apart.
    - **Upstream (fork checkout).** If the filtered origin lookup found nothing and
      `git remote get-url upstream` exists, parse it the same way, set `PR_REPO` to it, and repeat the
-     query — still filtering on `headRepositoryOwner.login == ORIGIN_OWNER`, since the head branch
-     lives in your fork, not in the base repository.
+     query — but now filter `headRepository.nameWithOwner` against the **origin** pair
+     (`ORIGIN_OWNER/ORIGIN_REPO`), since the head branch lives in your fork, not in the base
+     repository that `PR_REPO` now names.
 
    Zero matches after filtering, or more than one, → stop and say so; never guess.
 4. Capture `PR_NUMBER`, `HEAD_REF` (`headRefName`), and **`BASE_REF` (`baseRefName`) — the base branch
    is whatever the PR says it is, not a hardcoded `main`.**
 5. Resolve the two remotes by matching `git remote -v` URLs (strip `git@github.com:`,
    `https://github.com/`, and a trailing `.git`):
-   - `PUSH_REMOTE` — the remote holding `headRepositoryOwner.login`'s copy of the head branch. This
-     is where the force-push goes. For a fork PR it is the fork, not the base repository.
+   - `PUSH_REMOTE` — the remote whose URL resolves to `headRepository.nameWithOwner`, the **full
+     owner/repo pair** of the head repository. This is where the force-push goes; for a fork PR it is
+     the fork, not the base repository. Matching on the owner alone is not enough: the same account
+     may have several remotes here, and if two of their repositories carry a branch of this name the
+     lease would be captured against — and the push aimed at — the wrong one, safely overwriting a
+     branch that has nothing to do with this PR. If no remote matches the pair, stop rather than
+     guessing; a lease is only as meaningful as the ref it is armed against.
    - `BASE_REMOTE` — the remote holding the base repository. For a same-repo PR both are `origin`.
      If no local remote points at the base repository, use its clone URL
      `https://github.com/<base_owner>/<base_repo>.git`; `git fetch` accepts a URL in place of a name.
@@ -162,7 +170,7 @@ Only if they state none, infer from the manifests:
 | `package.json` | the `format`/`lint`/`typecheck`/`test`/`build` scripts that exist, via the lockfile's package manager (`npm run`, `pnpm`, `yarn`) |
 | `pyproject.toml` | `uv run ruff format --check .`, `uv run ruff check .`, `uv run ty check`, `uv run pytest` — or the `hatch`/bare-`pytest` equivalents when `uv.lock` is absent |
 | `Cargo.toml` | `cargo fmt --check`, `cargo clippy`, `cargo test`, `cargo build` |
-| `go.mod` | `gofmt -l .`, `go vet ./...`, `go test ./...`, `go build ./...` |
+| `go.mod` | `gofmt -l .`, `go vet ./...`, `go test ./...`, `go build ./...` — `gofmt -l` recurses, but exits **0** even when it lists unformatted files, so judge that step by its output, not its exit status |
 | `Makefile` | whichever of `make fmt`, `make lint`, `make test`, `make check`, `make ci` exist |
 | `.pre-commit-config.yaml` | `pre-commit run --all-files` |
 
@@ -191,7 +199,10 @@ On a conflict, loop until the rebase completes:
 5. **Verify before continuing.** All three must hold:
    - `git diff --name-only --diff-filter=U` — empty (nothing unmerged left).
    - `git diff --name-only` — empty (nothing resolved-but-unstaged).
-   - `git grep -nE '^(<<<<<<< |=======$|>>>>>>> )' -- <resolved paths>` — no hits.
+   - `git grep -nE '^(<{7}|\|{7}|={7}|>{7})( |$)' -- <resolved paths>` — no hits. The `|||||||`
+     alternative matters: under `merge.conflictStyle = diff3` or `zdiff3` git emits a base section
+     delimited by it, and a pattern covering only the other three markers passes a resolution that
+     still carries the base text.
    If any fails, go back to item 1 rather than continuing over a half-resolved tree.
 6. `GIT_EDITOR=true git rebase --continue`. The override is mandatory: a real editor has nothing to
    attach to in a headless run and the command would hang. **No git invocation in this skill may open
