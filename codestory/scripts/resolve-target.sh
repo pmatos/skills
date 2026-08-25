@@ -342,18 +342,31 @@ case "$kind" in
   path)
     [ -n "$ref" ] || die "--kind path needs --ref <file-or-directory>"
     path_arg="$ref"
+    # Both probes go through `path_exists`, which accepts a symlink whose
+    # destination is gone. A bare `-e` follows the link and calls it absent, so
+    # `--kind path --ref <broken-link>` used to die here on a file that
+    # `--kind project` narrates happily — and a relative one would have skipped
+    # the rebase below before dying on the un-rebased name.
     case "$path_arg" in
       /*) ;;
       *)
-        if [ -e "$invocation_cwd/$path_arg" ]; then
+        if path_exists "" "$invocation_cwd/$path_arg"; then
           path_arg="$invocation_cwd/$path_arg"
         fi
         ;;
     esac
-    [ -e "$path_arg" ] || die "no such file or directory: $ref"
+    path_exists "" "$path_arg" || die "no such file or directory: $ref"
     # `ref` feeds the story slug, so it must name the same target from any
     # directory — otherwise resume silently forks into a second story file.
-    if resolved="$(realpath --relative-to="$repo_root" "$path_arg" 2>/dev/null)"; then
+    # The parent is canonicalised physically, so a symlinked directory on the
+    # way in still lands on one slug; the final component is kept as written.
+    # Resolving that too would name a symlink's *target* — a story about
+    # `good.lnk` was filed under the slug `target.txt`, colliding with the
+    # story about the target itself — and would fail outright on a broken link.
+    slug_parent="$(realpath -- "$(dirname -- "$path_arg")" 2>/dev/null || printf '')"
+    if [ -n "$slug_parent" ] &&
+      resolved="$(realpath --no-symlinks --relative-to="$repo_root" -- \
+        "$slug_parent/$(basename -- "$path_arg")" 2>/dev/null)"; then
       ref="$resolved"
     fi
     [ "$ref" != "." ] || ref=""
@@ -598,13 +611,19 @@ done
 # NUL framing for the same reason the enumerations use it: a pathname can
 # contain anything but NUL. Errs toward reporting a change, never away from it.
 content_fingerprint() {
-  local path i
+  local path i mode
   local -a regular=() links=() batch=()
   for path in ${kept_paths[@]+"${kept_paths[@]}"}; do
     if [ -L "$path" ]; then links+=("$path"); else regular+=("$path"); fi
   done
   {
-    printf 'kind\0%s\0ref\0%s\0' "$kind" "$ref"
+    # `base_sha` is in the hash because a working-tree story is a diff against
+    # it: `git reset --mixed` moves HEAD without touching a single byte on
+    # disk, and the story's whole subject changes while its content does not.
+    # State-shaped targets leave `base_sha` empty, which is exactly right —
+    # hashing the checkout commit there would stale every path and project
+    # story on an unrelated commit.
+    printf 'kind\0%s\0ref\0%s\0base\0%s\0' "$kind" "$ref" "$base_sha"
     for i in ${excluded_paths[@]+"${!excluded_paths[@]}"}; do
       # Exclusion records are in the hash so that a change in *coverage* is
       # detected — but not the skill's own output. `.stories/` fills up as the
@@ -621,7 +640,14 @@ content_fingerprint() {
     for path in ${links[@]+"${links[@]}"}; do
       printf 'l\0%s\0%s\0' "$path" "$(readlink -- "$path" 2>/dev/null)"
     done
-    for path in ${regular[@]+"${regular[@]}"}; do printf 'f\0%s\0' "$path"; done
+    # The executable bit is the one mode git records for a regular file, and
+    # `chmod +x` on an already-edited file is a change with identical bytes.
+    # Not applied to symlinks: `-x` follows them, and their value is hashed
+    # above.
+    for path in ${regular[@]+"${regular[@]}"}; do
+      if [ -x "$path" ]; then mode=x; else mode=-; fi
+      printf 'f\0%s\0%s\0' "$path" "$mode"
+    done
     # Blob hashes for those regular files, in the order just listed. Batched so
     # a whole-project target costs a handful of git processes, not one per file.
     for path in ${regular[@]+"${regular[@]}"}; do
