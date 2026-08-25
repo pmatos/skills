@@ -47,6 +47,10 @@ Skill `/pm-plan` (dual-harness) that performs deep, multi-phase implementation p
 
 Slash command `/pm-cr` that reviews the current diff, or a PR/branch/path target, for correctness bugs and reuse/simplification/efficiency/altitude/conventions cleanups at a chosen effort level (low/medium/high/xhigh/max/ultra, defaulting to whatever was last used this conversation). Low/medium favor precision; high through max fan out across up to 10 parallel finder angles, verify each candidate (3-state at medium, recall-biased above it), and xhigh/max add a gap-sweep pass. `--fix` applies the findings directly, `--comment` posts them as inline PR comments, `ultra` (no local cloud access) falls back to a local max-effort review. Mechanics live in `references/angles.md`, `references/effort-levels.md`, and `references/output-and-flags.md`.
 
+## pm-simplify
+
+Slash command `/pm-simplify` that cleans up the changed code without changing behavior. Reviews the diff for reuse, simplification, efficiency, and altitude issues via four parallel review agents (falling back to a single inline pass when no native subagent tool is available), then fixes what it finds directly. Quality only — does not hunt for correctness bugs.
+
 ## fork
 
 Slash command `/fork` that accepts a prompt and implements it with both Claude Code and OpenAI Codex CLI in parallel git worktrees. After both finish, runs the best-of skill to compare implementations and pick the winner.
@@ -62,3 +66,7 @@ Slash command `/is-skill` that analyzes the current session's conversation, cont
 ## upscale
 
 Skill that upscales raster images with a local OpenCV EDSR super-resolution model, writes an exact requested pixel size, and verifies the final dimensions.
+
+## codestory
+
+Slash command `/codestory` that turns a PR, branch, working-tree diff, file, path or whole project into a flow-ordered story told beat by beat, pausing after each beat so the reader can ask for more detail or move on. Built for code review: it explains so the human can judge and never issues verdicts itself. Lens subagents (interfaces, control flow, dependencies, IO, error handling, situating context, tests-as-spec) gather leads only — the narrator re-reads the source before every beat, and every excerpt carries a `path:line` anchor. Fan-out shape follows a size tier computed by `scripts/resolve-target.sh`. The story accumulates at `.stories/<slug>.md` and is resumable.

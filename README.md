@@ -159,6 +159,22 @@ What it does:
 
 Trigger phrases: `code review this`, `review this PR`, `review the diff`, `review my changes`, `review at high effort`, `review with fixes`.
 
+### `/pm-simplify` — Simplify
+
+```bash
+npx skills@latest add pmatos/skills/pm-simplify
+```
+
+Cleans up the changed code without changing behavior. Reviews the diff for reuse, simplification, efficiency, and altitude issues, then fixes what it finds directly. Quality only — it does not hunt for correctness bugs.
+
+What it does:
+- Gathers the diff under review — the PR's base branch (or the remote's default branch) three-dot-diffed against `HEAD`, plus uncommitted working-tree changes and any untracked files (nothing gets staged) — or reviews an explicit PR/branch/path argument.
+- If a native subagent tool (the `Agent`/`Task` tool) is available, launches four parallel review agents — one per angle: **Reuse** (re-implemented functionality that already exists in the codebase), **Simplification** (redundant state, copy-paste, deep nesting, dead code), **Efficiency** (redundant computation/I/O, sequential independent work, closures that leak large captured scopes), and **Altitude** (special cases bolted onto shared infrastructure instead of a deeper fix).
+- Without a native subagent tool, works through all four angles inline in a single pass instead, and says so in its summary.
+- Dedups overlapping findings and fixes each directly, skipping anything that would change behavior, reach outside the diff, or looks like a false positive — noting the skip rather than arguing with it.
+
+Trigger phrases: `simplify this`, `simplify the diff`, `clean up this code`, `clean up the changed code`, `reuse pass`, `simplification pass`, `efficiency pass`, `altitude pass`.
+
 ### `/fork` — Dual-Model Implementation
 
 ```bash
@@ -278,6 +294,29 @@ What it does:
 Trigger phrases: `upscale image`, `enlarge this image`, `super-resolve`, `make this higher resolution`, `make a 5120x2160 version`.
 
 **Requires**: [`uv`](https://github.com/astral-sh/uv) for the bundled script, plus network access on first use to download the EDSR model.
+
+### `codestory` — Code as a Running Narrative
+
+```bash
+npx skills@latest add pmatos/skills/codestory
+```
+
+Turns a PR, branch, working-tree diff, file, path or whole project into a story told alongside the code, so a reviewer can check whether it does what they expect.
+
+What it does:
+- Narrates in **beats** — one narrative idea each — pausing after every beat to offer *continue*, *go deeper*, *show the verbatim code*, or *skip this area*.
+- Follows the code's **flow**, not the file order. For a PR or branch the story is about the *change*: what it did before, what it does now, what that means for callers.
+- Tells the story **against the stated intent** (PR description, commit messages, linked issue) and flags what the code does that the intent never mentioned.
+- Dispatches **lens subagents** — interfaces, control/data flow, external dependencies, IO and side effects, error handling, situating context, tests-as-specification — which produce *leads*, never prose. The narrator re-reads the source before describing anything.
+- Anchors every excerpt to `path:line`; simplified excerpts, inferences and invented examples all carry explicit markers.
+- **Explains, never judges** — it will say "this early return skips the cleanup below", never "this is a bug". Verdicts belong to the reviewer.
+- Scales by size tier (read-everything / partition-and-synthesise / structural map with lazy reads), computed deterministically and shown before it is spent.
+- Reports every skipped file (lockfiles, generated, vendored, binaries) so nothing is silently unnarrated.
+- Accumulates the story at `.stories/<slug>.md` as it goes; resumable, with a staleness check against the recorded SHA.
+
+Trigger phrases: `walk me through this code`, `tell me the story of this PR`, `explain this branch`, `help me review this`, `what does this code actually do`, `codestory`.
+
+**Requires**: a git repository. [`gh`](https://cli.github.com/) only for PR targets and issue context — it degrades to history-only when absent. Interactive only; there is no headless mode.
 
 ## License
 
