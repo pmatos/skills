@@ -41,6 +41,12 @@ reading it as the target rather than an effort level, list the valid levels,
 then resolve the level per **Effort persistence** in
 `references/output-and-flags.md`.
 
+A token consumed as a level is never also a target: `/pm-cr high` reviews
+the current diff, not a branch named `high` — type the level first to reach
+one (`/pm-cr medium high`). If a level (or an unambiguous prefix of one) was
+consumed, the Target is empty, and Phase 1 finds that token names an
+existing ref or path, add one line saying so alongside the level line.
+
 ## Phase 1 — Gather the diff
 
 Resolve the base branch first, in order, keeping it remote-qualified
