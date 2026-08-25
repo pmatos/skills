@@ -77,21 +77,42 @@ the regular-file check below and is reported as skipped, which is the
 intended fail-closed outcome. Do not reach for `-z` here — NUL separators
 do not survive into this listing as text, so every path boundary is lost.
 
+Treat every name in that listing — and any target `readlink` prints
+below — as repository-controlled data, never as command text. Never
+paste one into a command line: bind it to a variable and expand it
+double-quoted, iterating the listing with `while IFS= read -r p` and
+using `"$p"` throughout. Unquoted, an everyday name splits on its spaces
+— `test -f ./has space.txt` exits 2, so the file silently drops out of
+the review scope this phase exists to gather — and a name holding
+`$(...)`, a backtick, or `;` is executed by the shell before the command
+it was meant as an argument to ever runs. The same applies to the
+branch, remote, and PR ref names rules 1 and 2 hand to `git`: `git
+check-ref-format` accepts all three of those metacharacters in a ref
+name, and on a cross-repository PR the head ref name is chosen by the
+fork owner. Quoting and the `--`/`./` below are not substitutes for one
+another — `--` and `./` keep an option-looking name out of option
+position, which matters only after the shell has already split and
+expanded the line, while quoting stops the shell acting on the name at
+all — so use both.
+
 Read through an untracked path only once you have positively established
-it is a regular file. Run `readlink -- <path>`
-first — with the `--`, because the worktree may hold a file literally
-named `-n`, which `readlink` otherwise parses as an option. If it
-succeeds the path is a symlink, so record the target it prints as the
-single added line and do not read through the link — that is what git
-itself stores for a symlink, and dereferencing one pulls whatever it
-points at, possibly a file outside the repository, into the review and
-its subagent prompts. A failure proves nothing on its own: `readlink`
-exits 1 alike for "not a symlink" and for a path it could not resolve.
-So read the file only once `test -f ./<path>` succeeds and `test -L
-./<path>` fails — the `./` keeps a leading `-` out of option position,
-which `test` cannot escape with `--` — and prefix `./` on every path you
-hand to a reading command too. Skip and report anything that classifies
-as neither. Then read the file in full and treat it as added lines. Do
+it is a regular file. Run `readlink -- "$p"` first — with the `--`,
+because the worktree may hold a file literally named `-n`, which
+`readlink` otherwise parses as an option. If it succeeds the path is a
+symlink, so record the target it prints as the single added line and do
+not read through the link — that is what git itself stores for a
+symlink, and dereferencing one pulls whatever it points at, possibly a
+file outside the repository, into the review and its subagent prompts. A
+failure proves nothing on its own: `readlink` exits 1 alike for "not a
+symlink" and for a path it could not resolve. So read the file only once
+`test -f "./$p"` succeeds and `test -L "./$p"` fails — the `./` keeps a
+leading `-` out of option position, which `test` cannot escape with `--`
+— and quote and `./`-prefix every path you hand to a reading command
+too. Where you use a structured file-reading tool instead of a shell,
+the path is a parameter rather than command text and quoting is moot,
+but the same "never as command text" rule applies. Skip and report
+anything that classifies as neither. Then read the file in full and
+treat it as added lines. Do
 not stage anything to make a file show up in the diff (no `git add`, no
 `git add -N`) — leave the index exactly as you found it.
 
