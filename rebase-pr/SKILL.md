@@ -272,14 +272,21 @@ from the manifests:
 | `Makefile` | whichever of `make fmt`, `make lint`, `make test`, `make check`, `make ci` exist |
 | `.pre-commit-config.yaml` | `pre-commit run --all-files` |
 
-**Re-run this discovery after Step 4's rebase** whenever the replayed base brought in a new or
-changed `CLAUDE.md` / `AGENTS.md` (`git diff --name-only "$ORIGINAL_HEAD" HEAD -- '*CLAUDE.md' '*AGENTS.md'`
-is enough to tell). This walk reads the *checked-out* tree, which at Step 3 is still the pre-rebase
-PR branch — so a package's instruction file that the **base** added after the PR diverged is
-invisible here, and the gate would run without the checks that file mandates before the branch is
-force-pushed. That is the same failure the paragraph above argues against, arriving from the other
-direction. Post-rebase discovery is a strict superset: it sees base-added *and* PR-added instruction
-files, which reading them from `BASE_SHA` alone would not.
+**Re-run this discovery after Step 4's rebase**, unconditionally. Everything it reads can change
+underneath it: not just `CLAUDE.md` / `AGENTS.md`, but every manifest and lockfile in the table below
+— a base that adds a `lint` script to `package.json`, or switches package manager by replacing the
+lockfile, redefines the gate without touching an instruction file at all. Narrowing the trigger to
+instruction files would leave `GATE` derived from the pre-rebase tree in exactly those cases. The
+walk is a handful of file reads with no side effects, so re-running it costs nothing worth
+conditioning on; if the merged command set comes back identical, say so in one line and move on.
+
+The reason it must run twice rather than only once, later, is that this walk reads the *checked-out*
+tree — at Step 3 that is still the pre-rebase PR branch, so a package's instruction file the **base**
+added after the PR diverged is invisible here, and the gate would run without the checks that file
+mandates before the branch is force-pushed. That is the same failure the paragraph above argues
+against, arriving from the other direction. Post-rebase discovery is a strict superset: it sees
+base-added *and* PR-added instructions and manifests, which reading them from `BASE_SHA` alone would
+not.
 
 Record the resulting list as `GATE`. Never assume `npm run *`. Also note any known-failure list the
 project's instructions record — see `references/quality-gate.md` for why that list belongs in the
