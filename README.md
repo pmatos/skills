@@ -138,6 +138,27 @@ Trigger phrases: `plan this`, `make a plan`, `implementation plan`, `deep plan`,
 
 **Requires**: nothing extra on the native Claude Code path. On the Codex CLI (shell) path: `codex` invoked with `--sandbox workspace-write` (or higher) and the `claude` CLI authenticated and on `$PATH`.
 
+### `/pm-cr` — Code Review
+
+```bash
+npx skills@latest add pmatos/skills/pm-cr
+```
+
+Reviews the current diff, or a PR number/branch/path target, for correctness bugs and reuse/simplification/efficiency/altitude/conventions cleanups at a chosen effort level.
+
+What it does:
+- Gathers the diff under review (`git diff <base>...HEAD` against the resolved default branch — `origin/HEAD` symref, then `gh repo view --json defaultBranchRef`, then a local `main`/`master`, with `HEAD~1` only as a disclosed last resort — plus any uncommitted working-tree changes and any untracked, non-ignored files), or reviews an explicit PR/branch/path argument (a PR or branch target must be checked out — the review is refused with a `gh pr checkout` hint rather than silently diffing the current branch).
+- **low**: a single hunk-only read pass, no subagents, capped at 4 findings.
+- **medium**: 8 parallel finder angles (3 correctness + Reuse/Simplification/Efficiency/Altitude/Conventions), up to 6 candidates each, then a 3-state verify pass (CONFIRMED/PLAUSIBLE/REFUTED) — capped at 8 findings, tuned for precision.
+- **high**: the same 8 angles, but a recall-biased verify pass ("PLAUSIBLE by default") — capped at 10 findings, tuned for recall.
+- **xhigh/max**: 10 parallel finder angles (adds a language-pitfall and a wrapper/proxy-correctness angle), up to 8 candidates each, recall-biased verify, plus a final gap-sweep pass — capped at 15 findings.
+- **ultra**: no local equivalent to the built-in command's cloud multi-agent review, so it falls back to a local max-effort run instead.
+- Falls back to a single inline pass through all angles for a level when no native subagent tool is available, instead of fanning out.
+- `--fix` applies the reported findings to the working tree directly, skipping anything that would change behavior or fall outside the diff. `--comment` posts findings as inline PR comments (GitHub MCP tool, falling back to `gh api`). `--post`/`--no-post` only apply to `ultra` and are otherwise ignored with a note.
+- Reuses the effort level last used earlier in the same conversation when none is given, defaulting to `medium` on first use.
+
+Trigger phrases: `code review this`, `review this PR`, `review the diff`, `review my changes`, `review at high effort`, `review with fixes`.
+
 ### `/pm-simplify` — Simplify
 
 ```bash
