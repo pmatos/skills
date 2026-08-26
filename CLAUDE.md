@@ -39,6 +39,10 @@ Slash command `/wigo` (What Is Going On?) that gives a comprehensive situational
 
 Slash command `/pm-autofix-pr` that iteratively fixes CI failures and addresses reviewer feedback on a GitHub PR from the local CLI. Fetches CI and review state, evaluates each feedback item on its merits, fixes valid issues, replies with no-change rationale for invalid or out-of-scope feedback, auto-resolves merge conflicts with the base branch, runs local pre-commit checks, commits, pushes, and loops until CI is green, the PR has no merge conflicts, and all feedback has an outcome reply.
 
+## rebase-pr
+
+Slash command `/rebase-pr` that rebases a PR branch onto its base branch, resolves conflicts file by file, re-runs the project's detected quality gate, and force-pushes through a `--force-with-lease` armed with an anchor captured *before* the rebase — so a concurrent writer is protected instead of clobbered. `gh` CLI only. Bundles `scripts/capture-lease.sh` (anchor capture plus ahead/behind/diverged classification) and `scripts/safe-force-push.sh` (re-inspect, stand down, or push).
+
 ## pm-plan
 
 Skill `/pm-plan` (dual-harness) that performs deep, multi-phase implementation planning before writing any code. The shared workflow runs under either harness; a capability fork selects the dispatch mechanism for parallel exploration, plan-name generation, and adversarial review: the native `Agent`/`Task` tool (Claude Code) or `claude -p` headless subagents (OpenAI Codex CLI, which has no native subagent tool). Mechanics live in `references/dispatch-claude.md` and `references/dispatch-codex.md`. Produces a structured plan at `.ultraplan/<plan-name>.md`. The shell path requires `codex --sandbox workspace-write` and `claude` on `$PATH`; the native path needs neither.
