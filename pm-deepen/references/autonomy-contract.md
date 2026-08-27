@@ -86,7 +86,7 @@ Done depends on the flags. Anything short of the matching list is a bail-out wit
 5. The picked candidate is implemented **test-first**: a test pinning the adjudicated interface was written and seen to fail, then made to pass.
 6. The project's quality gate passes. Discover it from `CLAUDE.md`/`AGENTS.md` and the manifests, and run each step as a **separate command** — never `&&`-chained, so a flaky step cannot silently skip the ones after it.
 7. A PR is open, whose body carries the problem, the before/after in `codebase-design` vocabulary, a link to the report, the score and the runner-up candidate, the runner-up design and why it lost, any `## Proposed ADR`, and any `CONTEXT.md` terms added.
-8. The backlog entry is `in-flight` with its PR number, committed.
+8. The backlog entry is `in-flight` with its PR number, committed **and pushed**, so the PR itself contains it — a commit that stays local defeats the next run's reconciliation.
 
 **`--no-pr`** — as the default run through condition 6, then: the branch is committed and left unpushed, and the backlog entry stays `proposed` with a note naming the branch. No PR, so no PR number.
 
