@@ -27,11 +27,11 @@ The rule: **an unattended run may sharpen the vocabulary, but it may not record 
 
 Every bail-out **writes an exit report and stops**. Silent no-ops are indistinguishable from a crashed run, which is how an unattended routine rots unnoticed.
 
-**Commit before you stop.** Any artefact already written — report, backlog, work in progress — is committed to the run's branch first. A bail-out that leaves the tree dirty makes the *next* firing bail at preflight too, and the one after that, until a human intervenes. That is the failure this contract exists to prevent, so it must not be the contract's own exit path.
+**Commit before you stop — once the run's branch exists.** Any artefact already written — report, backlog, work in progress — is committed to the run's branch first. Before that branch exists (preflight checks 1 and 2, fetch and clean-tree), there is nothing to commit to and nothing has been written: print the exit report to stdout, record `**Committed**: nothing`, and never commit to the caller's branch. A bail-out that leaves the tree dirty makes the *next* firing bail at preflight too, and the one after that, until a human intervenes. That is the failure this contract exists to prevent, so it must not be the contract's own exit path.
 
 ### The exit report
 
-One markdown block, printed to stdout and appended to `.architecture/backlog.md` under the affected entry (or under a `## Run log` heading when no entry applies). Fixed fields, so a routine can diff successive runs:
+One markdown block, printed to stdout and — once the run's branch exists — appended to `.architecture/backlog.md` under the affected entry (or under a `## Run log` heading when no entry applies). A pre-branch bail (preflight checks 1 and 2) prints it and stops there, writing no file. Fixed fields, so a routine can diff successive runs:
 
 ```markdown
 ### Run <YYYY-MM-DD> — <outcome>
