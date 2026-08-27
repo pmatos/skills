@@ -15,6 +15,25 @@ It covers ruff (Python), shfmt + shellcheck (shell), markdownlint-cli2 (Markdown
 actionlint + zizmor (workflows), and the SKILL.md frontmatter validator. Install
 the git hook once with `pre-commit install`.
 
+## Pull requests
+
+**The PR title must be a Conventional Commit**, enforced by
+`.github/workflows/lint-pr-title.yml`. This is a *separate* check from the
+commit-message hook, and it reads the PR title only — a valid commit message
+does not imply a valid PR title, so a title typed by hand at `gh pr create`
+time is the usual thing that fails.
+
+A skill name is a **scope**, not a type. The type prefix is mandatory:
+
+```text
+feat(pm-deepen): adopt the branch the caller prepared     # correct
+pm-deepen: adopt the branch the caller prepared           # fails: no type
+```
+
+Allowed types: `feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`,
+`build`, `ci`, `chore`, `revert`. Fix a rejected title in place with
+`gh pr edit <n> --title "..."` — the check re-runs on edit, no push needed.
+
 ## cp
 
 Slash command `/cp` that commits and pushes changes to the current branch, running only the pre-commit checks described in the project's CLAUDE.md (or AGENTS.md) — nothing more, nothing less.
@@ -77,4 +96,4 @@ Slash command `/codestory` that turns a PR, branch, working-tree diff, file, pat
 
 ## pm-deepen
 
-Slash command `/pm-deepen` that runs an architecture review end to end with **no questions**, so it is safe for cron jobs, routines and headless firings. Scans for deepening opportunities (shallow modules whose interface is nearly as complex as their implementation), scores each on leverage (doubled), locality, heat and inverted blast radius, auto-picks the top one, explores interfaces via `codebase-design`'s design-it-twice sub-agents, adjudicates the winner with a fresh sub-agent instead of the interactive `grilling` loop, implements it test-first, and opens a PR. The deliverable is a committed markdown report at `.architecture/reviews/<date>-<slug>.md` (GitHub-rendered Mermaid, no `xdg-open`) plus a persisted `.architecture/backlog.md` that dedups against already-landed refactors. Forked from Matt Pocock's [`improve-codebase-architecture`](https://github.com/mattpocock/skills), which is interactive by design; the exploration heuristics, candidate-card fields and vocabulary discipline are his.
+Slash command `/pm-deepen` that runs an architecture review end to end with **no questions**, so it is safe for cron jobs, routines and headless firings. Scans for deepening opportunities (shallow modules whose interface is nearly as complex as their implementation), scores each on leverage (doubled), locality, heat and inverted blast radius, auto-picks the top one, explores interfaces via `codebase-design`'s design-it-twice sub-agents, adjudicates the winner with a fresh sub-agent instead of the interactive `grilling` loop, implements it test-first, and opens a PR. It adopts the branch it was started on when that branch is non-default and carries no commits of its own — the state a headless harness leaves a prepared workspace in, and what keeps the PR discoverable by its head branch — otherwise cutting its own from `origin/<default-branch>`. The deliverable is a committed markdown report at `.architecture/reviews/<date>-<slug>.md` (GitHub-rendered Mermaid, no `xdg-open`) plus a persisted `.architecture/backlog.md` that dedups against already-landed refactors. Forked from Matt Pocock's [`improve-codebase-architecture`](https://github.com/mattpocock/skills), which is interactive by design; the exploration heuristics, candidate-card fields and vocabulary discipline are his.
