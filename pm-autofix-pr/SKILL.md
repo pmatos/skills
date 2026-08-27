@@ -95,7 +95,7 @@ Per-host invocation table (referenced by Step 4):
 | Host | Local Evaluator (clean-context spawn of own model) | Cross-harness Evaluator |
 |------|---------------------------------------------------|-------------------------|
 | `claude` | Agent tool with `model="opus"` | Skill tool with `skill="codex-2nd-opinion"` |
-| `codex` | Bash: `codex exec --full-auto --sandbox read-only --ephemeral - < /tmp/eval-XXXX` (10-min timeout) | Bash: `claude -p --permission-mode auto --output-format text < /tmp/eval-XXXX` (10-min timeout) |
+| `codex` | Bash: `codex exec --sandbox read-only --ephemeral - < /tmp/eval-XXXX` (10-min timeout) | Bash: `claude -p --permission-mode auto --output-format text < /tmp/eval-XXXX` (10-min timeout) |
 
 For Bash-based evaluator spawns, write the prompt to a `mktemp /tmp/eval-XXXXXX` file, run the command with stdin redirection, capture stdout, then `rm -f` the temp file.
 
@@ -182,7 +182,7 @@ For each feedback item not already answered, gather context, then spawn **two su
 
 1. **Local Evaluator** — runs the host model in a clean context. Use the row from Step 0a's per-host invocation table that matches your host:
    - **Claude host:** Agent tool with `model="opus"`.
-   - **Codex host:** Bash with `codex exec --full-auto --sandbox read-only --ephemeral - < /tmp/eval-XXXXXX` (10-minute timeout). Write the prompt via `mktemp` first; `rm -f` after.
+   - **Codex host:** Bash with `codex exec --sandbox read-only --ephemeral - < /tmp/eval-XXXXXX` (10-minute timeout). Write the prompt via `mktemp` first; `rm -f` after.
 
    Provide the comment, code context, PR title/description, and changed files summary. Ask for a **FIX / DEFER / REJECT** verdict with category, confidence, and reasoning. See `references/comment-evaluation.md` for the full prompt template.
 

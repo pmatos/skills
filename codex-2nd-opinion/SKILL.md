@@ -46,7 +46,7 @@ Execute the following command. Codex writes its response to stdout, which the Ba
 
 ```bash
 codex exec \
-  --full-auto --sandbox read-only --ephemeral \
+  --sandbox read-only --ephemeral \
   - < /tmp/codex-2op-XXXXXX  # substitute the actual mktemp path here
 ```
 

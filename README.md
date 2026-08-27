@@ -207,7 +207,7 @@ Implements the same task with both Claude Code and OpenAI Codex CLI in parallel 
 
 What it does:
 - Creates two isolated git worktrees from the current HEAD.
-- Sends the identical prompt to both Claude Code (`claude -p`) and Codex (`codex exec --full-auto`) in parallel.
+- Sends the identical prompt to both Claude Code (`claude -p`) and Codex (`codex exec --sandbox workspace-write`) in parallel.
 - Collects the diffs and commit history from each implementation.
 - Invokes the best-of skill to compare correctness, code quality, and completeness — or performs an inline comparison as a fallback.
 - Merges the winning implementation into the original branch (with user confirmation).

@@ -12,7 +12,7 @@ For each unresolved feedback item, spawn two subagents **in parallel**:
 
 1. **Local Evaluator** — runs the host model in a clean context.
    - Claude host: Agent tool with `model="opus"`.
-   - Codex host: Bash with `codex exec --full-auto --sandbox read-only --ephemeral - < /tmp/eval-XXXXXX` (10-minute timeout; write the prompt with `mktemp` and `rm -f` after).
+   - Codex host: Bash with `codex exec --sandbox read-only --ephemeral - < /tmp/eval-XXXXXX` (10-minute timeout; write the prompt with `mktemp` and `rm -f` after).
 2. **Cross-harness Evaluator** — runs the other harness's model.
    - Claude host: Skill tool with `skill="codex-2nd-opinion"`. **Never** substitute `codex:rescue`, `codex:codex-rescue`, or any other `codex:*` plugin skill — those are unrelated tools.
    - Codex host: Bash with `claude -p --permission-mode auto --output-format text < /tmp/eval-XXXXXX` (10-minute timeout; same `mktemp` / `rm -f` discipline; `--permission-mode auto` keeps `claude` from prompting when run headless inside the loop). **Never** call `codex exec` again here — that would just be the Local Evaluator.

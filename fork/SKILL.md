@@ -95,7 +95,7 @@ claude -p --dangerously-skip-permissions --verbose < "$PROMPT_FILE"
 ```bash
 cd <codex-worktree-path> && \
 CODEX=$(command -v codex || echo "$HOME/node_modules/.bin/codex") && \
-"$CODEX" exec --full-auto - < "$PROMPT_FILE"
+"$CODEX" exec --sandbox workspace-write - < "$PROMPT_FILE"
 ```
 
 No `-m` or `-c` flags for Codex — the user's `~/.codex/config.toml` supplies model and reasoning settings.
