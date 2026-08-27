@@ -56,11 +56,22 @@ Establish that the run can finish before it changes anything. Check in order; on
 2. **Working tree is clean**, ignoring paths under `.architecture/`. Never stash: the stash stack is shared across worktrees and sessions. Uncommitted `.architecture/` files are the residue of an interrupted run, not a reason to bail — step 2 reconciles them.
 3. **Settle the run's branch** now, before anything is written, so every artefact has somewhere to be committed. Never work on the default branch.
 
-   **Adopt the branch you were started on** when it is not the default branch *and* has zero commits ahead of `origin/<default-branch>` (`git rev-list --count origin/<default-branch>..HEAD` is 0). An empty branch cut from the base is a branch a caller made for this run — a headless harness that prepares a workspace, or a human who branched before invoking — and taking it over is what lets that caller find the resulting PR. If the adopted branch is *behind* the base, fast-forward it with `git merge --ff-only origin/<default-branch>`; there are no commits of the run's own to lose, and `--ff-only` fails loudly instead of rewriting anything. If that fails, the branch has diverged from base: fall back to creating a branch, below.
+   **Adopt the branch you were started on** only when it is demonstrably a branch made *for* this run. Taking it over is what lets a caller find the resulting PR — a harness that prepares a workspace derives the branch name deterministically and then looks for the PR by that head — but adopting the wrong branch means committing to and pushing something shared, which the side-effect table forbids. All four must hold:
+
+   1. It is **not the default branch**.
+   2. It has **no unique history**: `git rev-list --count origin/<default-branch>..HEAD` is 0, so there are no commits of anyone else's to build on top of.
+   3. It has **no upstream**: `git rev-parse --abbrev-ref --symbolic-full-name @{u}` fails.
+   4. It is **unpublished**: `refs/remotes/origin/<branch>` does not exist after check 1's fetch.
+
+   Conditions 3 and 4 are the ones that matter, and (2) alone is not a substitute for them. Zero commits ahead proves only that a branch has no history of its own — it is equally true of a long-lived `release/*` branch that is an ancestor of the default branch, or of a topic branch someone left checked out after it merged. Both are shared, both are published, and neither was made for this run. A firing workspace's branch, by contrast, is created locally from the base and has never been pushed by anyone. Ownership, not emptiness, is the evidence.
+
+   If the adopted branch is *behind* the base, fast-forward it with `git merge --ff-only origin/<default-branch>`; there are no commits of the run's own to lose, and `--ff-only` fails loudly instead of rewriting anything. If that fails, the branch has diverged from base: fall back to creating a branch, below.
+
+   Every one of these checks **fails closed** — refusing adoption just means creating a branch, which is the behaviour that predates adoption. A stale remote-tracking ref for a deleted remote branch will refuse adoption too; that is the correct direction to err in.
 
    **Otherwise create one**: name it `pm-deepen/run-<YYYY-MM-DD>-<HHMM>` and cut it from **`origin/<default-branch>`**, not from the local default branch — a fetch updates remote-tracking refs, so branching off local `main` in a stale container still bases the PR on old code.
 
-   Record which path was taken and the branch name in the report and the exit report. The distinction matters twice later: step 2 does not rename an adopted branch, and an adopted branch is the caller's to delete, never this run's.
+   Record which path was taken, the branch name, and — when adoption was refused — which condition refused it, in the report and the exit report. Without that line a harness whose PR went missing has no way to tell why. The distinction matters twice later: step 2 does not rename an adopted branch, and an adopted branch is the caller's to delete, never this run's.
 4. **The quality gate is discoverable**: read `CLAUDE.md`/`AGENTS.md` and the manifests, and record the exact commands. A repo with no test runner cannot be deepened test-first — bail.
 5. **`gh` is available and authenticated**: `gh auth status`. If it is missing or unauthenticated, **degrade to `--report-only`** rather than bailing — a report with no PR is still evidence, and this is the most common cron-container failure. Record it under *Degradations* in the report, and follow the degraded reconciliation rule at step 2.
 

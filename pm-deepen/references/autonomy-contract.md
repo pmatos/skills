@@ -11,7 +11,7 @@ The rule: **an unattended run may sharpen the vocabulary, but it may not record 
 - **Add a term to `CONTEXT.md`** when the deepened module is named after a concept the domain glossary does not yet carry. Create `CONTEXT.md` lazily if absent. This lands in the PR diff, where it is reviewed with everything else.
 - **Sharpen a fuzzy `CONTEXT.md` term** whose current wording is contradicted by the code being deepened. Say so in the PR body.
 - **Create or update `.architecture/backlog.md`** and `.architecture/reviews/<date>-<slug>.md`, and commit them.
-- **Adopt the branch it was started on, or create one**, then commit, push, and open a PR — see *Definitions of done*. Adoption is bounded: only a non-default branch with zero commits ahead of `origin/<default-branch>`, which is a branch prepared *for* this run and carries nothing to lose.
+- **Adopt the branch it was started on, or create one**, then commit, push, and open a PR — see *Definitions of done*. Adoption is bounded to a branch that is demonstrably this run's: non-default, no unique history, **no upstream, and unpublished on origin**. Emptiness alone is not evidence of ownership — a merged topic branch or an ancestor `release/*` branch is also empty, and both are shared. Every condition fails closed to creating a branch.
 - **Write tests**, including tests that pin existing behaviour before it moves.
 
 **May not do without a human:**
