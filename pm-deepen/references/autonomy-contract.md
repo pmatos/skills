@@ -11,7 +11,7 @@ The rule: **an unattended run may sharpen the vocabulary, but it may not record 
 - **Add a term to `CONTEXT.md`** when the deepened module is named after a concept the domain glossary does not yet carry. Create `CONTEXT.md` lazily if absent. This lands in the PR diff, where it is reviewed with everything else.
 - **Sharpen a fuzzy `CONTEXT.md` term** whose current wording is contradicted by the code being deepened. Say so in the PR body.
 - **Create or update `.architecture/backlog.md`** and `.architecture/reviews/<date>-<slug>.md`, and commit them.
-- **Create a branch, commit, push, and open a PR** — see *Definitions of done*.
+- **Adopt the branch it was started on, or create one**, then commit, push, and open a PR — see *Definitions of done*. Adoption is bounded: only a non-default branch with zero commits ahead of `origin/<default-branch>`, which is a branch prepared *for* this run and carries nothing to lose.
 - **Write tests**, including tests that pin existing behaviour before it moves.
 
 **May not do without a human:**
@@ -27,18 +27,18 @@ The rule: **an unattended run may sharpen the vocabulary, but it may not record 
 
 Every bail-out **writes an exit report and stops**. Silent no-ops are indistinguishable from a crashed run, which is how an unattended routine rots unnoticed.
 
-**Commit before you stop — once the run's branch exists.** Any artefact already written — report, backlog, work in progress — is committed to the run's branch first. Before that branch exists (preflight checks 1 and 2, fetch and clean-tree), there is nothing to commit to and nothing has been written: print the exit report to stdout, record `**Committed**: nothing`, and never commit to the caller's branch. A bail-out that leaves the tree dirty makes the *next* firing bail at preflight too, and the one after that, until a human intervenes. That is the failure this contract exists to prevent, so it must not be the contract's own exit path.
+**Commit before you stop — once the run's branch is settled.** Any artefact already written — report, backlog, work in progress — is committed to the run's branch first. Before check 3 settles that branch (preflight checks 1 and 2, fetch and clean-tree), there is nothing to commit to and nothing has been written: print the exit report to stdout, record `**Committed**: nothing`, and never commit to a branch this run has not yet taken over. A bail-out that leaves the tree dirty makes the *next* firing bail at preflight too, and the one after that, until a human intervenes. That is the failure this contract exists to prevent, so it must not be the contract's own exit path.
 
 ### The exit report
 
-One markdown block, printed to stdout and — once the run's branch exists — appended to `.architecture/backlog.md` under the affected entry (or under a `## Run log` heading when no entry applies). A pre-branch bail (preflight checks 1 and 2) prints it and stops there, writing no file. Fixed fields, so a routine can diff successive runs:
+One markdown block, printed to stdout and — once the run's branch is settled — appended to `.architecture/backlog.md` under the affected entry (or under a `## Run log` heading when no entry applies). A pre-branch bail (preflight checks 1 and 2) prints it and stops there, writing no file. Fixed fields, so a routine can diff successive runs:
 
 ```markdown
 ### Run <YYYY-MM-DD> — <outcome>
 
 - **Outcome**: complete | bailed-preflight | bailed-design | bailed-mid-flight | no-candidates
 - **Stopped at**: step <n> — <one-line reason>
-- **Branch**: <branch name — `pm-deepen/run-<date>-<time>`, or `pm-deepen/<slug>` once renamed at step 2>
+- **Branch**: <branch name, and `adopted` or `created` — a created branch is `pm-deepen/run-<date>-<time>`, or `pm-deepen/<slug>` once renamed at step 2; an adopted branch keeps the caller's name throughout>
 - **Committed**: <what was committed, or "nothing">
 - **Evidence**: <failing command and verbatim output, dirty paths, open PR number — whatever a human needs>
 - **Next**: <what a human or the next firing should do>
@@ -49,7 +49,7 @@ One markdown block, printed to stdout and — once the run's branch exists — a
 ### Stop before making any change when
 
 - **The working tree is dirty**, ignoring `.architecture/`. Report the dirty paths. Never stash — the stash stack is shared with other worktrees and sessions.
-- **No branch can be cut from `origin/<default-branch>`.** The slug-collision check (an existing `pm-deepen/<slug>` branch) happens at step 2 instead, because no slug exists until a candidate is picked.
+- **No branch can be settled** — the branch you were started on is not adoptable *and* none can be cut from `origin/<default-branch>`. The slug-collision check (an existing `pm-deepen/<slug>` branch) happens at step 2 instead, because no slug exists until a candidate is picked, and it never fires on an adopted branch.
 - **An `in-flight` backlog entry still has an open PR** *and this run would implement something*. One PR at a time; a second concurrent architecture PR is unreviewable. Report the open PR number. A `--report-only` run is not blocked by this — it opens nothing.
 - **The repo has no test runner**, or the picked candidate's behaviour cannot be pinned by a test. Test-first is not optional here.
 - **No candidate survives the hard filters.** Write the report, commit it, **push the branch** unless `--no-pr`, and exit with outcome `no-candidates`. Committing to an unpushed local branch in a cron container is the same invisibility the temp-file HTML had.
@@ -76,7 +76,7 @@ Done depends on the flags. Anything short of the matching list is a bail-out wit
 
 **Common to every run:**
 
-1. The run worked on its own branch, never the default branch.
+1. The run worked on its own branch — adopted or created — never the default branch.
 2. `.architecture/reviews/<date>-<slug>.md` exists **and is committed**, with every candidate scored out of 25.
 3. `.architecture/backlog.md` is reconciled and committed, with a status for every candidate seen.
 4. The working tree is clean.
@@ -92,7 +92,7 @@ Done depends on the flags. Anything short of the matching list is a bail-out wit
 
 **`--report-only`** — the common four, plus the report's `## Design` section explicitly noting that no design pass ran, and the branch pushed unless `--no-pr` is also set. No implementation and no PR is the *correct* outcome, not a shortfall.
 
-**Pruning.** `--report-only` and `no-candidates` runs push a `pm-deepen/run-*` branch that no PR references, so a recurring routine accumulates them. They carry only `.architecture/` commits: once their content is on the default branch, they are safe to delete. Deleting them is a human's call — this run never removes a branch it did not create in this firing.
+**Pruning.** `--report-only` and `no-candidates` runs that *created* their branch push a `pm-deepen/run-*` branch that no PR references, so a recurring routine accumulates them. They carry only `.architecture/` commits: once their content is on the default branch, they are safe to delete. Deleting them is a human's call — this run never removes a branch it did not create in this firing, and an **adopted** branch is never a prune candidate at all: it belongs to whoever prepared it, who may well have their own retention rules for it.
 
 For the default run the PR is the deliverable. A run that produces a beautiful report and no PR has not finished — that is the failure mode this fork exists to close.
 
