@@ -50,11 +50,28 @@ Parse flags from the invocation. **With no arguments, the run does everything**:
 
 Establish that the run can finish before it changes anything. Check in order; on any failure write the exit report ([autonomy-contract.md](references/autonomy-contract.md)) and stop.
 
-**Checks 1 and 2 run before the run's branch exists, so their bail-outs write nothing.** Print the exit report to stdout, record `**Committed**: nothing`, and commit nothing — the contract's "commit before you stop" rule applies only once there is a branch of the run's own to commit to. Committing here would land `.architecture/` changes on whatever branch the caller happened to have checked out, possibly the default branch, which the side-effect table forbids; and in the dirty-tree case it would commit into the very tree the check exists to protect. Do **not** close this by creating the branch earlier: a clean branch cannot be cut from `origin/<default-branch>` over a dirty tree without carrying or clobbering the caller's work.
+**Checks 1 and 2 run before the run has settled its branch, so their bail-outs write nothing.** Print the exit report to stdout, record `**Committed**: nothing`, and commit nothing — the contract's "commit before you stop" rule applies only once check 3 has adopted or created a branch to commit to. Committing here would land `.architecture/` changes on whatever branch the caller happened to have checked out, possibly the default branch, which the side-effect table forbids; and in the dirty-tree case it would commit into the very tree the check exists to protect. Do **not** close this by settling the branch earlier: neither adoption nor a clean cut from `origin/<default-branch>` is safe over a dirty tree without carrying or clobbering the caller's work.
 
 1. **Fetch first.** `git fetch origin` — a cron container's local branches are routinely days stale, and both the base branch and the PR reconciliation below are read against origin.
 2. **Working tree is clean**, ignoring paths under `.architecture/`. Never stash: the stash stack is shared across worktrees and sessions. Uncommitted `.architecture/` files are the residue of an interrupted run, not a reason to bail — step 2 reconciles them.
-3. **Create the run's branch** now, before anything is written, so every artefact has somewhere to be committed. Name it `pm-deepen/run-<YYYY-MM-DD>-<HHMM>` and cut it from **`origin/<default-branch>`**, not from the local default branch — a fetch updates remote-tracking refs, so branching off local `main` in a stale container still bases the PR on old code. Never work on the default branch.
+3. **Settle the run's branch** now, before anything is written, so every artefact has somewhere to be committed. Never work on the default branch.
+
+   **Adopt the branch you were started on** only when it is demonstrably a branch made *for* this run. Taking it over is what lets a caller find the resulting PR — a harness that prepares a workspace derives the branch name deterministically and then looks for the PR by that head — but adopting the wrong branch means committing to and pushing something shared, which the side-effect table forbids. All four must hold:
+
+   1. It is **not the default branch**.
+   2. It has **no unique history**: `git rev-list --count origin/<default-branch>..HEAD` is 0, so there are no commits of anyone else's to build on top of.
+   3. It has **no upstream**: `git rev-parse --abbrev-ref --symbolic-full-name @{u}` fails.
+   4. It is **unpublished**: `refs/remotes/origin/<branch>` does not exist after check 1's fetch.
+
+   Conditions 3 and 4 are the ones that matter, and (2) alone is not a substitute for them. Zero commits ahead proves only that a branch has no history of its own — it is equally true of a long-lived `release/*` branch that is an ancestor of the default branch, or of a topic branch someone left checked out after it merged. Both are shared, both are published, and neither was made for this run. A firing workspace's branch, by contrast, is created locally from the base and has never been pushed by anyone. Ownership, not emptiness, is the evidence.
+
+   If the adopted branch is *behind* the base, fast-forward it with `git merge --ff-only origin/<default-branch>`; there are no commits of the run's own to lose, and `--ff-only` fails loudly instead of rewriting anything. If that fails, the branch has diverged from base: fall back to creating a branch, below.
+
+   Every one of these checks **fails closed** — refusing adoption just means creating a branch, which is the behaviour that predates adoption. A stale remote-tracking ref for a deleted remote branch will refuse adoption too; that is the correct direction to err in.
+
+   **Otherwise create one**: name it `pm-deepen/run-<YYYY-MM-DD>-<HHMM>` and cut it from **`origin/<default-branch>`**, not from the local default branch — a fetch updates remote-tracking refs, so branching off local `main` in a stale container still bases the PR on old code.
+
+   Record which path was taken, the branch name, and — when adoption was refused — which condition refused it, in the report and the exit report. Without that line a harness whose PR went missing has no way to tell why. The distinction matters twice later: step 2 does not rename an adopted branch, and an adopted branch is the caller's to delete, never this run's.
 4. **The quality gate is discoverable**: read `CLAUDE.md`/`AGENTS.md` and the manifests, and record the exact commands. A repo with no test runner cannot be deepened test-first — bail.
 5. **`gh` is available and authenticated**: `gh auth status`. If it is missing or unauthenticated, **degrade to `--report-only`** rather than bailing — a report with no PR is still evidence, and this is the most common cron-container failure. Record it under *Degradations* in the report, and follow the degraded reconciliation rule at step 2.
 
@@ -85,7 +102,11 @@ Read `.architecture/backlog.md` if it exists and reconcile it against merged and
 
 **Degraded (no `gh`)**: skip the PR reconciliation entirely and leave every `in-flight` entry exactly as it is. Do not guess at PR state, and do not silently drop the step — an unreconciled backlog means `in-flight` entries keep hard-filtering their candidates, so a degraded routine surfaces steadily less over time. Say so under *Degradations* so a reader knows the ranking was made against possibly-stale state.
 
-**Rename the branch once the slug is known.** A run that will implement something renames its branch to `pm-deepen/<slug>` (`git branch -m`); nothing has been pushed yet, so this is free. If `pm-deepen/<slug>` already exists locally or on origin, that candidate is already in flight — bail. A `--report-only` or no-candidates run keeps its run-stamped name.
+**Name the branch after the slug — but only if the branch is this run's to name.** A run that *created* its branch at step 0 and will implement something renames it to `pm-deepen/<slug>` (`git branch -m`); nothing has been pushed yet, so this is free. A `--report-only` or no-candidates run keeps its run-stamped name.
+
+**Never rename an adopted branch.** Its name is the caller's identity for this run — a headless harness derives the branch deterministically and then looks for the resulting PR by that head, so renaming it hides the PR from the very system that asked for the work. Keep the adopted name for the whole run and record the slug in the report and the backlog instead.
+
+Either way, check the slug for collisions: if `pm-deepen/<slug>` already exists locally or on origin, that candidate is already in flight — bail. On an adopted branch this check finds nothing, because no slug-named branch is ever created; there the backlog's `in-flight`-entry-with-an-open-PR check below is the dedup that matters, which is why it is the primary guard and this one the backstop.
 
 Then score every candidate on leverage, locality, blast radius, and heat; apply the hard filters; rank; **take the top one**. The rubric, the filters, and the deterministic tie-break are in [ranking.md](references/ranking.md).
 
