@@ -340,6 +340,31 @@ Trigger phrases: `walk me through this code`, `tell me the story of this PR`, `e
 
 **Requires**: a git repository. [`gh`](https://cli.github.com/) only for PR targets and issue context — it degrades to history-only when absent. Interactive only; there is no headless mode.
 
+### `/pm-deepen` — Autonomous Architecture Deepening
+
+```bash
+npx skills@latest add pmatos/skills/pm-deepen
+```
+
+Scans a codebase for **deepening opportunities** — refactors that turn a shallow module into a deep one — picks the highest-leverage one, implements it test-first, and opens a PR. Runs end to end with **no questions**, so it is safe for cron jobs, routines and headless firings.
+
+What it does:
+- Scopes by **hot spot**: walks `git log` to weight recently-changed areas, because deepening pays off through *future* changes. A path argument overrides the inference.
+- Scores every candidate out of 25 on **leverage** (doubled), **locality**, **heat** and **blast radius** (inverted), applies hard filters (fails the deletion test, too large for one PR, contradicts an ADR, already seen), then takes the top one with a deterministic tie-break — no "which would you like to explore?".
+- Explores interfaces with `codebase-design`'s **design-it-twice** sub-agents, then **adjudicates** the winner with a fresh sub-agent scoring depth, locality, seam placement, test surface and blast radius — replacing the interactive `grilling` loop that waits on a human.
+- Implements the winner **test-first** (red-green inline — the `tdd` skill is deliberately not called, since it gates on confirming seams with a user), runs the project's quality gate as separate un-chained commands, and never weakens a test to reach green.
+- Leaves a **durable deliverable**: a committed markdown report at `.architecture/reviews/<date>-<slug>.md` with GitHub-rendered Mermaid before/after diagrams — no temp files, no `xdg-open`.
+- **Remembers**: a persisted `.architecture/backlog.md` with per-item status (proposed / in-flight / landed / dropped / rejected), reconciled against merged and open PRs, so recurring runs stop re-surfacing the same candidates. Machine drops are reversible; only a human's rejection is permanent.
+- Has an explicit **autonomy contract**: `CONTEXT.md` term additions are unilateral; writing an ADR, merging, force-pushing and touching a shared branch are not. Every bail-out writes an exit report instead of failing silently.
+
+Flags: `--report-only` (stop after the report), `--no-pr` (implement and commit, don't push).
+
+Trigger phrases: `deepen a module`, `find shallow modules`, `run an architecture review`, `open a refactor PR`, `improve the codebase architecture unattended`.
+
+**Requires**: a git repository with a discoverable test runner. [`gh`](https://cli.github.com/) for PR creation and backlog reconciliation — without it the run degrades to `--report-only` rather than failing. The `codebase-design` skill is used when installed, with a stated fallback when it isn't.
+
+**Credit**: forked from Matt Pocock's [`improve-codebase-architecture`](https://github.com/mattpocock/skills) (`mattpocock/skills`), which is interactive by design — it opens an HTML report and grills you through whichever candidate you pick. The exploration heuristics, candidate-card fields and vocabulary discipline are his; this fork replaces the three interactive joints (the pick, the grilling loop, the GUI deliverable) and adds a terminal step and a backlog memory. Upstream is MIT-licensed, Copyright (c) Matt Pocock — compatible with this repo's MIT licence.
+
 ## License
 
 MIT
