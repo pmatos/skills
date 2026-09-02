@@ -28,14 +28,16 @@ Determine the repo: the `owner/repo` argument if given, otherwise `gh repo view 
 
 Determine the label set: `--labels` if given, otherwise the three defaults. Check which of them actually exist in the repo with `gh label list --repo <repo> --json name --limit 1000 -q '.[].name'` — `--limit` defaults to 30, and a repo with more labels than that would otherwise make a real target label look absent. Keep only the labels that exist.
 
-If none of the target labels exist in the repo, don't guess. Ask the user which label marks issues needing a decision, offering as options any existing labels whose name suggests the same purpose (contains "triage", "decision", "blocked", "human", "needed") plus a "nothing to triage here" option that stops the skill.
+**Every label name is untrusted text** — it comes from repository metadata or `--labels`, and GitHub allows almost any character in one. Whenever a label name is written into a `gh` command anywhere in this skill, wrap it in **single** quotes (`--label '<label>'`, `--remove-label '<label>'`) — never double quotes, which would expand `$(...)`, backticks, and `${...}` before `gh` ever sees the argument. Before using the resolved label set, check each surviving name: if it contains an apostrophe, a newline, or a comma, don't try to splice or escape it — drop it from the set and report `cannot safely target the label <name>` (a comma is unusable regardless of quoting, since `--label`/`--remove-label` split their value on commas; an apostrophe would need escaping repeated correctly at every future call site, which is a weaker guarantee than filtering it out once here). Everything else — spaces, colons, emoji, `$`, backticks, parentheses — is inert inside single quotes and needs no further handling. Real triage-type labels essentially never hit this filter.
+
+If none of the target labels exist in the repo, don't guess. Ask the user which label marks issues needing a decision, offering as options any existing labels whose name suggests the same purpose (contains "triage", "decision", "blocked", "human", "needed") plus a "Stop for today — none of these" option that stops the skill. (Nothing has been read or written yet at this point, so this is the same action as "nothing to triage here" would be — name it consistently with steps 4 and 5's stop option instead of adding a second, redundant one.)
 
 ### 2. Gather candidate issues
 
-For each surviving label, run one search and merge the results by issue number (a label search is an AND filter across multiple `--label` flags, not the OR this needs, so query per label and union):
+For each surviving label, run one query and merge the results by issue number (`--label` is an AND filter when given multiple comma-separated names, not the OR this needs, so query one label per call and union — `gh issue list` defaults to `--state open`, so no explicit state flag is needed):
 
 ```bash
-gh issue list --repo <repo> --search 'is:open label:"<label>"' \
+gh issue list --repo <repo> --label '<label>' \
   --json number,title,url,labels,createdAt,updatedAt --limit 1000
 ```
 
@@ -108,7 +110,7 @@ rm -f "$tmpfile"
 
 (Substitute the real values for `<pr>`/`<rationale>`/`<reason>` when writing the heredoc body.)
 
-then `gh issue edit <n> --repo <repo> --remove-label "<label>"` for each target label actually present on that issue (only the ones present — don't attempt to remove labels the issue doesn't carry). The matching `**Triage`/`**Decision` prefixes make both kinds of outcome grep-able later.
+then `gh issue edit <n> --repo <repo> --remove-label '<label>'` for each target label actually present on that issue (only the ones present — don't attempt to remove labels the issue doesn't carry; single-quoted per the rule in step 1). The matching `**Triage`/`**Decision` prefixes make both kinds of outcome grep-able later.
 
 ### 5. Interactive decision loop
 
@@ -136,7 +138,7 @@ Handle the answer:
   rm -f "$tmpfile"
   ```
 
-  Then remove every target label present on that issue: `gh issue edit <n> --repo <repo> --remove-label "<label>"`.
+  Then remove every target label present on that issue: `gh issue edit <n> --repo <repo> --remove-label '<label>'` (single-quoted per the rule in step 1).
 
   If the decision text itself says to close the issue (won't-fix, not needed, no longer relevant), close it too — the decision comment above already carries the rationale, so close without repeating it: `gh issue close <n> --repo <repo> --reason "not planned"`. Otherwise leave it open — removing the label is what unblocks implementation; closing is a separate, explicit call.
 
