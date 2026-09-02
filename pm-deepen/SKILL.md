@@ -84,13 +84,15 @@ Establish that the run can finish before it changes anything. Check in order; on
 
 Read `CONTEXT.md` and any ADRs covering the area first, so candidates are named in the project's own vocabulary and don't re-litigate settled decisions.
 
-Then spawn a sub-agent to walk the codebase. Don't follow rigid heuristics; explore organically and note where you experience friction:
+Then spawn a sub-agent to walk the codebase. Don't follow rigid heuristics; explore organically and note where you experience friction. Two patterns are worth checking for by name, not just waiting to trip over them — they've been disproportionately high-leverage in past runs (the current record example is a seam collapsing 14 duplicated prologues) without being rare or repo-specific:
 
 - Where does understanding one concept require bouncing between many small modules?
 - Where are modules **shallow**, with an interface nearly as complex as the implementation?
 - Where have pure functions been extracted just for testability, while the real bugs hide in how they're called (no **locality**)?
 - Where do tightly-coupled modules leak across their seams?
 - Which parts are untested, or hard to test through their current interface?
+- Where do sibling functions repeat the same prologue or epilogue — validation, setup, teardown — that a single shared seam could collapse?
+- Where do two parallel implementations of the same logic (a client/server pair, a compiler and its self-hosted or alternate-backend port, a fast path and a fallback) drift apart in ways a shared abstraction would have prevented?
 
 Apply the **deletion test** to anything you suspect is shallow: would deleting it concentrate complexity, or just move it? "Concentrates" is the signal you want.
 
