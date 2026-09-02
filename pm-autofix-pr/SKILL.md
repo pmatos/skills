@@ -487,7 +487,7 @@ Print:
 - Issue creation failures: 0 / K (each requires manual filing — see Deferred table)
 ```
 
-The last Step 5g checklist evaluation (or, for a `dirty-worktree`/`push-failure` exit that never reached 5g, a fresh run of its four checks) is the source for this block — every exit prints the same four PASS/FAIL conditions, not just `fixed-point`, so a `stale-loop` or `ci-timeout` exit is exactly as legible as a success.
+The last Step 5g checklist evaluation (or, for any exit that never reached 5g — e.g. `dirty-worktree`/`push-failure`, an early `ci-timeout` on a first push, a `merge-conflict` failing out of 5h, or a `rebase-conflict` failing out of 5d — a fresh run of its four checks) is the source for this block — every exit prints the same four PASS/FAIL conditions, not just `fixed-point`, so a `stale-loop` or `ci-timeout` exit is exactly as legible as a success.
 
 Do **not** ask the user anything at the end. The skill exits unconditionally after printing the summary:
 
