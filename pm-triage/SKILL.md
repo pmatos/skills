@@ -26,7 +26,7 @@ Every decision is written back to GitHub itself — a comment recording the deci
 
 Determine the repo: the `owner/repo` argument if given, otherwise `gh repo view --json nameWithOwner -q .nameWithOwner`. Bail with a clear message if neither works (not a git repo, no `gh` auth, or `gh` unavailable — this skill is `gh`-only; it never uses a GitHub MCP server, since it targets arbitrary `owner/repo` values that may not be the current project).
 
-Determine the label set: `--labels` if given, otherwise the three defaults. Check which of them actually exist in the repo with `gh label list --repo <repo> --json name -q '.[].name'`. Keep only the labels that exist.
+Determine the label set: `--labels` if given, otherwise the three defaults. Check which of them actually exist in the repo with `gh label list --repo <repo> --json name --limit 1000 -q '.[].name'` — `--limit` defaults to 30, and a repo with more labels than that would otherwise make a real target label look absent. Keep only the labels that exist.
 
 If none of the target labels exist in the repo, don't guess. Ask the user which label marks issues needing a decision, offering as options any existing labels whose name suggests the same purpose (contains "triage", "decision", "blocked", "human", "needed") plus a "nothing to triage here" option that stops the skill.
 
@@ -36,8 +36,10 @@ For each surviving label, run one search and merge the results by issue number (
 
 ```bash
 gh issue list --repo <repo> --search 'is:open label:"<label>"' \
-  --json number,title,url,labels,createdAt,updatedAt --limit 200
+  --json number,title,url,labels,createdAt,updatedAt --limit 1000
 ```
+
+`gh` paginates internally for any `--limit` above one page, so 1000 comes back in full for the overwhelming majority of triage queues. If a query still returns exactly 1000 (the cap itself, not a coincidence), note in the step 6 summary that this label's queue may be truncated and more issues likely remain beyond what this run saw — a queue that size is far outside this skill's interactive, one-at-a-time use case, so flagging it is enough; it doesn't need its own cursor-pagination logic.
 
 If the merged set is empty, report "Nothing to triage — no open issues carry <labels> in <repo>" and stop. Nothing after this point runs.
 
@@ -80,17 +82,21 @@ Ask once, before touching anything:
 - Skip auto-resolutions — leave `RESOLVED_BY_PR`/`SUPERSEDED` issues untouched, go straight to decisions
 - Stop here for today
 
-**"Review each auto-resolution individually"** runs the same shape as step 5's loop, one auto-resolution at a time: `AskUserQuestion` with the issue, its verdict, and citation, options `Apply` / `Skip — leave the label` / `Stop for today`, handled exactly as those outcomes are handled in step 5. Once every auto-resolution has been reviewed (or the user stops), continue to the decision queue as normal.
+**"Review each auto-resolution individually"** runs the same shape as step 5's loop, one auto-resolution at a time: `AskUserQuestion` with the issue, its verdict, and citation, options `Apply` / `Skip — leave the label` / `Stop for today`. `Apply` and `Skip` are handled exactly as those outcomes are handled in step 5, and the sub-loop continues to the next auto-resolution. `Stop for today` is handled exactly as step 5 handles it too: end the session immediately, do not touch this or any remaining auto-resolution, and go straight to step 6 — it does **not** fall through to the decision queue. Only once every auto-resolution has been reviewed without the user stopping does the sub-loop end normally and continue to the decision queue.
 
-Every comment this skill posts goes through a temp file, never inline in the shell command — the text can come from a sub-agent's rationale or (in step 5) the user's own verbatim words, and either can contain backticks, `$(...)`, or a stray quote that would break or, worse, execute inside a double-quoted `--body "..."`. Write the body to `mktemp`, pass it with `--body-file`, then `rm -f` it:
+Every comment this skill posts goes through a temp file, never inline in the shell command — the text can come from a sub-agent's rationale or (in step 5) the user's own verbatim words, and either can contain backticks, `$(...)`, or a stray quote. Splicing that text into a double-quoted shell argument (`--body "..."`, or even `printf '%s\n' "..."`) still expands or executes it before `gh` ever sees the file — the shell parses the argument first, so the temp-file step by itself is not the safety measure. Use a quoted heredoc instead: with a **quoted** delimiter (`<<'PMTRIAGE_EOF'`), the shell treats everything between the markers as inert literal text — no expansion, no substitution, no command execution — no matter what it contains:
 
 ```bash
 tmpfile=$(mktemp)
-printf '%s\n' "**Triage (via /pm-triage, <today's date>):** resolved by #<pr> — <rationale>" > "$tmpfile"
-# or: "**Triage (via /pm-triage, <today's date>):** superseded — <reason>"
+cat > "$tmpfile" <<'PMTRIAGE_EOF'
+**Triage (via /pm-triage, <today's date>):** resolved by #<pr> — <rationale>
+PMTRIAGE_EOF
+# or: **Triage (via /pm-triage, <today's date>):** superseded — <reason>
 gh issue comment <n> --repo <repo> --body-file "$tmpfile"
 rm -f "$tmpfile"
 ```
+
+(Substitute the real values for `<pr>`/`<rationale>`/`<reason>` when writing the heredoc body — the delimiter's quoting is what keeps them inert, not their placeholder form. If a harness tool that writes files directly — not through a shell string — is available, that works too and sidesteps the heredoc entirely; the requirement is that the content never passes through shell parsing.)
 
 then `gh issue edit <n> --repo <repo> --remove-label "<label>"` for each target label actually present on that issue (only the ones present — don't attempt to remove labels the issue doesn't carry). The matching `**Triage`/`**Decision` prefixes make both kinds of outcome grep-able later.
 
@@ -109,11 +115,13 @@ Handle the answer:
 
 - **Stop for today** → end the loop immediately. Do not touch this issue. Go to step 6.
 - **Skip** → don't comment or relabel. Move to the next issue. Note it as skipped-this-session in the running summary (it still carries the label, so it resurfaces next run — no different than never having looked at it, just recorded so today's summary is complete).
-- **Anything else** → this is the decision. Post it through a temp file, same discipline as step 4:
+- **Anything else** → this is the decision. Post it through a quoted heredoc, same discipline as step 4 — `<answer>` is the user's own verbatim text and just as capable of containing shell metacharacters as a sub-agent's rationale:
 
   ```bash
   tmpfile=$(mktemp)
-  printf '%s\n' "**Decision (via /pm-triage, <today's date>):** <answer>" > "$tmpfile"
+  cat > "$tmpfile" <<'PMTRIAGE_EOF'
+  **Decision (via /pm-triage, <today's date>):** <answer>
+  PMTRIAGE_EOF
   gh issue comment <n> --repo <repo> --body-file "$tmpfile"
   rm -f "$tmpfile"
   ```
@@ -130,5 +138,6 @@ Report, grouped:
 - **Auto-resolved** — issue, reason (resolved-by-PR / superseded), link.
 - **Skipped this session** — issue, link (still carries the label).
 - **Untouched / remaining** — count, with the search query to see them (`is:open label:"<label>"` per surviving label), whether because the session was stopped early or because the queue is simply that long.
+- **Possibly truncated** — only if step 2 flagged a label whose query hit the 1000-issue cap: name it and note that more issues than this run saw may exist.
 
 No file is written and no state is persisted beyond what's now on GitHub — the label removals and comments made this session are the entire record.
