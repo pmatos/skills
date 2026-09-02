@@ -84,7 +84,7 @@ Establish that the run can finish before it changes anything. Check in order; on
 
 Read `CONTEXT.md` and any ADRs covering the area first, so candidates are named in the project's own vocabulary and don't re-litigate settled decisions.
 
-Then spawn a sub-agent to walk the codebase. Don't follow rigid heuristics; explore organically and note where you experience friction. Two patterns are worth checking for by name, not just waiting to trip over them — they've been disproportionately high-leverage in past runs (the current record example is a seam collapsing 14 duplicated prologues) without being rare or repo-specific:
+Then spawn a sub-agent to walk the codebase. Don't follow rigid heuristics; explore organically and note where you experience friction. Two patterns are worth checking for by name, not just waiting to trip over them — they've been disproportionately high-leverage in past runs (one past example: a seam collapsing 14 duplicated prologues) without being rare or repo-specific:
 
 - Where does understanding one concept require bouncing between many small modules?
 - Where are modules **shallow**, with an interface nearly as complex as the implementation?
