@@ -55,7 +55,7 @@ Before asking the user anything, work out which issues genuinely still need a hu
 Dispatch this analysis in parallel — one read-only sub-agent per issue (or small batches of ~5-8 if the candidate count is large) via the `Agent` tool, `general-purpose`. (`Explore` is tuned for locating code by search pattern and reads excerpts rather than full content — not a good fit for reasoning over an issue's full discussion. If no sub-agent tool is available in the current harness, do this pass inline, one issue at a time; it's slower, not different.) Brief each agent explicitly: **read-only** — run `gh issue view`/`gh pr list`/`gh api` (GET) only, never `gh issue comment`/`edit`/`close` or any other mutating command; report the verdict back to the orchestrator instead of acting on it. Give it the issue number, repo, and this task:
 
 1. `gh issue view <n> --repo <repo> --json title,body,comments,labels,url,createdAt,updatedAt,state`.
-2. Look for a merged PR that already answers it: `gh pr list --repo <repo> --state merged --search "#<n> in:body"`, and check the issue's own cross-references via `gh api repos/<repo>/issues/<n>/timeline --jq '.[] | select(.event=="cross-referenced" or .event=="closed")'`.
+2. Look for a merged PR that already answers it: `gh pr list --repo <repo> --state merged --search "#<n> in:body"`, and check the issue's own cross-references via `gh api --paginate repos/<repo>/issues/<n>/timeline --jq '.[] | select(.event=="cross-referenced" or .event=="closed")'` — without `--paginate` this only inspects the first page, and a busy issue's cross-reference or closing event can sit past it, letting an already-settled issue wrongly reach the decision queue.
 3. Look for a newer issue or comment that explicitly supersedes it ("supersedes #<n>", "no longer needed", the described feature since removed).
 4. If still open, read the issue body and comments for options already debated in the discussion — these become synthesized candidate resolutions, not invented ones.
 5. Return the verdict as labeled lines, one field per line, so free text in the rationale or a candidate can't collide with a delimiter:
@@ -82,9 +82,19 @@ Ask once, before touching anything:
 - Skip auto-resolutions — leave `RESOLVED_BY_PR`/`SUPERSEDED` issues untouched, go straight to decisions
 - Stop here for today
 
-**"Review each auto-resolution individually"** runs the same shape as step 5's loop, one auto-resolution at a time: `AskUserQuestion` with the issue, its verdict, and citation, options `Apply` / `Skip — leave the label` / `Stop for today`. `Apply` and `Skip` are handled exactly as those outcomes are handled in step 5, and the sub-loop continues to the next auto-resolution. `Stop for today` is handled exactly as step 5 handles it too: end the session immediately, do not touch this or any remaining auto-resolution, and go straight to step 6 — it does **not** fall through to the decision queue. Only once every auto-resolution has been reviewed without the user stopping does the sub-loop end normally and continue to the decision queue.
+**"Review each auto-resolution individually"** runs one auto-resolution at a time: `AskUserQuestion` with the issue, its verdict, and citation, options `Apply` / `Skip — leave the label` / `Stop for today`. Handle each:
 
-Every comment this skill posts goes through a temp file, never inline in the shell command — the text can come from a sub-agent's rationale or (in step 5) the user's own verbatim words, and either can contain backticks, `$(...)`, or a stray quote. Splicing that text into a double-quoted shell argument (`--body "..."`, or even `printf '%s\n' "..."`) still expands or executes it before `gh` ever sees the file — the shell parses the argument first, so the temp-file step by itself is not the safety measure. Use a quoted heredoc instead: with a **quoted** delimiter (`<<'PMTRIAGE_EOF'`), the shell treats everything between the markers as inert literal text — no expansion, no substitution, no command execution — no matter what it contains:
+- **`Apply`** → post the `**Triage**` comment and remove the target label(s), exactly as the "apply all" path below does for that one issue. This is *not* the same handling as step 5's "anything else" branch — step 5 has no `Apply` outcome of its own, and treating this `Apply` as a step-5 decision would post a literal `**Decision:** Apply` comment instead of the auto-resolution rationale. Then continue the sub-loop with the next auto-resolution.
+- **`Skip — leave the label`** → don't comment or relabel this one; continue the sub-loop with the next auto-resolution.
+- **`Stop for today`** → end the session immediately, do not touch this or any remaining auto-resolution (whether still pending review here or still queued for step 5), and go straight to step 6 — it does **not** fall through to the decision queue.
+
+Only once every auto-resolution has been reviewed without the user stopping does the sub-loop end normally and continue to the decision queue.
+
+Every comment this skill posts goes through a temp file, never inline in the shell command — the text can come from a sub-agent's rationale or (in step 5) the user's own verbatim words, and either can contain backticks, `$(...)`, or a stray quote. Splicing that text into a double-quoted shell argument (`--body "..."`, or even `printf '%s\n' "..."`) still expands or executes it before `gh` ever sees the file — the shell parses the argument first, so the temp-file step by itself is not the safety measure.
+
+**Primary: write the body with a harness file-writing tool** (e.g. Claude Code's `Write` tool), not a shell command — `mktemp` a path, write the full comment text to it directly, then `gh issue comment <n> --repo <repo> --body-file <path>`. The content never enters a shell program at all, so neither expansion nor any delimiter can touch it.
+
+**Fallback, only if no such tool is available in the current harness:** a heredoc with a **quoted** delimiter (`<<'PMTRIAGE_EOF'`) blocks expansion inside the body, but a body line that happens to *equal* the delimiter still ends the heredoc early and exposes whatever follows as shell source — so the delimiter must be chosen to not collide, not just quoted. Since the body is already known before the heredoc is written, check it: pick `PMTRIAGE_EOF`, or if any line of the actual body content matches it exactly, pick a different, more distinctive token and use that instead.
 
 ```bash
 tmpfile=$(mktemp)
@@ -96,7 +106,7 @@ gh issue comment <n> --repo <repo> --body-file "$tmpfile"
 rm -f "$tmpfile"
 ```
 
-(Substitute the real values for `<pr>`/`<rationale>`/`<reason>` when writing the heredoc body — the delimiter's quoting is what keeps them inert, not their placeholder form. If a harness tool that writes files directly — not through a shell string — is available, that works too and sidesteps the heredoc entirely; the requirement is that the content never passes through shell parsing.)
+(Substitute the real values for `<pr>`/`<rationale>`/`<reason>` when writing the heredoc body.)
 
 then `gh issue edit <n> --repo <repo> --remove-label "<label>"` for each target label actually present on that issue (only the ones present — don't attempt to remove labels the issue doesn't carry). The matching `**Triage`/`**Decision` prefixes make both kinds of outcome grep-able later.
 
@@ -115,7 +125,7 @@ Handle the answer:
 
 - **Stop for today** → end the loop immediately. Do not touch this issue. Go to step 6.
 - **Skip** → don't comment or relabel. Move to the next issue. Note it as skipped-this-session in the running summary (it still carries the label, so it resurfaces next run — no different than never having looked at it, just recorded so today's summary is complete).
-- **Anything else** → this is the decision. Post it through a quoted heredoc, same discipline as step 4 — `<answer>` is the user's own verbatim text and just as capable of containing shell metacharacters as a sub-agent's rationale:
+- **Anything else** → this is the decision. Post it with the same primary-tool / fallback-heredoc discipline as step 4 — `<answer>` is the user's own verbatim text and just as capable of containing shell metacharacters (or a `PMTRIAGE_EOF`-lookalike line) as a sub-agent's rationale:
 
   ```bash
   tmpfile=$(mktemp)
