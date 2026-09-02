@@ -6,7 +6,7 @@ user-invocable: true
 
 # Autofix PR
 
-Iteratively fix CI failures and address reviewer feedback on a GitHub PR until a true fixed point is reached — all CI green, the PR free of merge conflicts with its base branch, every feedback item triaged into one of three outcomes (FIX, DEFER, REJECT), and every feedback item has a reply documenting the outcome. A single invocation handles everything end-to-end without user input.
+Iteratively fix CI failures and address reviewer feedback on a GitHub PR until a true fixed point is reached — all CI green, the PR free of merge conflicts with its base branch, every feedback item triaged into one of three outcomes (FIX, DEFER, REJECT), every feedback item has a reply documenting the outcome, and the run's own fix commits have cleared an independent regression-review pass. A single invocation handles everything end-to-end without user input.
 
 ## Core Principle: Three Outcomes per Feedback Item
 
@@ -112,6 +112,8 @@ Also initialize `TOTAL_CI_BUDGET_REMAINING` to `TOTAL_CI_BUDGET` minutes here �
 For the same reason, also probe here — once, not per-iteration and not inside Step 5f's own prose — whether Step 5f's waiting primitive (item 1) can use a blocking watch: run `gh pr checks --help 2>&1 | grep -q -- '--watch'` **and** check for a `timeout`-equivalent binary (`command -v timeout` first, falling back to `command -v gtimeout`, the name Homebrew's coreutils installs on stock macOS). Record the result as `WATCH_USABLE` (true only if both checks pass) and, when true, the resolved binary name as `TIMEOUT_BIN`. Both Step 5f and Step 6 read these once-per-run values; neither re-probes, including on the Step 3 → Step 6 direct path that never visits Step 5f.
 
 Also initialize `ALL_COMMITTED_ITEMS = []` here, for the same reason `TOTAL_CI_BUDGET_REMAINING` lives here rather than in Step 3: it is a run-wide accumulator (one entry per successful FIX commit across every iteration, appended to in Step 5b, consumed by Step 7's budget-exhaustion comment) that must persist and only grow for the whole run — unlike the other lists Step 3 (re)initializes below, which are safely re-derived from each fetch.
+
+Also initialize `REGRESSION_CLEAN_STREAK = 0` and `REGRESSION_FIXES = []` here, same run-wide-persistence reasoning: the streak (Step 5g checklist condition 5) must survive across iterations to be meaningful, and `REGRESSION_FIXES` accumulates one entry per self-caught regression fix for Step 7's summary, the same way `ALL_COMMITTED_ITEMS` does for reviewer-triggered fixes.
 
 If a GitHub MCP server happens to be connected in this session, note it for opportunistic use later (thread resolution only — see "GitHub CLI Commands Used" below); its absence is not a preflight failure and no check for it is needed here.
 
@@ -377,14 +379,15 @@ This wait-and-refetch path is the only mechanism the skill uses to detect new st
 
 **5g. Re-fetch state and check for fixed point.** Re-run Step 3's calls. Filter out threads whose ID is in `ADDRESSED_THREAD_IDS` and PR-level feedback whose key is in `REPLIED_ITEM_KEYS`. For each item in `OUTCOME_MARKERS`, suppress it **only if** its latest reviewer marker still matches the value recorded at the prior REJECT/DEFER outcome; if a later reviewer reply exists, remove the item from `OUTCOME_MARKERS` and treat it as fresh feedback to re-evaluate in Step 4. If the merged state has a non-empty `errors` list (including an indeterminate `mergeable == null`), do **not** declare a fixed point — report the fetch failures and retry after 30 seconds.
 
-**Fixed-point checklist.** Every time 5g runs, evaluate all four conditions below and print each as `PASS`/`FAIL` with the concrete evidence that proves it — not just the verdict. This is what keeps a resumed or reviewed run legible instead of trailing off mid-analysis with no record of what was actually still open:
+**Fixed-point checklist.** Every time 5g runs, evaluate all five conditions below and print each as `PASS`/`FAIL` with the concrete evidence that proves it — not just the verdict. This is what keeps a resumed or reviewed run legible instead of trailing off mid-analysis with no record of what was actually still open:
 
 1. **CI green** — `ci_failures` is empty after filtering out `cancelled` (the only non-success conclusion treated as informational). Any remaining entry — including `timed_out`, `startup_failure`, `action_required`, and non-`github-actions` `failure` — blocks convergence and is reported to the user. Print `PASS` with the list of check names + conclusions, or `FAIL` with the list of still-failing checks.
 2. **Zero unresolved feedback** — no reviewer feedback item remains without an evaluation decision and an outcome reply. Print `PASS` with the count of items evaluated this run, or `FAIL` with the list of items still missing a reply.
 3. **No merge conflicts** — `has_merge_conflict` is false. **This is a hard gate: never declare a fixed point while the PR is conflicted.** A `null`/indeterminate `mergeable` is not "false"; it was recorded in `errors` above, so print `FAIL` here too (retry rather than converge). Print `PASS` with `mergeable_state`, or `FAIL` and fall through to the "Merge conflict present" branch below.
 4. **Zero unpushed commits** — run `git log origin/<head.ref>..HEAD --oneline` (the `head.ref` captured in Step 1; if the branch has no upstream yet, treat any local commit as unpushed) and print its output verbatim. Empty output is `PASS`; any listed commit is `FAIL` — return to 5d to push, then re-run this checklist. This check exists because control flow alone (5d pushes before 5g runs) is not proof: a prior run's push can fail, be skipped, or be interrupted in a way this explicit check catches even when every other signal looks clean — this is what a stale unpushed-commits state from a prior run looks like from inside 5g.
+5. **No regressions in this run's fix commits** — only evaluate this condition once conditions 1-4 above already print `PASS` (no point spending a review pass on a diff that CI, feedback triage, or a conflict merge is about to change anyway). If `ALL_COMMITTED_ITEMS` is empty (this invocation hasn't made any commits of its own yet — e.g. Step 4's "nothing to fix" short-circuit before any iteration ran), print `PASS` vacuously without spawning a reviewer: there is nothing of *this run's* authorship to check for self-inflicted regressions, and CI already vets whatever commits already existed on the branch coming in. Otherwise run Step 5i's regression-review pass and print `PASS` once `REGRESSION_CLEAN_STREAK >= 2`, or `FAIL` with the current streak count and, if this pass found new issues, their list — then follow Step 5i's routing (fix each issue unconditionally, or re-run the pass) rather than converging.
 
-**Fixed point reached** only when all four conditions above print `PASS` → proceed to Step 6.
+**Fixed point reached** only when all five conditions above print `PASS` → proceed to Step 6.
 
 **Merge conflict present** (`has_merge_conflict` true) → run Step 5h, then continue the loop.
 
@@ -410,9 +413,24 @@ This wait-and-refetch path is the only mechanism the skill uses to detect new st
 
 **Bounded attempt.** Successful merges count toward stale-loop detection (Step 5g): if two consecutive iterations resolve base conflicts but the PR is still reported non-mergeable — e.g. the base keeps advancing and re-conflicting faster than the loop can converge — stop with `exit reason: stale-loop` rather than merging forever.
 
+**5i. Regression-review pass.** The mechanic behind Step 5g's checklist condition 5. Every other checklist condition depends on an external signal — CI, a reviewer, GitHub's mergeability check — catching a problem; this one exists because past runs shipped self-inflicted regressions (a swallowed clock event in a deferral implementation, a hardcoded test literal that broke once `main` advanced) that no external signal caught until a *later*, separate reviewer pass, forcing a follow-up PR. This step is that reviewer pass, run inline instead of after the fact.
+
+Runs only when Step 5g's conditions 1-4 already print `PASS` (see condition 5's own text for why: no point reviewing a diff that other in-flight work is about to change).
+
+1. **Spawn a fresh clean-context reviewer** over the diff of `ALL_COMMITTED_ITEMS` (every commit this invocation has made so far, run-wide — not just this iteration's), using Step 0a's **Local Evaluator** row (Agent tool with `model="opus"` on Claude host; `codex exec --sandbox read-only --ephemeral - < /tmp/eval-XXXXXX` on Codex host, same `mktemp`/`rm -f` discipline as Step 4). A genuinely fresh spawn every time this runs, with no memory of any prior verdict on this diff — that independence is what makes a second pass worth anything; asking the same in-context model to double-check its own just-stated answer would not be.
+2. **Prompt:** review only for correctness bugs and regressions the fix commits themselves introduced — not style, not scope, not anything Step 4's dual-evaluator already triages from reviewer feedback. Explicitly ask it to check for, at minimum:
+   - dropped, swallowed, or silently-discarded events or state on any code path the diff touches (the swallowed-clock-event failure shape from the incident above);
+   - test assertions whose expected value is derived from mutable state on the base branch — a hash, count, date, or other literal that will drift as `main` advances — rather than a fixed, self-contained expectation (the hardcoded-test-literal failure shape from the same incident history).
+
+   Ask for a verdict: **CLEAN** or **ISSUES**, with each issue concrete enough to act on (file:line, what's wrong, why it's a regression and not a style nit).
+3. **On CLEAN:** if `HEAD` hasn't moved since the last time this pass ran — no new commit landed, from a regression fix or otherwise, since the previous CLEAN verdict, or this is the first pass this run — increment `REGRESSION_CLEAN_STREAK`; otherwise set it to `1` (this pass is the first clean read of the *current* diff, so it starts the streak over rather than continuing one that verified a smaller diff). Hand the streak value back to Step 5g's condition 5 to print.
+4. **On ISSUES:** reset `REGRESSION_CLEAN_STREAK` to `0`. Treat each finding as its own FIX item — no Step 4 triage, no FIX/DEFER/REJECT ambiguity call: the loop authored the bug, so the loop fixes it, unconditionally. Route each through Step 5b's existing single-item flow (apply, 5c pre-commit, commit), append `{sha, finding_summary}` to `REGRESSION_FIXES`, then go to 5d to push. Hand the finding list back to Step 5g's condition 5 to print. The next 5g pass re-runs this review from scratch against the updated diff.
+
+**Bound.** If the same finding (same file:line and the same defect, allowing for paraphrase) is reported by two consecutive ISSUES verdicts even after being "fixed" in between, treat it like stale-loop: record `stale_loop` in the final summary and jump to Step 7, rather than looping forever chasing a fix the reviewer keeps rejecting. No separate budget counter is needed for this — the spawn itself and any CI re-run its fix triggers via 5d/5f already deduct from `TOTAL_CI_BUDGET_REMAINING` like everything else, so a persistently-flagging reviewer still bottoms out in the existing `ci-timeout` exit if `stale_loop` doesn't catch it first.
+
 ### Step 6: Monitoring Phase
 
-Skip if `MONITOR_DURATION` is 0 or if there are CI failures, unanswered feedback items, or a merge conflict (`has_merge_conflict` true). Monitoring is only entered from a true fixed point.
+Skip if `MONITOR_DURATION` is 0 or if there are CI failures, unanswered feedback items, a merge conflict (`has_merge_conflict` true), or (`ALL_COMMITTED_ITEMS` is non-empty and `REGRESSION_CLEAN_STREAK < 2`) — the same vacuous-pass exception Step 5g's condition 5 applies, so a run that made no commits of its own isn't blocked from monitoring by a streak it never had a reason to build. Monitoring is only entered from a true fixed point.
 
 The effective monitor window is `min(MONITOR_DURATION, TOTAL_CI_BUDGET_REMAINING)` — the same shared counter Step 5f draws down, initialized once in Step 0b and never reset by convergence (this holds even when Step 6 is entered directly from Step 3's "nothing to fix" exit, without ever passing through Step 5f). If that effective window is `<= 0` (the run reached a fixed point but exhausted the total budget getting there), skip monitoring entirely and proceed straight to Step 7 as `monitoring-timeout`: the PR genuinely has no open work, there is just no budget left to keep watching it — still a success exit, and no resume-pointer comment is needed since nothing is pending.
 
@@ -479,15 +497,21 @@ Print:
 |------|--------------------|----------------|
 | @reviewer on parser.ts:201 | type-check: tsc TS2322 | #125 |
 
+### Regression Fixes (self-caught by Step 5i, no reviewer involved)
+| Commit | Finding |
+|--------|---------|
+| a1b2c3d | Deferred-run branch dropped the pending clock event instead of replaying it after the concurrency cap lifted |
+
 ### Current Status
 - CI: All passing / N failures remaining (list each: name, conclusion, log link)
 - Mergeable: yes / no — merge conflicts with `<base.ref>` remaining (list conflicted files if the run exited on `merge-conflict`)
 - Reviewer feedback: All answered / M items still missing replies (list each)
 - Unpushed commits: PASS (`git log origin/<head.ref>..HEAD` empty) / FAIL (list the commit shas + subjects still local-only)
+- Regression review: PASS (`REGRESSION_CLEAN_STREAK` reached 2) / vacuous (no commits this run) / FAIL (streak stuck at N — list the last-reported findings)
 - Issue creation failures: 0 / K (each requires manual filing — see Deferred table)
 ```
 
-The last Step 5g checklist evaluation (or, for a `dirty-worktree`/`push-failure` exit that never reached 5g, a fresh run of its four checks) is the source for this block — every exit prints the same four PASS/FAIL conditions, not just `fixed-point`, so a `stale-loop` or `ci-timeout` exit is exactly as legible as a success.
+The last Step 5g checklist evaluation (or, for a `dirty-worktree`/`push-failure` exit that never reached 5g, a fresh run of its five checks) is the source for this block — every exit prints the same five PASS/FAIL conditions, not just `fixed-point`, so a `stale-loop` or `ci-timeout` exit is exactly as legible as a success.
 
 Do **not** ask the user anything at the end. The skill exits unconditionally after printing the summary:
 
