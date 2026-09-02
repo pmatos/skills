@@ -168,7 +168,7 @@ Initialize `ADDRESSED_THREAD_IDS` with `resolved_thread_ids`. Initialize `REPLIE
 
 Print the initial assessment as a status line — `Found N CI failures, M reviewer feedback items, and merge conflicts: yes/no. Begin processing.` — and proceed unconditionally. **Never** wait for a confirmation: the skill is fully automatic from this point on.
 
-If there is nothing to fix (no CI failures, no unanswered feedback), `has_merge_conflict` is false, **and the `errors` list is empty**, report the PR is clean and proceed to Step 6 (monitoring). If `has_merge_conflict` is true, go to Step 5h even when there is no other work. If `errors` is non-empty — including an indeterminate `mergeable == null` recorded in Step 3, or any failed Step 3 fetch — do **not** declare the PR clean and do **not** enter monitoring; fall through to Step 5g's retry path (report the fetch failures and retry after 30 seconds) so the ambiguous state resolves before any success exit. A false "clean" here would otherwise skip Step 5g's error gate entirely under `--monitor 0`.
+If there is nothing to fix (no CI failures, no unanswered feedback), `has_merge_conflict` is false, **and the `errors` list is empty**, run Step 5g's checklist condition 4 (`git log origin/<head.ref>..HEAD --oneline`, printed as `PASS`/`FAIL`) before declaring anything — a resumed run can find nothing new to fix while a prior, interrupted run still left local commits unpushed on this exact branch, and that would otherwise slip straight past every other gate below. If it prints `FAIL`, go to Step 5d to push, then re-evaluate this paragraph. Once it prints `PASS`, report the PR is clean and proceed to Step 6 (monitoring). If `has_merge_conflict` is true, go to Step 5h even when there is no other work. If `errors` is non-empty — including an indeterminate `mergeable == null` recorded in Step 3, or any failed Step 3 fetch — do **not** declare the PR clean and do **not** enter monitoring; fall through to Step 5g's retry path (report the fetch failures and retry after 30 seconds) so the ambiguous state resolves before any success exit. A false "clean" here would otherwise skip Step 5g's error gate entirely under `--monitor 0`.
 
 ### Step 4: Evaluate Every Feedback Item
 
@@ -377,12 +377,14 @@ This wait-and-refetch path is the only mechanism the skill uses to detect new st
 
 **5g. Re-fetch state and check for fixed point.** Re-run Step 3's calls. Filter out threads whose ID is in `ADDRESSED_THREAD_IDS` and PR-level feedback whose key is in `REPLIED_ITEM_KEYS`. For each item in `OUTCOME_MARKERS`, suppress it **only if** its latest reviewer marker still matches the value recorded at the prior REJECT/DEFER outcome; if a later reviewer reply exists, remove the item from `OUTCOME_MARKERS` and treat it as fresh feedback to re-evaluate in Step 4. If the merged state has a non-empty `errors` list (including an indeterminate `mergeable == null`), do **not** declare a fixed point — report the fetch failures and retry after 30 seconds.
 
-**Fixed point reached** if **all** of:
-- `ci_failures` is empty after filtering out `cancelled` (the only non-success conclusion treated as informational). Any remaining entry — including `timed_out`, `startup_failure`, `action_required`, and non-`github-actions` `failure` — blocks convergence and is reported to the user.
-- No reviewer feedback item remains without an evaluation decision and an outcome reply.
-- `has_merge_conflict` is false — the PR has no merge conflicts with its base branch. **This is a hard gate: never declare a fixed point while the PR is conflicted.** If `has_merge_conflict` is true, do not converge — run Step 5h to resolve the conflict, then continue the loop. (A `null`/indeterminate `mergeable` is not "false"; it was recorded in `errors` above, so this branch retries rather than converging.)
+**Fixed-point checklist.** Every time 5g runs, evaluate all four conditions below and print each as `PASS`/`FAIL` with the concrete evidence that proves it — not just the verdict. This is what keeps a resumed or reviewed run legible instead of trailing off mid-analysis with no record of what was actually still open:
 
-→ Proceed to Step 6.
+1. **CI green** — `ci_failures` is empty after filtering out `cancelled` (the only non-success conclusion treated as informational). Any remaining entry — including `timed_out`, `startup_failure`, `action_required`, and non-`github-actions` `failure` — blocks convergence and is reported to the user. Print `PASS` with the list of check names + conclusions, or `FAIL` with the list of still-failing checks.
+2. **Zero unresolved feedback** — no reviewer feedback item remains without an evaluation decision and an outcome reply. Print `PASS` with the count of items evaluated this run, or `FAIL` with the list of items still missing a reply.
+3. **No merge conflicts** — `has_merge_conflict` is false. **This is a hard gate: never declare a fixed point while the PR is conflicted.** A `null`/indeterminate `mergeable` is not "false"; it was recorded in `errors` above, so print `FAIL` here too (retry rather than converge). Print `PASS` with `mergeable_state`, or `FAIL` and fall through to the "Merge conflict present" branch below.
+4. **Zero unpushed commits** — run `git log origin/<head.ref>..HEAD --oneline` (the `head.ref` captured in Step 1; if the branch has no upstream yet, treat any local commit as unpushed) and print its output verbatim. Empty output is `PASS`; any listed commit is `FAIL` — return to 5d to push, then re-run this checklist. This check exists because control flow alone (5d pushes before 5g runs) is not proof: a prior run's push can fail, be skipped, or be interrupted in a way this explicit check catches even when every other signal looks clean — this is what a stale unpushed-commits state from a prior run looks like from inside 5g.
+
+**Fixed point reached** only when all four conditions above print `PASS` → proceed to Step 6.
 
 **Merge conflict present** (`has_merge_conflict` true) → run Step 5h, then continue the loop.
 
@@ -481,8 +483,11 @@ Print:
 - CI: All passing / N failures remaining (list each: name, conclusion, log link)
 - Mergeable: yes / no — merge conflicts with `<base.ref>` remaining (list conflicted files if the run exited on `merge-conflict`)
 - Reviewer feedback: All answered / M items still missing replies (list each)
+- Unpushed commits: PASS (`git log origin/<head.ref>..HEAD` empty) / FAIL (list the commit shas + subjects still local-only)
 - Issue creation failures: 0 / K (each requires manual filing — see Deferred table)
 ```
+
+The last Step 5g checklist evaluation (or, for a `dirty-worktree`/`push-failure` exit that never reached 5g, a fresh run of its four checks) is the source for this block — every exit prints the same four PASS/FAIL conditions, not just `fixed-point`, so a `stale-loop` or `ci-timeout` exit is exactly as legible as a success.
 
 Do **not** ask the user anything at the end. The skill exits unconditionally after printing the summary:
 
