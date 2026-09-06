@@ -1,6 +1,6 @@
 # Planning Patterns Reference
 
-Every subagent below is dispatched with `Agent` calls using `subagent_type: "Explore"` (parallel = multiple calls in one message). Every subagent runs read-only, has zero inherited context, and must receive a fully self-contained prompt. This document specifies *what each subagent's mission is*, not the invocation mechanics — those are in `SKILL.md`.
+Every subagent below is dispatched with `Agent` calls using `subagent_type: "Explore"` (parallel = multiple calls in one message) when a native subagent tool is available; without one, the orchestrator works through the same missions itself, inline, one at a time (see SKILL.md Step 3). A dispatched subagent runs read-only, has zero inherited context, and must receive a fully self-contained prompt; working inline, the same mission boundaries still apply, to keep each concern's findings non-overlapping. This document specifies *what each subagent's mission is*, not the invocation mechanics — those are in `SKILL.md`.
 
 ## Exploration Strategies
 

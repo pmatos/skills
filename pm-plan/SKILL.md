@@ -1,7 +1,7 @@
 ---
 name: pm-plan
 description: This skill should be used when the user asks to "plan this", "make a plan", "create an implementation plan", "how should I implement", "design the implementation", "plan the refactor", "plan the migration", "plan the feature", "break this down into steps", "implementation strategy", "deep plan", "thorough plan", or wants a thorough, multi-phase implementation plan with codebase exploration before writing any code.
-version: 4.0.0
+version: 4.1.0
 argument-hint: "<task description or feature request>"
 user-invocable: true
 ---
@@ -77,13 +77,13 @@ For each area the task touches, explore systematically using read-only tools:
 
 #### Dispatching subagents
 
-Issue multiple `Agent` calls with `subagent_type: "Explore"` in a single message to run them in parallel; synthesize the returned results directly — there is nothing to stage or read back from disk.
+If a native subagent tool is available, issue multiple `Agent` calls with `subagent_type: "Explore"` in a single message to run them in parallel; synthesize the returned results directly — there is nothing to stage or read back from disk. **Without one**, perform the same exploration yourself, inline, working through each concern in turn instead of in parallel — slower, not different.
 
-Each subagent prompt must be **self-contained** — subagents do not inherit your conversation. Always include (1) the task description, (2) the agent's specific mission and scope boundary, (3) what to return (file paths with line numbers, patterns, risks, etc.), (4) project conventions extracted from CLAUDE.md/AGENTS.md.
+Each subagent prompt must be **self-contained** — subagents do not inherit your conversation. Always include (1) the task description, (2) the agent's specific mission and scope boundary, (3) what to return (file paths with line numbers, patterns, risks, etc.), (4) project conventions extracted from CLAUDE.md/AGENTS.md. Working inline, hold the same mission boundaries in your own head as you move from one concern to the next — they exist to keep the findings non-overlapping, not just to brief a subagent.
 
-**For Medium tasks**, dispatch 1-2 parallel Explore subagents. Choose a strategy based on task type — **breadth-first discovery**, **feature trace**, or **impact analysis**. See `references/planning-patterns.md` for mission templates.
+**For Medium tasks**, dispatch 1-2 parallel Explore subagents (or, without a subagent tool, cover the same ground yourself in sequence). Choose a strategy based on task type — **breadth-first discovery**, **feature trace**, or **impact analysis**. See `references/planning-patterns.md` for mission templates.
 
-**For Large tasks**, dispatch exactly 3 parallel Explore subagents using the **Three-Concern Decomposition** — one subagent per concern, all started together:
+**For Large tasks**, dispatch exactly 3 parallel Explore subagents using the **Three-Concern Decomposition** — one subagent per concern, all started together (or, without a subagent tool, work through the same three concerns yourself, one at a time):
 1. **Architecture Understanding** — how the affected subsystems work, patterns, conventions, reference implementations
 2. **Change Surface Identification** — every file to modify/create, existing utilities to reuse
 3. **Risks, Edge Cases & Dependencies** — callers, consumers, edge cases, test gaps, integration points
@@ -99,11 +99,13 @@ Each subagent has a strict boundary: architecture doesn't propose changes, chang
 
 #### Plan naming (cheap/fast model)
 
-Dispatch a one-shot `Agent` call pinned to a fast, cheap model (`model: "haiku"`) to generate the name. The mission:
+If a native subagent tool is available, dispatch a one-shot `Agent` call pinned to a fast, cheap model (`model: "haiku"`) to generate the name. The mission:
 
 > "Generate a short kebab-case name (2-3 words) that summarizes this task: \<task description\>. Reply with ONLY the name, nothing else. Example: auth-token-refresh"
 
-Sanitize the returned name: strip everything except lowercase letters, digits, and hyphens (`[^a-z0-9-]`), truncate to 50 characters, and trim leading/trailing hyphens. If the result is empty, fall back to `plan`. Then check if `.ultraplan/<plan-name>.md` already exists — if so, append `-2`, `-3`, etc. until the name is unique. Use the final name as `<plan-name>` for the rest of this session. The plan file path is `.ultraplan/<plan-name>.md`.
+**Without a native subagent tool**, pick the name yourself inline instead — the dispatch exists mainly to keep naming cheap, not because the task requires delegation.
+
+Sanitize the returned (or self-picked) name: strip everything except lowercase letters, digits, and hyphens (`[^a-z0-9-]`), truncate to 50 characters, and trim leading/trailing hyphens. If the result is empty, fall back to `plan`. Then check if `.ultraplan/<plan-name>.md` already exists — if so, append `-2`, `-3`, etc. until the name is unique. Use the final name as `<plan-name>` for the rest of this session. The plan file path is `.ultraplan/<plan-name>.md`.
 
 ```bash
 mkdir -p .ultraplan
@@ -202,7 +204,7 @@ Adversarial review (Step 6) is not gated by task size — it's gated by whether 
 
 ## Prerequisites
 
-- A native subagent tool (the `Agent`/`Task` tool) and the read-only `Explore` agent type.
+- A native subagent tool (the `Agent`/`Task` tool) and the read-only `Explore` agent type are preferred, not required — Step 3's exploration and plan naming fall back to inline execution without one (slower, not different).
 - Standard POSIX shell utilities for recon and validation: `git`, `find`, `grep` (or `rg`), `sed`, `test`.
 
 ## Additional Resources
