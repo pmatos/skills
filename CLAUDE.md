@@ -64,7 +64,7 @@ Slash command `/rebase-pr` that rebases a PR branch onto its base branch, resolv
 
 ## pm-plan
 
-Skill `/pm-plan` (dual-harness) that performs deep, multi-phase implementation planning before writing any code. The shared workflow runs under either harness; a capability fork selects the dispatch mechanism for parallel exploration, plan-name generation, and adversarial review: the native `Agent`/`Task` tool (Claude Code) or `claude -p` headless subagents (OpenAI Codex CLI, which has no native subagent tool). Mechanics live in `references/dispatch-claude.md` and `references/dispatch-codex.md`. Produces a structured plan at `.ultraplan/<plan-name>.md`. The shell path requires `codex --sandbox workspace-write` and `claude` on `$PATH`; the native path needs neither.
+Skill `/pm-plan` that performs deep, multi-phase implementation planning before writing any code. Dispatches parallel `Explore` subagents (via the native `Agent`/`Task` tool) for codebase exploration, plan-name generation, and adversarial review of the draft plan. The adversarial review step consults the advisor when one is available in the session, falling back to an inline self-review when it isn't. Produces a structured plan at `.ultraplan/<plan-name>.md`.
 
 ## pm-cr
 
@@ -73,10 +73,6 @@ Slash command `/pm-cr` that reviews the current diff, or a PR/branch/path target
 ## pm-simplify
 
 Slash command `/pm-simplify` that cleans up the changed code without changing behavior. Reviews the diff for reuse, simplification, efficiency, and altitude issues via four parallel review agents (falling back to a single inline pass when no native subagent tool is available), then fixes what it finds directly. Quality only — does not hunt for correctness bugs.
-
-## fork
-
-Slash command `/fork` that accepts a prompt and implements it with both Claude Code and OpenAI Codex CLI in parallel git worktrees. After both finish, runs the best-of skill to compare implementations and pick the winner.
 
 ## best-of
 
@@ -96,7 +92,7 @@ Slash command `/codestory` that turns a PR, branch, working-tree diff, file, pat
 
 ## pm-deepen
 
-Slash command `/pm-deepen` that runs an architecture review end to end with **no questions**, so it is safe for cron jobs, routines and headless firings. Scans for deepening opportunities (shallow modules whose interface is nearly as complex as their implementation), scores each on leverage (doubled), locality, heat and inverted blast radius, auto-picks the top one, explores interfaces via `codebase-design`'s design-it-twice sub-agents, adjudicates the winner with a fresh sub-agent instead of the interactive `grilling` loop, implements it test-first, and opens a PR. It adopts the branch it was started on when that branch is provably its own to take (non-default, no unique history, no upstream, unpublished) — the state a headless harness leaves a prepared workspace in, and what keeps the PR discoverable by its head branch — otherwise cutting its own from `origin/<default-branch>`. The deliverable is a committed markdown report at `.architecture/reviews/<date>-<slug>.md` (GitHub-rendered Mermaid, no `xdg-open`) plus a persisted `.architecture/backlog.md` that dedups against already-landed refactors. Forked from Matt Pocock's [`improve-codebase-architecture`](https://github.com/mattpocock/skills), which is interactive by design; the exploration heuristics, candidate-card fields and vocabulary discipline are his.
+Slash command `/pm-deepen` that runs an architecture review end to end with **no questions**, so it is safe for cron jobs, routines and headless firings. Scans for deepening opportunities (shallow modules whose interface is nearly as complex as their implementation), scores each on leverage (doubled), locality, heat and inverted blast radius, auto-picks the top one, explores interfaces via `codebase-design`'s design-it-twice sub-agents, adjudicates the winner — via the advisor when one is available, falling back to self-adjudication against the written designs otherwise — instead of the interactive `grilling` loop, implements it test-first, and opens a PR. It adopts the branch it was started on when that branch is provably its own to take (non-default, no unique history, no upstream, unpublished) — the state a headless harness leaves a prepared workspace in, and what keeps the PR discoverable by its head branch — otherwise cutting its own from `origin/<default-branch>`. The deliverable is a committed markdown report at `.architecture/reviews/<date>-<slug>.md` (GitHub-rendered Mermaid, no `xdg-open`) plus a persisted `.architecture/backlog.md` that dedups against already-landed refactors. Forked from Matt Pocock's [`improve-codebase-architecture`](https://github.com/mattpocock/skills), which is interactive by design; the exploration heuristics, candidate-card fields and vocabulary discipline are his.
 
 ## pm-triage
 

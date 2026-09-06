@@ -1,23 +1,22 @@
-# Dual-Agent Reviewer Feedback Evaluation
+# Reviewer Feedback Evaluation
 
-Every unresolved reviewer feedback item must be evaluated before any action is taken. This includes inline review threads, review summary bodies, and PR conversation comments. This prevents wasting effort on invalid, out-of-scope, or low-value feedback. Two independent evaluators assess each item in parallel, and their combined verdict picks one of three outcomes: **FIX** (apply in this PR), **DEFER** (file a tracking issue), or **REJECT** (reply with rationale, no code change).
+Every unresolved reviewer feedback item must be evaluated before any action is taken. This includes inline review threads, review summary bodies, and PR conversation comments. This prevents wasting effort on invalid, out-of-scope, or low-value feedback. A primary evaluator assesses each item, cross-checked by the advisor (when one is available) once per batch, and the combined verdict picks one of three outcomes: **FIX** (apply in this PR), **DEFER** (file a tracking issue), or **REJECT** (reply with rationale, no code change).
 
 The skill is fully automatic. Evaluators must never produce an "ask the user" verdict — uncertain or ambiguous items are auto-classified as DEFER (see "Handling Ambiguous Feedback" below).
 
 ## Evaluation Architecture
 
-The skill is harness-symmetric: it runs under either Claude Code or Codex CLI, and the evaluator pair is always the local host model + the *other* harness's model. SKILL.md Step 0a captures `LOCAL_LABEL` / `REMOTE_LABEL` and the per-host invocation rows used below.
+The skill runs identically regardless of which harness hosts it. SKILL.md Step 0a records two capability flags: `SUBAGENT_TOOL` (a native `Agent`/`Task` tool is available) and `ADVISOR` (a consultable advisor is available).
 
-For each unresolved feedback item, spawn two subagents **in parallel**:
+For each unresolved feedback item:
 
-1. **Local Evaluator** — runs the host model in a clean context.
-   - Claude host: Agent tool with `model="opus"`.
-   - Codex host: Bash with `codex exec --sandbox read-only --ephemeral - < /tmp/eval-XXXXXX` (10-minute timeout; write the prompt with `mktemp` and `rm -f` after).
-2. **Cross-harness Evaluator** — runs the other harness's model.
-   - Claude host: Skill tool with `skill="codex-2nd-opinion"`. **Never** substitute `codex:rescue`, `codex:codex-rescue`, or any other `codex:*` plugin skill — those are unrelated tools.
-   - Codex host: Bash with `claude -p --permission-mode auto --output-format text < /tmp/eval-XXXXXX` (10-minute timeout; same `mktemp` / `rm -f` discipline; `--permission-mode auto` keeps `claude` from prompting when run headless inside the loop). **Never** call `codex exec` again here — that would just be the Local Evaluator.
+1. **Primary Evaluator.** If `SUBAGENT_TOOL`, spawn a clean-context `Agent` subagent for this item. If not, evaluate it yourself, inline.
 
-Both receive identical context and return independent verdicts.
+Once every item in this pass has a Primary verdict — not before, and not per item:
+
+2. **Advisor check** (only if `ADVISOR`). State the whole batch in-transcript — each item's key, feedback, Primary verdict, confidence, and reasoning — then consult the advisor once for the batch. It reviews the conversation as it stands (it takes no separate prompt), so the batch must already be stated before the call. Ask it to flag any item where it would land on a different verdict.
+
+If `ADVISOR` is false, skip step 2 — every item's Primary verdict is final, subject to the confidence rule in the Decision Matrix below.
 
 ## Context to Provide Each Evaluator
 
@@ -30,7 +29,7 @@ Each evaluator needs:
 - The PR diff summary (what files changed and why)
 - The project's CLAUDE.md pre-commit requirements (if any)
 
-## Evaluator Prompt Template (used by both Local and Cross-harness evaluators)
+## Evaluator Prompt Template (used for the Primary Evaluator; restated in-transcript for the advisor batch)
 
 ```
 Evaluate this reviewer feedback item on a GitHub PR. Pick exactly one of three outcomes: FIX, DEFER, or REJECT.
@@ -81,54 +80,28 @@ REPLY_GUIDANCE: one sentence describing what the PR reply should say
 ISSUE_TITLE: (only if VERDICT=DEFER) short imperative title for the tracking issue
 ```
 
-## Cross-harness Evaluator Invocation
-
-### Claude host (cross-harness = Codex)
-
-Invoke the `codex-2nd-opinion` skill via the Skill tool — exact form: `Skill(skill="codex-2nd-opinion", args=<the evaluation prompt above>)`. The skill handles Codex CLI formatting and invocation; pass the same template you used for the Local Evaluator.
-
-**Forbidden substitutes** (do not call any of these even if `codex-2nd-opinion` seems unavailable — stop and report instead):
-- `codex:rescue` (Skill tool)
-- `codex:codex-rescue` (Agent subagent)
-- `codex:setup`, `codex:codex-cli-runtime`, `codex:gpt-5-4-prompting`, `codex:codex-result-handling`
-
-These are unrelated tools from the `codex` plugin. The Cross-harness Evaluator's purpose is to get an *independent verdict* on a review comment, not to delegate rescue work.
-
-### Codex host (cross-harness = Claude)
-
-Write the prompt above to `/tmp/eval-XXXXXX` via `mktemp`, then run via Bash with a 10-minute timeout:
-
-```bash
-claude -p --permission-mode auto --output-format text < /tmp/eval-XXXXXX
-```
-
-`--permission-mode auto` is required: without it, headless `claude` will block on permission prompts inside the loop and the evaluator call will hang.
-
-Capture stdout as the evaluator's verdict, then `rm -f` the temp file. **Never** invoke `codex exec` here — that would re-run the Local Evaluator and lose the independent-verdict guarantee.
-
 ## Decision Matrix
 
-The combined verdict resolves each disagreement toward action where both evaluators still consider the feedback valid. Concretely: FIX when both vote FIX, **or** when one votes FIX and the other DEFER (both agree the feedback is legitimate — they only disagree on timing, so fix it now rather than filing an issue); only REJECT when both vote REJECT; every remaining disagreement — all of which carry at least one REJECT vote — becomes DEFER (file an issue so nothing is silently dropped).
+The combined verdict resolves each disagreement toward action where both the Primary Evaluator and the advisor still consider the feedback valid. Concretely: FIX when both agree FIX, **or** when one lands on FIX and the other on DEFER (both agree the feedback is legitimate — they only disagree on timing, so fix it now rather than filing an issue); only REJECT when there is no disagreement; every remaining disagreement — all of which carry at least one REJECT — becomes DEFER (file an issue so nothing is silently dropped). When no advisor is available, a **low-confidence** Primary verdict is not acted on unchecked — it routes to DEFER instead, since there is no second opinion to catch a bad call.
 
-| Local Verdict | Cross-harness Verdict | Combined Action |
-|---------------|-----------------------|-----------------|
-| FIX | FIX | **FIX** — apply code change in this PR |
+| Primary Verdict | Advisor (if consulted) | Combined Action |
+|---|---|---|
+| FIX | FIX, or not flagged | **FIX** — apply code change in this PR |
 | FIX | DEFER | **FIX** — both agree the feedback is valid; apply it now instead of filing an issue |
 | DEFER | FIX | **FIX** — both agree the feedback is valid; apply it now instead of filing an issue |
-| REJECT | REJECT | **REJECT** — reply with rationale, no code change, no issue |
-| DEFER | DEFER | **DEFER** — file tracking issue, reply with link |
+| REJECT | REJECT, or not flagged | **REJECT** — reply with rationale, no code change, no issue |
+| DEFER | DEFER, or not flagged | **DEFER** — file tracking issue, reply with link |
 | FIX | REJECT | **DEFER** — file tracking issue, reply with link |
 | REJECT | FIX | **DEFER** — file tracking issue, reply with link |
 | DEFER | REJECT | **DEFER** — file tracking issue, reply with link |
 | REJECT | DEFER | **DEFER** — file tracking issue, reply with link |
+| any | not consulted (`ADVISOR` false), **low confidence** | **DEFER** — file tracking issue, reply with link |
 
-This rule leans toward action while staying churn-averse: when both evaluators consider the feedback valid (FIX + DEFER, in either order) the change lands in this PR rather than on the tracker; but a REJECT vote from either evaluator is enough to keep the change out of this PR and file an issue instead. Use the category from the evaluator whose verdict matched the combined action; on ties, use the higher-confidence evaluator; on full ties, use the Local Evaluator's category.
-
-For DEFER outcomes whose evaluators disagreed (e.g. FIX/REJECT), use category `ambiguous` so the filed issue carries a clear "humans need to break the tie" signal.
+This rule leans toward action while staying churn-averse: when both sides consider the feedback valid (FIX + DEFER, in either order) the change lands in this PR rather than on the tracker; but a REJECT from either side is enough to keep the change out of this PR and file an issue instead. Use the Primary Evaluator's category when its verdict matches the combined action; when the advisor's disagreement changed the outcome, use `ambiguous` so the filed issue carries a clear "humans need to break the tie" signal.
 
 ## Confidence Note
 
-Confidence (HIGH | MEDIUM | LOW) is metadata for the rejection-category selection and the issue body, **not** an override knob. The decision matrix above is the only thing that picks the action — high confidence on one side does not flip a DEFER into a FIX or REJECT.
+Confidence (HIGH | MEDIUM | LOW) is metadata for the rejection-category selection and the issue body. It is **not** an override knob when an advisor was consulted — the decision matrix above is the only thing that picks the action in that case. It becomes load-bearing only in the no-advisor row above: with no second opinion available, a LOW-confidence verdict routes to DEFER regardless of what it was, as the compensating control for running without a cross-check.
 
 ## DEFER Taxonomy and Tracking Issue
 
@@ -172,4 +145,4 @@ Always evaluate inline threads based on the **most recent reviewer comment** in 
 
 ## Performance Note
 
-Feedback evaluation is the most expensive step but also the most important. Each item spawns two subagents — for a PR with 10 feedback items, that's 20 subagent calls (10 pairs running in parallel). This is intentional. Getting the evaluation right means fewer wasted iterations and no unnecessary code churn.
+Feedback evaluation is the most expensive step but also the most important. Each item spawns at most one subagent (the Primary Evaluator) — for a PR with 10 feedback items, that's 10 subagent calls running in parallel, plus **one** advisor consultation for the whole batch, never one per item. The advisor forwards the full conversation on every call, so calling it per item would mean replaying an ever-growing transcript ten times over instead of once; batching is not an optimization here, it is the difference between usable and impractical.
