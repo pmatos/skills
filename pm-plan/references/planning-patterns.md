@@ -1,11 +1,6 @@
 # Planning Patterns Reference
 
-All "subagent" dispatches in this document are **harness-agnostic missions**, not invocations. Bind each to your selected dispatch path:
-
-- **Native path** — `Agent` calls with `subagent_type: "Explore"` (parallel = multiple calls in one message). See `dispatch-claude.md`.
-- **Shell path** — `claude -p` headless processes staged under `$PLAN_TMP`, backgrounded and `wait`ed. See `dispatch-codex.md`.
-
-Every subagent runs read-only, has zero inherited context, and must receive a fully self-contained prompt. This document specifies *what each subagent's mission is*; the dispatch reference specifies *how to launch it and achieve parallelism*.
+Every subagent below is dispatched with `Agent` calls using `subagent_type: "Explore"` (parallel = multiple calls in one message) when a native subagent tool is available; without one, the orchestrator works through the same missions itself, inline, one at a time (see SKILL.md Step 3). A dispatched subagent runs read-only, has zero inherited context, and must receive a fully self-contained prompt; working inline, the same mission boundaries still apply, to keep each concern's findings non-overlapping. This document specifies *what each subagent's mission is*, not the invocation mechanics — those are in `SKILL.md`.
 
 ## Exploration Strategies
 
@@ -132,7 +127,7 @@ Assess blast radius of a change with two parallel subagents:
 
 ### Large tasks (Three-Concern Decomposition)
 
-Dispatch all three subagents **in parallel** (native: three `Agent` calls in one message; shell: three backgrounded `claude -p` calls + `wait` — see your dispatch reference). Each subagent has a clear boundary — architecture doesn't propose changes, change surface doesn't assess risks, risks doesn't propose implementations. This prevents overlap and ensures each report is focused.
+Dispatch all three subagents **in parallel** — three `Agent` calls in one message. Each subagent has a clear boundary — architecture doesn't propose changes, change surface doesn't assess risks, risks doesn't propose implementations. This prevents overlap and ensures each report is focused.
 
 Synthesize by:
 1. Start with Subagent 1's architecture context as the foundation

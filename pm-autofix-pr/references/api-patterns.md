@@ -143,7 +143,7 @@ A snapshot is considered changed (and the loop wakes the evaluator) if any of th
 
 ### Why polling, not webhook subscription
 
-Earlier drafts of this skill referenced a `subscribe_pr_activity` / `unsubscribe_pr_activity` pair and consumed `<github-webhook-activity>` envelopes. Those tools are Claude Code coordinator-mode built-ins exposed only by certain long-running harnesses (e.g. Claude Code Web); they are not something `gh` or the upstream `github-mcp-server` toolset expose, and are not available in the interactive Claude Code CLI or in Codex CLI sessions. Polling works uniformly across every harness this skill supports, at the cost of ~`POLL_INTERVAL/2` average latency between an external event and the loop reacting to it. For a fix loop bottlenecked on CI runs measured in minutes, that latency is invisible.
+Earlier drafts of this skill referenced a `subscribe_pr_activity` / `unsubscribe_pr_activity` pair and consumed `<github-webhook-activity>` envelopes. Those tools are coordinator-mode built-ins exposed only by certain long-running harnesses; they are not something `gh` or the upstream `github-mcp-server` toolset expose, and are not available in the interactive CLI sessions this skill targets. Polling works uniformly across every harness this skill supports, at the cost of ~`POLL_INTERVAL/2` average latency between an external event and the loop reacting to it. For a fix loop bottlenecked on CI runs measured in minutes, that latency is invisible.
 
 ## CI check runs
 
@@ -252,7 +252,7 @@ A pull request is also an issue, so its top-level conversation comments live und
 
 ## Replying to review summaries and PR conversation comments
 
-Review summaries and PR conversation comments don't have inline review-thread reply anchors; post a PR-level comment through the issues endpoint. Write the body to a temp file first — a reviewer-authored or generated body can contain backticks, `$`, and newlines that are unsafe to inline as a shell argument. Allocate that file with `mktemp` (e.g. `mktemp /tmp/reply-body-XXXXXX`) rather than a fixed literal path: two concurrent `/pm-autofix-pr` invocations on the same host would otherwise race on the same filename, letting one invocation's reply get overwritten by the other's before `gh` reads it. Capture the exact path `mktemp` returns and reuse it for both the write and the `gh` call below, then `rm -f` it afterward — the same discipline already used for evaluator prompt files (Step 0a):
+Review summaries and PR conversation comments don't have inline review-thread reply anchors; post a PR-level comment through the issues endpoint. Write the body to a temp file first — a reviewer-authored or generated body can contain backticks, `$`, and newlines that are unsafe to inline as a shell argument. Allocate that file with `mktemp` (e.g. `mktemp /tmp/reply-body-XXXXXX`) rather than a fixed literal path: two concurrent `/pm-autofix-pr` invocations on the same host would otherwise race on the same filename, letting one invocation's reply get overwritten by the other's before `gh` reads it. Capture the exact path `mktemp` returns and reuse it for both the write and the `gh` call below, then `rm -f` it afterward:
 
 ```bash
 gh pr comment <pull_number> -R {owner}/{repo} --body-file <tmpfile>

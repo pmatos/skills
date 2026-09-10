@@ -141,20 +141,20 @@ Trigger phrases: `rebase pr`, `rebase onto main`, `rebase this branch`, `rebase 
 
 **Requires**: [GitHub CLI](https://cli.github.com/) (`gh`), authenticated.
 
-### `/pm-plan` — Deep Implementation Planning (dual-harness)
+### `/pm-plan` — Deep Implementation Planning
 
 ```bash
 npx skills@latest add pmatos/skills/pm-plan
 ```
 
-Performs thorough, multi-phase implementation planning with parallel subagent exploration before any code is written. The workflow is identical whichever harness runs it — **Claude Code or OpenAI Codex CLI** — and only the mechanism for dispatching subagents (parallel exploration, plan naming, adversarial review) differs. The skill forks on capability, not identity: if it has a native `Agent`/`Task` tool (Claude Code) it spawns read-only `Explore` subagents directly; if its only way to run another model is the shell (Codex CLI) it dispatches `claude -p` headless subagents with a read-only tool allowlist. Produces a battle-tested, file-path-grounded plan at `.ultraplan/<plan-name>.md` (name generated from the task description).
+Performs thorough, multi-phase implementation planning with parallel subagent exploration before any code is written. Produces a battle-tested, file-path-grounded plan at `.ultraplan/<plan-name>.md` (name generated from the task description).
 
 What it does:
 - Assesses task complexity and scales exploration depth accordingly (Small/Medium/Large).
-- Dispatches parallel read-only Explore subagents — via the native `Agent`/`Task` tool (Claude Code) or backgrounded `claude -p` processes (Codex CLI) — to systematically map affected code areas.
+- Dispatches parallel read-only `Explore` subagents (via the native `Agent`/`Task` tool) to systematically map affected code areas.
 - Drafts a structured plan with exact `file:line` references, ordered steps, and verification criteria.
-- Validates all file references exist and dispatches an adversarial reviewer subagent to catch issues.
-- Operates in strict read-only mode for the source tree — only `.ultraplan/<plan-name>.md` (and, on the shell path, a `/tmp/pm-plan-*` staging directory) are written. Read-only is enforced by a hard `Read,Grep,Glob` tool allowlist on the shell path and by the read-only `Explore` agent type on the native path.
+- Validates all file references exist, then gets an independent critique of the draft plan — consulting the advisor when one is available in the session, falling back to an inline self-review otherwise.
+- Operates in strict read-only mode for the source tree — only `.ultraplan/<plan-name>.md` is written.
 
 Trigger phrases: `plan this`, `make a plan`, `implementation plan`, `deep plan`, `thorough plan`.
 
@@ -197,26 +197,6 @@ What it does:
 
 Trigger phrases: `simplify this`, `simplify the diff`, `clean up this code`, `clean up the changed code`, `reuse pass`, `simplification pass`, `efficiency pass`, `altitude pass`.
 
-### `/fork` — Dual-Model Implementation
-
-```bash
-npx skills@latest add pmatos/skills/fork
-```
-
-Implements the same task with both Claude Code and OpenAI Codex CLI in parallel git worktrees, then runs the best-of skill to compare and select the superior implementation.
-
-What it does:
-- Creates two isolated git worktrees from the current HEAD.
-- Sends the identical prompt to both Claude Code (`claude -p`) and Codex (`codex exec --sandbox workspace-write`) in parallel.
-- Collects the diffs and commit history from each implementation.
-- Invokes the best-of skill to compare correctness, code quality, and completeness — or performs an inline comparison as a fallback.
-- Merges the winning implementation into the original branch (with user confirmation).
-- Cleans up worktrees and temporary branches.
-
-Trigger phrases: `fork`, `race claude and codex`, `dual implement`, `run both models`, `compare implementations`, `implement with both`.
-
-**Requires**: [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) and [OpenAI Codex CLI](https://github.com/openai/codex) installed with `OPENAI_API_KEY` set.
-
 ### `/best-of` — Code Comparison
 
 ```bash
@@ -230,7 +210,7 @@ What it does:
 - Dispatches parallel agents scoring correctness, security, SOLID/DRY, testing, idiomaticity, and project-convention adherence.
 - Applies a 15-criteria weighted rubric; every claim is anchored to `file:line` evidence.
 - Emits a structured verdict (winner, per-criterion scores, rationale, specific citations).
-- Used internally by `/fork`, but runs standalone against any pair of worktrees.
+- Runs standalone against any pair of worktrees.
 
 Trigger phrases: `best of`, `compare worktrees`, `compare solutions`, `which solution is better`, `pick the better implementation`, `evaluate solutions`.
 
@@ -351,7 +331,7 @@ Scans a codebase for **deepening opportunities** — refactors that turn a shall
 What it does:
 - Scopes by **hot spot**: walks `git log` to weight recently-changed areas, because deepening pays off through *future* changes. A path argument overrides the inference.
 - Scores every candidate out of 25 on **leverage** (doubled), **locality**, **heat** and **blast radius** (inverted), applies hard filters (fails the deletion test, too large for one PR, contradicts an ADR, already seen), then takes the top one with a deterministic tie-break — no "which would you like to explore?".
-- Explores interfaces with `codebase-design`'s **design-it-twice** sub-agents, then **adjudicates** the winner with a fresh sub-agent scoring depth, locality, seam placement, test surface and blast radius — replacing the interactive `grilling` loop that waits on a human.
+- Explores interfaces with `codebase-design`'s **design-it-twice** sub-agents, then **adjudicates** the winner — via the advisor when available, falling back to self-adjudication against the written designs otherwise — scoring depth, locality, seam placement, test surface and blast radius; replaces the interactive `grilling` loop that waits on a human.
 - Implements the winner **test-first** (red-green inline — the `tdd` skill is deliberately not called, since it gates on confirming seams with a user), runs the project's quality gate as separate un-chained commands, and never weakens a test to reach green.
 - Leaves a **durable deliverable**: a committed markdown report at `.architecture/reviews/<date>-<slug>.md` with GitHub-rendered Mermaid before/after diagrams — no temp files, no `xdg-open`.
 - **Remembers**: a persisted `.architecture/backlog.md` with per-item status (proposed / in-flight / landed / dropped / rejected), reconciled against merged and open PRs, so recurring runs stop re-surfacing the same candidates. Machine drops are reversible; only a human's rejection is permanent.
