@@ -9,7 +9,7 @@ user-invocable: true
 
 Surface architectural friction, pick the highest-leverage **deepening opportunity** — a refactor that turns a shallow module into a deep one — implement it test-first, and open a PR. The aim is testability and AI-navigability.
 
-**This skill never asks a question.** Every decision the upstream skill puts to the user is made here from the evidence and written into the report, so it is auditable after the fact rather than blocking before it. That is the whole point of the fork: it has to complete unattended, from a cron firing or a routine, with nobody watching.
+**This skill never asks a question.** Every decision the upstream skill puts to the user is made here from the evidence and written into the backlog and the PR body, so it is auditable after the fact rather than blocking before it. That is the whole point of the fork: it has to complete unattended, from a cron firing or a routine, with nobody watching.
 
 > Forked from Matt Pocock's [`improve-codebase-architecture`](https://github.com/mattpocock/skills) (`mattpocock/skills`), which is interactive by design: it presents an HTML report and then grills the user through whichever candidate they pick. The exploration heuristics, candidate-card fields, and vocabulary discipline are his. This fork replaces the three interactive joints — the candidate pick, the grilling loop, and the GUI deliverable — and adds a terminal step and a backlog memory. Upstream is MIT-licensed, Copyright (c) Matt Pocock.
 
@@ -23,17 +23,17 @@ This skill is *informed* by the project's domain model and built on a shared des
 Read each one at the step that needs it, not all up front:
 
 - [references/ranking.md](references/ranking.md) — the scoring rubric that replaces the "which one?" question, and the backlog that stops runs repeating themselves. **Read before step 2.** Step 0 needs only the fixed backlog path from it.
-- [references/report-format.md](references/report-format.md) — the committed markdown deliverable that replaces the temp-directory HTML. **Read before step 3.**
+- [references/deliverables.md](references/deliverables.md) — the run scratchpad that replaces the temp-directory HTML, and the PR body that replaces it as the deliverable. **Read before step 3.**
 - [references/autonomy-contract.md](references/autonomy-contract.md) — which side effects are unilateral, when to bail out, what the exit report looks like, and what "done" means. **Read before step 0, and consult on any bail-out.**
 
 ## Delegated skills
 
-This skill calls three others. Each is **optional**: if it is not installed, use the stated fallback and note the substitution in the report. None of their interactive steps apply here — this run has no user to present to.
+This skill calls three others. Each is **optional**: if it is not installed, use the stated fallback and note the substitution in the PR body — or in the exit report on a run that opens no PR. None of their interactive steps apply here — this run has no user to present to.
 
 | Skill | Used at | If absent | Interactive steps to override |
 |---|---|---|---|
-| `codebase-design` | preamble, step 4 | Use the vocabulary as defined in this file | `DESIGN-IT-TWICE.md` steps 1 and 3 say to *show* and *present* to the user. There is no user. Write the problem-space framing and the design comparison into the report as artefacts and continue without pausing. |
-| `tdd` | **not called** | Red-green inline at step 5 is the primary path | `tdd` requires the seams under test to be **confirmed with the user** before any test is written, and that gate is not worth loading into an unattended run. If you do call it: the confirmation is already satisfied — the seam under test is the interface the step-4 adjudicator picked, recorded in the report. Treat it as the pre-agreed seam and do not re-confirm. |
+| `codebase-design` | preamble, step 4 | Use the vocabulary as defined in this file | `DESIGN-IT-TWICE.md` steps 1 and 3 say to *show* and *present* to the user. There is no user. Write the problem-space framing and the design comparison into the scratchpad as artefacts, carry the comparison into the PR body, and continue without pausing. |
+| `tdd` | **not called** | Red-green inline at step 5 is the primary path | `tdd` requires the seams under test to be **confirmed with the user** before any test is written, and that gate is not worth loading into an unattended run. If you do call it: the confirmation is already satisfied — the seam under test is the interface the step-4 adjudicator picked, recorded in the scratchpad. Treat it as the pre-agreed seam and do not re-confirm. |
 | `domain-modeling` | **not called** | Edit `CONTEXT.md` directly at step 6 | Its ADR-recording step would be pre-empted anyway: this run never writes an ADR. |
 
 ## Arguments
@@ -41,7 +41,7 @@ This skill calls three others. Each is **optional**: if it is not installed, use
 Parse flags from the invocation. **With no arguments, the run does everything**: scan, pick, implement, and open a PR.
 
 - `<path|module>` — scope the scan to this path or module. Skips the hot-spot inference in step 1.
-- `--report-only` — stop after **step 3**. Produces the committed report and the reconciled backlog; no design pass, no implementation, no PR.
+- `--report-only` — stop after **step 3**. Produces the reconciled, committed backlog — every candidate scored, with a status; no design pass, no implementation, no PR. The flag is named for the upstream report it once wrote; what it now produces is the backlog.
 - `--no-pr` — implement and commit on a branch, but don't push or open a PR.
 
 ## Workflow
@@ -71,9 +71,9 @@ Establish that the run can finish before it changes anything. Check in order; on
 
    **Otherwise create one**: name it `pm-deepen/run-<YYYY-MM-DD>-<HHMM>` and cut it from **`origin/<default-branch>`**, not from the local default branch — a fetch updates remote-tracking refs, so branching off local `main` in a stale container still bases the PR on old code.
 
-   Record which path was taken, the branch name, and — when adoption was refused — which condition refused it, in the report and the exit report. Without that line a harness whose PR went missing has no way to tell why. The distinction matters twice later: step 2 does not rename an adopted branch, and an adopted branch is the caller's to delete, never this run's.
+   Record which path was taken, the branch name, and — when adoption was refused — which condition refused it, in the backlog and the exit report. Without that line a harness whose PR went missing has no way to tell why. The distinction matters twice later: step 2 does not rename an adopted branch, and an adopted branch is the caller's to delete, never this run's.
 4. **The quality gate is discoverable**: read `CLAUDE.md`/`AGENTS.md` and the manifests, and record the exact commands. A repo with no test runner cannot be deepened test-first — bail.
-5. **`gh` is available and authenticated**: `gh auth status`. If it is missing or unauthenticated, **degrade to `--report-only`** rather than bailing — a report with no PR is still evidence, and this is the most common cron-container failure. Record it under *Degradations* in the report, and follow the degraded reconciliation rule at step 2.
+5. **`gh` is available and authenticated**: `gh auth status`. If it is missing or unauthenticated, **degrade to `--report-only`** rather than bailing — a scored backlog with no PR is still evidence, and this is the most common cron-container failure. Record it under *Degradations* in the exit report, and follow the degraded reconciliation rule at step 2.
 
 ### 1. Explore
 
@@ -106,27 +106,29 @@ Read `.architecture/backlog.md` if it exists and reconcile it against merged and
 
 **Name the branch after the slug — but only if the branch is this run's to name.** A run that *created* its branch at step 0 and will implement something renames it to `pm-deepen/<slug>` (`git branch -m`); nothing has been pushed yet, so this is free. A `--report-only` or no-candidates run keeps its run-stamped name.
 
-**Never rename an adopted branch.** Its name is the caller's identity for this run — a headless harness derives the branch deterministically and then looks for the resulting PR by that head, so renaming it hides the PR from the very system that asked for the work. Keep the adopted name for the whole run and record the slug in the report and the backlog instead.
+**Never rename an adopted branch.** Its name is the caller's identity for this run — a headless harness derives the branch deterministically and then looks for the resulting PR by that head, so renaming it hides the PR from the very system that asked for the work. Keep the adopted name for the whole run and record the slug in the backlog instead.
 
 Either way, check the slug for collisions: if `pm-deepen/<slug>` already exists locally or on origin, that candidate is already in flight — bail. On an adopted branch this check finds nothing, because no slug-named branch is ever created; there the backlog's `in-flight`-entry-with-an-open-PR check below is the dedup that matters, which is why it is the primary guard and this one the backstop.
 
 Then score every candidate on leverage, locality, blast radius, and heat; apply the hard filters; rank; **take the top one**. The rubric, the filters, and the deterministic tie-break are in [ranking.md](references/ranking.md).
 
-Do not ask which to explore. Do not stop at a shortlist. The pick and its reasoning go into the report, where a reviewer can disagree with it in the PR.
+Do not ask which to explore. Do not stop at a shortlist. The pick and its reasoning go into the PR body, where a reviewer can disagree with them.
 
 Merge every candidate — picked, dropped, and too-large — into `.architecture/backlog.md` with the status the rubric assigns it, reusing existing slugs so the dedup filter keeps working across runs.
 
 If an `in-flight` entry still has an open PR, **and this run would implement something**, stop: one architecture PR at a time. A `--report-only` run continues — it opens nothing.
 
-### 3. Write the report
+### 3. Write up the run
 
-Write the report per [report-format.md](references/report-format.md): one card per candidate with files, scores, problem, deletion test, solution, benefits, before/after Mermaid diagrams and recommendation strength, then the dropped list, the too-large list, and the pick.
+Two different artefacts, per [deliverables.md](references/deliverables.md), and the difference is what survives the run.
 
-Never write to a temp directory. Never call `xdg-open`, `open`, or `start` — an unattended run has no display, and a discarded temp file leaves no evidence the run happened.
+**The scratchpad** goes in the session scratchpad directory: every candidate with its four axis scores and file-count estimate, and later the step-4 designs. It is working memory, not a deliverable — nothing reads it after this firing ends. Never write it into the repository, and never call `xdg-open`, `open`, or `start`; an unattended run has no display.
 
-**Commit the report and the backlog to the run's branch now**, before going further. Artefacts that are written but never committed are lost on the next firing and leave the tree dirty.
+**The backlog** is the durable record, already merged at step 2. **Commit `.architecture/backlog.md` to the run's branch now**, before going further, applying the compaction rule in [ranking.md](references/ranking.md). Nothing else under `.architecture/` is written. An artefact that is written but never committed is lost on the next firing and leaves the tree dirty.
 
-If `--report-only`: push the branch unless `--no-pr`, and stop here. This is a complete run — see the per-flag definitions of done in [autonomy-contract.md](references/autonomy-contract.md).
+The narrative — problem, deletion test, solution, benefits, before/after diagrams, scores, both runner-ups — is written at step 6, into the PR body. Do not also commit it as a file: it would be a second copy of the PR, in the same diff, that no later run reads.
+
+If `--report-only`: there is no step 6 and no PR, so the backlog is the only place the reasoning can land — put the pick's reasoning in its entry's `Summary` before committing, or the run produces scores with nothing explaining them. Then push the branch unless `--no-pr`, and stop here. This is a complete run — see the per-flag definitions of done in [autonomy-contract.md](references/autonomy-contract.md).
 
 ### 4. Design the interface
 
@@ -134,7 +136,7 @@ Now propose interfaces — not before; a candidate is chosen on friction, not on
 
 Call the Skill tool with `codebase-design` and use its **design-it-twice** pattern: spawn 3+ sub-agents in parallel, each briefed to produce a *radically different* interface for the deepened module (minimal surface; maximum flexibility; optimised for the most common caller; ports-and-adapters where dependencies cross a seam). Give each the file paths, coupling details, dependency category, what sits behind the seam, and both vocabularies.
 
-**Without a sub-agent tool**, produce the designs inline one at a time, writing each into the report's `## Design` section *before* starting the next, rather than holding them only in memory. Note in the report that the designs were produced inline.
+**Without a sub-agent tool**, produce the designs inline one at a time, writing each into the scratchpad's `## Design` section *before* starting the next, rather than holding them only in memory. Note in the PR body that the designs were produced inline.
 
 Then **adjudicate instead of grilling.** Upstream hands the winning design to the `grilling` skill, which asks the user a round of questions and waits for answers — no human, no progress. Here, adjudication picks the winner against fixed criteria, in this order:
 
@@ -146,9 +148,9 @@ Then **adjudicate instead of grilling.** Upstream hands the winning design to th
 
 Grilling already requires a recommended answer per question, so an adjudicator can settle the same tree from the same evidence. State the criteria above and a pointer to the written designs in-transcript — neutrally, without editorializing toward a favorite, since the advisor reads whatever bias is already on the record — then consult the advisor to pick the winner. The advisor takes no separate prompt; it reviews your conversation as it stands, so state the criteria immediately before calling it.
 
-**If no advisor is available**, adjudicate yourself against the written designs in the report rather than against memory — this is why they were written down first, whether generated by sub-agents or inline. Note in the report that adjudication was done without an advisor.
+**If no advisor is available**, adjudicate yourself against the written designs in the scratchpad rather than against memory — this is why they were written down first, whether generated by sub-agents or inline. Note in the PR body that adjudication was done without an advisor.
 
-Append the winner, the losing designs, and the reasoning to the report's `## Design` section, and carry the winner and the strongest loser into the PR body.
+Append the winner, the losing designs, and the reasoning to the scratchpad's `## Design` section, and carry the winner and the strongest loser into the PR body.
 
 If the criteria above cannot separate the designs, that is a bail-out, not a coin flip.
 
@@ -166,6 +168,6 @@ Watch the diff against the file-count estimate the candidate was scored on. A ch
 
 Update `CONTEXT.md` if the deepened module is named after a concept the glossary lacks, or if a term the code contradicts needs sharpening. **Do not write an ADR** — propose it under `## Proposed ADR` in the PR body instead.
 
-Commit with a conventional-commit message. Unless `--no-pr`: push the branch and open a PR with `gh pr create`, whose body carries the problem, the before/after in `codebase-design` vocabulary, a link to the report, the winning candidate's score and the runner-up **candidate**, the runner-up **design** and why it lost, any proposed ADR, and any `CONTEXT.md` terms added. Set the backlog entry to `in-flight` with the PR number, commit that update, and **push again** so that commit lands in the PR. Without the second push, the PR — and the default branch after it merges — keeps a `proposed` entry with no PR number, and the next firing reads the backlog from `origin/<default-branch>`: the `in-flight` reconciliation lookup never fires and already-landed work resurfaces. Under `--no-pr` there is no PR number: leave the entry `proposed` and add a note naming the branch, so the next firing can find the work.
+Commit with a conventional-commit message. Unless `--no-pr`: push the branch and open a PR with `gh pr create`, writing its body to the contract in [deliverables.md](references/deliverables.md) — problem, deletion test, solution, benefits, the before/after Mermaid pair in `codebase-design` vocabulary, the winning candidate's score, the runner-up **candidate**, the runner-up **design** and why it lost, any proposed ADR, any `CONTEXT.md` terms added, and any degradations. Write it from the scratchpad, which has the scores and the designs already; the scratchpad itself is never linked, because it does not outlive the run. Set the backlog entry to `in-flight` with the PR number, commit that update, and **push again** so that commit lands in the PR. Without the second push, the PR — and the default branch after it merges — keeps a `proposed` entry with no PR number, and the next firing reads the backlog from `origin/<default-branch>`: the `in-flight` reconciliation lookup never fires and already-landed work resurfaces. Under `--no-pr` there is no PR number: leave the entry `proposed` and add a note naming the branch, so the next firing can find the work.
 
 The PR is the deliverable. Do not merge it, and do not approve it — see the full side-effect table in [autonomy-contract.md](references/autonomy-contract.md).
