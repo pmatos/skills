@@ -1,7 +1,7 @@
 ---
 name: pm-deepen
 description: This skill should be used when the user asks to "deepen a module", "find shallow modules", "run an architecture review", "open a refactor PR", "improve the codebase architecture unattended", or wants a hands-off run that scans a codebase for deepening opportunities, picks the highest-leverage one, implements it test-first, and opens a PR. Runs end to end with no questions, so it is safe for cron jobs, routines, and headless firings. Also triggered by the /pm-deepen command.
-argument-hint: "[<path|module>] [--report-only] [--no-pr]"
+argument-hint: "[<path|module>] [--scan-only] [--no-pr]"
 user-invocable: true
 ---
 
@@ -9,163 +9,212 @@ user-invocable: true
 
 Surface architectural friction, pick the highest-leverage **deepening opportunity** — a refactor that turns a shallow module into a deep one — implement it test-first, and open a PR. The aim is testability and AI-navigability.
 
-**This skill never asks a question.** Every decision the upstream skill puts to the user is made here from the evidence and written into the report, so it is auditable after the fact rather than blocking before it. That is the whole point of the fork: it has to complete unattended, from a cron firing or a routine, with nobody watching.
+**This skill never asks a question**, and **it writes nothing to the repository but the refactor itself.** Every decision the upstream skill puts to the user is made here from the evidence and stated in the PR body, so it is auditable in review rather than blocking before it. The PR is the deliverable, the report, and the memory. A run that finds nothing worth doing says so and exits — that is a good outcome, not a failure.
 
-> Forked from Matt Pocock's [`improve-codebase-architecture`](https://github.com/mattpocock/skills) (`mattpocock/skills`), which is interactive by design: it presents an HTML report and then grills the user through whichever candidate they pick. The exploration heuristics, candidate-card fields, and vocabulary discipline are his. This fork replaces the three interactive joints — the candidate pick, the grilling loop, and the GUI deliverable — and adds a terminal step and a backlog memory. Upstream is MIT-licensed, Copyright (c) Matt Pocock.
+> Forked from Matt Pocock's [`improve-codebase-architecture`](https://github.com/mattpocock/skills) (`mattpocock/skills`), which is interactive by design: it presents an HTML report and then grills the user through whichever candidate they pick. The exploration heuristics, candidate fields, and vocabulary discipline are his. This fork replaces the three interactive joints — the candidate pick, the grilling loop, and the GUI deliverable — and adds a terminal step. Upstream is MIT-licensed, Copyright (c) Matt Pocock.
 
 This skill is *informed* by the project's domain model and built on a shared design vocabulary:
 
-- Call the Skill tool with `codebase-design` for the architecture vocabulary (**module**, **interface**, **depth**, **seam**, **adapter**, **leverage**, **locality**) and its principles (the deletion test, "the interface is the test surface", "one adapter = hypothetical seam, two = real"). Use these terms exactly in every suggestion, and don't drift into "component", "service", "API", or "boundary".
+- Call the Skill tool with `codebase-design` for the architecture vocabulary (**module**, **interface**, **depth**, **seam**, **adapter**, **leverage**, **locality**) and its principles (the deletion test, "the interface is the test surface", "one adapter = hypothetical seam, two = real"). Use these terms exactly, and don't drift into "component", "service", "API", or "boundary".
 - `CONTEXT.md` gives names to good seams; ADRs in `docs/adr/` record decisions this skill must not re-litigate.
-
-## References
-
-Read each one at the step that needs it, not all up front:
-
-- [references/ranking.md](references/ranking.md) — the scoring rubric that replaces the "which one?" question, and the backlog that stops runs repeating themselves. **Read before step 2.** Step 0 needs only the fixed backlog path from it.
-- [references/report-format.md](references/report-format.md) — the committed markdown deliverable that replaces the temp-directory HTML. **Read before step 3.**
-- [references/autonomy-contract.md](references/autonomy-contract.md) — which side effects are unilateral, when to bail out, what the exit report looks like, and what "done" means. **Read before step 0, and consult on any bail-out.**
 
 ## Delegated skills
 
-This skill calls three others. Each is **optional**: if it is not installed, use the stated fallback and note the substitution in the report. None of their interactive steps apply here — this run has no user to present to.
+Each is **optional**: if it is not installed, use the stated fallback and note the substitution in the PR body. None of their interactive steps apply — this run has no user to present to.
 
 | Skill | Used at | If absent | Interactive steps to override |
 |---|---|---|---|
-| `codebase-design` | preamble, step 4 | Use the vocabulary as defined in this file | `DESIGN-IT-TWICE.md` steps 1 and 3 say to *show* and *present* to the user. There is no user. Write the problem-space framing and the design comparison into the report as artefacts and continue without pausing. |
-| `tdd` | **not called** | Red-green inline at step 5 is the primary path | `tdd` requires the seams under test to be **confirmed with the user** before any test is written, and that gate is not worth loading into an unattended run. If you do call it: the confirmation is already satisfied — the seam under test is the interface the step-4 adjudicator picked, recorded in the report. Treat it as the pre-agreed seam and do not re-confirm. |
-| `domain-modeling` | **not called** | Edit `CONTEXT.md` directly at step 6 | Its ADR-recording step would be pre-empted anyway: this run never writes an ADR. |
+| `codebase-design` | preamble, step 3 | Use the vocabulary as defined above | `DESIGN-IT-TWICE.md` steps 1 and 3 say to *show* and *present* to the user. There is no user. Carry the problem-space framing and the design comparison into the PR body and continue without pausing. |
+| `tdd` | **not called** | Red-green inline at step 4 is the primary path | `tdd` requires the seams under test to be **confirmed with the user** first, and that gate is not worth loading into an unattended run. If you do call it: the seam under test is the interface step 3 adjudicated. Treat it as pre-agreed and do not re-confirm. |
+| `domain-modeling` | **not called** | Edit `CONTEXT.md` directly at step 5 | Its ADR-recording step would be pre-empted anyway: this run never writes an ADR. |
 
 ## Arguments
 
-Parse flags from the invocation. **With no arguments, the run does everything**: scan, pick, implement, and open a PR.
+**With no arguments, the run does everything**: scan, pick, implement, and open a PR.
 
 - `<path|module>` — scope the scan to this path or module. Skips the hot-spot inference in step 1.
-- `--report-only` — stop after **step 3**. Produces the committed report and the reconciled backlog; no design pass, no implementation, no PR.
-- `--no-pr` — implement and commit on a branch, but don't push or open a PR.
+- `--scan-only` — stop after **step 2**. Print the ranked candidates and the pick to stdout; no design pass, no implementation, no PR, no commit. Nothing persists, which is the point: it is for a human watching the output, and for the degraded mode below. **`--report-only` is accepted as an alias**, because existing cron invocations use it; there is no report any more, but silently rejecting the flag a routine already passes would turn every one of its firings into a no-op.
+- `--no-pr` — implement and commit on a branch, but don't push or open a PR. The only mode that can leave finished work nowhere a later run will find it, which is acceptable because a human typed it.
+
+## State
+
+**There is no state file.** No backlog, no report, no `.architecture/` directory — earlier versions wrote all three, and nothing ever read them back. Two things already hold everything a later run needs:
+
+- **The tree** remembers landed work. A refactor that merged no longer shows the friction that surfaced it, so the next scan doesn't re-derive it.
+- **GitHub** remembers decisions. This skill labels every PR it opens `pm-deepen`, and `gh pr list --label pm-deepen --state all` recovers what past runs did, including the ones that failed.
+
+Where the tree is *not* sufficient — a refactor that landed only half, so the friction is still visible — the label query is what catches it, and re-picking the missing half is usually correct anyway.
 
 ## Workflow
 
 ### 0. Preflight
 
-Establish that the run can finish before it changes anything. Check in order; on any failure write the exit report ([autonomy-contract.md](references/autonomy-contract.md)) and stop.
+Establish that the run can finish before it changes anything. Check in order; on any failure print the exit report and stop.
 
-**Checks 1 and 2 run before the run has settled its branch, so their bail-outs write nothing.** Print the exit report to stdout, record `**Committed**: nothing`, and commit nothing — the contract's "commit before you stop" rule applies only once check 3 has adopted or created a branch to commit to. Committing here would land `.architecture/` changes on whatever branch the caller happened to have checked out, possibly the default branch, which the side-effect table forbids; and in the dirty-tree case it would commit into the very tree the check exists to protect. Do **not** close this by settling the branch earlier: neither adoption nor a clean cut from `origin/<default-branch>` is safe over a dirty tree without carrying or clobbering the caller's work.
+**Checks 1 and 2 run before the run has settled its branch, so their bail-outs write nothing** — which is now true of every bail-out that has no code to show, since there is no artefact to commit.
 
-1. **Fetch first.** `git fetch origin` — a cron container's local branches are routinely days stale, and both the base branch and the PR reconciliation below are read against origin.
-2. **Working tree is clean**, ignoring paths under `.architecture/`. Never stash: the stash stack is shared across worktrees and sessions. Uncommitted `.architecture/` files are the residue of an interrupted run, not a reason to bail — step 2 reconciles them.
-3. **Settle the run's branch** now, before anything is written, so every artefact has somewhere to be committed. Never work on the default branch.
+1. **Fetch first.** `git fetch origin` — a cron container's local branches are routinely days stale, and both the base branch and the PR query below are read against origin.
+2. **Working tree is clean.** Never stash: the stash stack is shared across worktrees and sessions.
+3. **Settle the run's branch** now. Never work on the default branch.
 
-   **Adopt the branch you were started on** only when it is demonstrably a branch made *for* this run. Taking it over is what lets a caller find the resulting PR — a harness that prepares a workspace derives the branch name deterministically and then looks for the PR by that head — but adopting the wrong branch means committing to and pushing something shared, which the side-effect table forbids. All four must hold:
+   **Adopt the branch you were started on** only when it is demonstrably a branch made *for* this run. Taking it over is what lets a caller find the resulting PR — a harness that prepares a workspace derives the branch name deterministically and then looks for the PR by that head — but adopting the wrong branch means committing to and pushing something shared. All four must hold:
 
    1. It is **not the default branch**.
-   2. It has **no unique history**: `git rev-list --count origin/<default-branch>..HEAD` is 0, so there are no commits of anyone else's to build on top of.
+   2. It has **no unique history**: `git rev-list --count origin/<default-branch>..HEAD` is 0.
    3. It has **no upstream**: `git rev-parse --abbrev-ref --symbolic-full-name @{u}` fails.
    4. It is **unpublished**: `refs/remotes/origin/<branch>` does not exist after check 1's fetch.
 
-   Conditions 3 and 4 are the ones that matter, and (2) alone is not a substitute for them. Zero commits ahead proves only that a branch has no history of its own — it is equally true of a long-lived `release/*` branch that is an ancestor of the default branch, or of a topic branch someone left checked out after it merged. Both are shared, both are published, and neither was made for this run. A firing workspace's branch, by contrast, is created locally from the base and has never been pushed by anyone. Ownership, not emptiness, is the evidence.
+   Conditions 3 and 4 are the ones that matter, and (2) alone is not a substitute. Zero commits ahead proves only that a branch has no history of its own — equally true of a long-lived `release/*` branch that is an ancestor of the default branch, or a topic branch someone left checked out after it merged. Both are shared, both are published, neither was made for this run. Ownership, not emptiness, is the evidence.
 
-   If the adopted branch is *behind* the base, fast-forward it with `git merge --ff-only origin/<default-branch>`; there are no commits of the run's own to lose, and `--ff-only` fails loudly instead of rewriting anything. If that fails, the branch has diverged from base: fall back to creating a branch, below.
+   Otherwise cut `pm-deepen/run-<date>-<time>` from `origin/<default-branch>`, to be renamed at step 2. **Never rename an adopted branch**: its name is the caller's identity for this run, and renaming hides the PR from the system that asked for the work.
 
-   Every one of these checks **fails closed** — refusing adoption just means creating a branch, which is the behaviour that predates adoption. A stale remote-tracking ref for a deleted remote branch will refuse adoption too; that is the correct direction to err in.
-
-   **Otherwise create one**: name it `pm-deepen/run-<YYYY-MM-DD>-<HHMM>` and cut it from **`origin/<default-branch>`**, not from the local default branch — a fetch updates remote-tracking refs, so branching off local `main` in a stale container still bases the PR on old code.
-
-   Record which path was taken, the branch name, and — when adoption was refused — which condition refused it, in the report and the exit report. Without that line a harness whose PR went missing has no way to tell why. The distinction matters twice later: step 2 does not rename an adopted branch, and an adopted branch is the caller's to delete, never this run's.
+   Record which path was taken, and when adoption was refused, which condition refused it.
 4. **The quality gate is discoverable**: read `CLAUDE.md`/`AGENTS.md` and the manifests, and record the exact commands. A repo with no test runner cannot be deepened test-first — bail.
-5. **`gh` is available and authenticated**: `gh auth status`. If it is missing or unauthenticated, **degrade to `--report-only`** rather than bailing — a report with no PR is still evidence, and this is the most common cron-container failure. Record it under *Degradations* in the report, and follow the degraded reconciliation rule at step 2.
+5. **`gh` is available and authenticated**: `gh auth status`. If it is missing or unauthenticated, **degrade to `--scan-only`**: with no `gh` there is no dedup, so the run cannot safely pick anything to implement and can only print. This is the most common cron-container failure. Say so in the output.
+6. **The `pm-deepen` label exists**, or create it: `gh label create pm-deepen --description "Automated architecture deepening" --force`. If the token cannot write labels, fall back to the marker comment `<!-- pm-deepen -->`, which every PR body carries either way, and query with `gh pr list --search "pm-deepen in:body" --state all`. Do **not** fall back to a title prefix: a repo that lints PR titles as conventional commits will reject it, and this skill's own does. Say which mechanism is in use, in the output and the PR body — it is the only dedup key, so a reader has to know which one a future run will trust.
 
-### 1. Explore
-
-**Scope before you scan: YAGNI.** Deepening pays off by making *future* changes easier, so weight the parts of the codebase that have recently changed. Decide *where* to look before looking:
-
-- If a path or module was given as an argument, take it and skip the inference.
-- Otherwise walk back a good stretch of `git log --oneline` to find the codebase's hot spots — the files and areas that keep coming up — and let those paths pull your attention first. If the changes are scattered with no clear hot spot, widen the net.
+### 1. Scan for candidates
 
 Read `CONTEXT.md` and any ADRs covering the area first, so candidates are named in the project's own vocabulary and don't re-litigate settled decisions.
 
-Then spawn a sub-agent to walk the codebase. Don't follow rigid heuristics; explore organically and note where you experience friction. Two patterns are worth checking for by name, not just waiting to trip over them — they've been disproportionately high-leverage in past runs (one past example: a seam collapsing 14 duplicated prologues) without being rare or repo-specific:
+Without a `<path|module>` argument, infer hot spots from the last 30–90 days of `git log` — the files that change most are where depth pays. Then look for shallowness: an interface nearly as complex as its implementation, callers reaching past a seam, one concept that forces a reader to bounce between modules, the same policy restated at several sites.
 
-- Where does understanding one concept require bouncing between many small modules?
-- Where are modules **shallow**, with an interface nearly as complex as the implementation?
-- Where have pure functions been extracted just for testability, while the real bugs hide in how they're called (no **locality**)?
-- Where do tightly-coupled modules leak across their seams?
-- Which parts are untested, or hard to test through their current interface?
-- Where do sibling functions repeat the same prologue or epilogue — validation, setup, teardown — that a single shared seam could collapse?
-- Where do two parallel implementations of the same logic (a client/server pair, a compiler and its self-hosted or alternate-backend port, a fast path and a fallback) drift apart in ways a shared abstraction would have prevented?
+Fan out with parallel sub-agents where the tool is available; otherwise scan inline.
 
-Apply the **deletion test** to anything you suspect is shallow: would deleting it concentrate complexity, or just move it? "Concentrates" is the signal you want.
+### 2. Check prior runs, score, and pick
 
-If no sub-agent tool is available in the current harness, do this pass inline. It is slower, not different.
+**Query what past runs did** before scoring anything:
 
-### 2. Reconcile, score, and pick
+```bash
+gh pr list --label pm-deepen --state all --json number,title,state,headRefName,body
+```
 
-Read `.architecture/backlog.md` if it exists and reconcile it against merged and open PRs via `gh` ([ranking.md](references/ranking.md)) — this is also where residue from an interrupted run gets folded in.
+(or the `in:body` marker search, when preflight check 6 fell back to it)
 
-**Degraded (no `gh`)**: skip the PR reconciliation entirely and leave every `in-flight` entry exactly as it is. Do not guess at PR state, and do not silently drop the step — an unreconciled backlog means `in-flight` entries keep hard-filtering their candidates, so a degraded routine surfaces steadily less over time. Say so under *Degradations* so a reader knows the ranking was made against possibly-stale state.
+- **An open PR** — stop. One architecture PR at a time; a second concurrent one is unreviewable. A `--scan-only` run continues, since it opens nothing.
+- **A closed, unmerged PR** — a human declined that refactor, or a run bailed there and the draft was closed. Either way, **do not re-pick it**: both mean a human looked and chose not to take it. Read the closing comment where there is one, but a bail draft closed without comment is still a no — absent evidence, the conservative reading is the correct one.
+- **A merged PR** — already landed. The tree normally reflects it, but check the PR when a candidate looks like a twin of one: a refactor applied to only one of two parallel implementations leaves real friction, and finishing it is legitimate work.
 
-**Name the branch after the slug — but only if the branch is this run's to name.** A run that *created* its branch at step 0 and will implement something renames it to `pm-deepen/<slug>` (`git branch -m`); nothing has been pushed yet, so this is free. A `--report-only` or no-candidates run keeps its run-stamped name.
+**Score every surviving candidate** on four axes, 1–5, each with a one-line justification:
 
-**Never rename an adopted branch.** Its name is the caller's identity for this run — a headless harness derives the branch deterministically and then looks for the resulting PR by that head, so renaming it hides the PR from the very system that asked for the work. Keep the adopted name for the whole run and record the slug in the report and the backlog instead.
+- **Leverage** — how much a caller or test gains per unit of interface. 5: pays back across many call sites *and* removes a class of test setup. 4: several call sites simplify, or a deeply-nested caller stops reaching past the seam. 3: one call site simplifies materially. 2: cosmetic; the interface shrinks but callers do the same work. 1: fails the deletion test — complexity moves rather than concentrates.
+- **Locality** — how much change, bugs, and verification concentrate in one place afterwards. 5 when a change that currently forces edits in several files becomes a one-file edit.
+- **Blast radius** (inverted — lower is better) — 1: contained, no published interface changes, 1–3 files. 2: a module and its direct callers, 4–8. 3: several modules or one signature used repo-wide, 9–20. 4: crosses a package/tier seam or touches a published interface, 21–40. 5: repo-wide rename or migration, 41+. Where the description and the file range disagree, **the description wins**. Record a **file-count estimate** alongside the band — step 4 watches the real diff against it.
+- **Heat** — how recently and often the files changed. YAGNI: deepening pays off through *future* changes, so cold code scores low however shallow it looks.
 
-Either way, check the slug for collisions: if `pm-deepen/<slug>` already exists locally or on origin, that candidate is already in flight — bail. On an adopted branch this check finds nothing, because no slug-named branch is ever created; there the backlog's `in-flight`-entry-with-an-open-PR check below is the dedup that matters, which is why it is the primary guard and this one the backstop.
+```
+score = (leverage x 2) + locality + heat + (6 - blast_radius)
+```
 
-Then score every candidate on leverage, locality, blast radius, and heat; apply the hard filters; rank; **take the top one**. The rubric, the filters, and the deterministic tie-break are in [ranking.md](references/ranking.md).
+Leverage is doubled because it is the axis the exercise exists to move. Range is **5 to 25**; always render as `n/25`.
 
-Do not ask which to explore. Do not stop at a shortlist. The pick and its reasoning go into the report, where a reviewer can disagree with it in the PR.
+**Hard filters, applied before ranking.** A candidate tripping any of these cannot be picked:
 
-Merge every candidate — picked, dropped, and too-large — into `.architecture/backlog.md` with the status the rubric assigns it, reusing existing slugs so the dedup filter keeps working across runs.
+- **Leverage is 1.** It failed the deletion test.
+- **Blast radius is 5.** Too large for one unattended PR; a human schedules it.
+- **It contradicts an ADR.** Reopening a recorded decision is not a unilateral side effect. Say so in the output when the friction is strong enough to warrant reopening that ADR, so a human can act on it.
+- **It cannot be pinned by a test.** Test-first is the terminal step.
 
-If an `in-flight` entry still has an open PR, **and this run would implement something**, stop: one architecture PR at a time. A `--report-only` run continues — it opens nothing.
+Rank by total, descending, and **take the top one**. Do not ask. Do not stop at a shortlist. Break a tie by, in order: lower blast radius, then higher heat, then most recently touched — deterministically, so two runs over an unchanged tree pick the same candidate.
 
-### 3. Write the report
+Rename a *created* branch to `pm-deepen/<slug>` now (`git branch -m`); nothing is pushed yet, so it is free. Never rename an adopted one.
 
-Write the report per [report-format.md](references/report-format.md): one card per candidate with files, scores, problem, deletion test, solution, benefits, before/after Mermaid diagrams and recommendation strength, then the dropped list, the too-large list, and the pick.
+If nothing survives the filters, print the exit report with outcome `no-candidates` and stop. **A tree with nothing automatable to deepen is a good tree**, and on a healthily-deepened repo this becomes the *usual* outcome rather than an exceptional one.
 
-Never write to a temp directory. Never call `xdg-open`, `open`, or `start` — an unattended run has no display, and a discarded temp file leaves no evidence the run happened.
+**`no-candidates` opens no PR and pushes nothing** — deliberately. It is the one outcome with no diff to show, and a nightly draft PR saying "nothing to do" is noise that trains a reader to ignore the label, which costs more than it buys. Its record is stdout, which is what a cron captures. Delete the branch on the way out if this run *created* it and never committed to it; an empty branch nobody references is litter, and earlier versions accumulated exactly that. Leave an adopted branch alone — it is the caller's.
 
-**Commit the report and the backlog to the run's branch now**, before going further. Artefacts that are written but never committed are lost on the next firing and leave the tree dirty.
+If `--scan-only`: print the ranked candidates, their scores and justifications, and the pick, and stop here.
 
-If `--report-only`: push the branch unless `--no-pr`, and stop here. This is a complete run — see the per-flag definitions of done in [autonomy-contract.md](references/autonomy-contract.md).
-
-### 4. Design the interface
+### 3. Design the interface
 
 Now propose interfaces — not before; a candidate is chosen on friction, not on a design you already had in mind.
 
-Call the Skill tool with `codebase-design` and use its **design-it-twice** pattern: spawn 3+ sub-agents in parallel, each briefed to produce a *radically different* interface for the deepened module (minimal surface; maximum flexibility; optimised for the most common caller; ports-and-adapters where dependencies cross a seam). Give each the file paths, coupling details, dependency category, what sits behind the seam, and both vocabularies.
+Call the Skill tool with `codebase-design` and use its **design-it-twice** pattern: spawn 3+ sub-agents in parallel, each briefed to produce a *radically different* interface for the deepened module (minimal surface; maximum flexibility; optimised for the most common caller; ports-and-adapters where dependencies cross a seam). Give each the file paths, coupling details, dependency category, what sits behind the seam, and both vocabularies. Without a sub-agent tool, produce them inline, one fully written out before the next is started.
 
-**Without a sub-agent tool**, produce the designs inline one at a time, writing each into the report's `## Design` section *before* starting the next, rather than holding them only in memory. Note in the report that the designs were produced inline.
+Then **adjudicate instead of grilling.** Upstream hands the winner to the `grilling` skill, which asks the user a round of questions and waits — no human, no progress. Adjudication picks the winner against fixed criteria, in this order:
 
-Then **adjudicate instead of grilling.** Upstream hands the winning design to the `grilling` skill, which asks the user a round of questions and waits for answers — no human, no progress. Here, adjudication picks the winner against fixed criteria, in this order:
-
-1. **Depth** — leverage at the interface: how much behaviour per unit of interface a caller must learn.
+1. **Depth** — how much behaviour per unit of interface a caller must learn.
 2. **Locality** — where change, bugs, and verification concentrate afterwards.
 3. **Seam placement** — is the seam where something actually varies? One adapter is a hypothetical seam; two is a real one.
 4. **Test surface** — can the behaviour be exercised through the interface, without reaching past it?
-5. **Blast radius** — of the two otherwise-equal designs, the smaller diff wins.
+5. **Blast radius** — of two otherwise-equal designs, the smaller diff wins.
 
-Grilling already requires a recommended answer per question, so an adjudicator can settle the same tree from the same evidence. State the criteria above and a pointer to the written designs in-transcript — neutrally, without editorializing toward a favorite, since the advisor reads whatever bias is already on the record — then consult the advisor to pick the winner. The advisor takes no separate prompt; it reviews your conversation as it stands, so state the criteria immediately before calling it.
+Grilling already requires a recommended answer per question, so an adjudicator can settle the same tree from the same evidence. State the criteria and the designs in-transcript — neutrally, without editorializing toward a favourite, since the advisor reads whatever bias is on the record — then consult the advisor to pick. The advisor takes no separate prompt; it reviews the conversation as it stands, so state the criteria immediately before calling it. **If no advisor is available**, adjudicate yourself against the criteria and say so in the PR body.
 
-**If no advisor is available**, adjudicate yourself against the written designs in the report rather than against memory — this is why they were written down first, whether generated by sub-agents or inline. Note in the report that adjudication was done without an advisor.
+Carry the winner and the strongest loser into the PR body. If the criteria cannot separate the designs, that is a bail-out, not a coin flip.
 
-Append the winner, the losing designs, and the reasoning to the report's `## Design` section, and carry the winner and the strongest loser into the PR body.
+### 4. Implement, test-first
 
-If the criteria above cannot separate the designs, that is a bail-out, not a coin flip.
-
-### 5. Implement, test-first
-
-Implement the winning design on the run's branch.
-
-Test-first is not optional: write a test that pins the intended interface, watch it fail, then make it pass. Pin existing behaviour with a test *before* moving it. The seam under test is the adjudicated interface — it is already agreed, so do not stop to confirm it.
+Write a test that pins the intended interface, watch it fail, then make it pass. Pin existing behaviour with a test *before* moving it. The seam under test is the adjudicated interface — already agreed, so do not stop to confirm it.
 
 Run the project's quality gate, each step as a **separate command**, never `&&`-chained. Fix failures; after 3 attempts still red, bail out with the failing command and its verbatim output. Never weaken, skip, or delete a test to reach green.
 
-Watch the diff against the file-count estimate the candidate was scored on. A change that outgrows its estimate was mis-scored — stop and report rather than pressing on. Do not revert the work: commit it as a `bail:` commit and leave the branch unpushed, per [autonomy-contract.md](references/autonomy-contract.md).
+Watch the diff against the file-count estimate. A change that outgrows it was mis-scored — stop and bail rather than pressing on. Do not revert the work: the diff is the most useful thing a human gets from a failed run.
 
-### 6. Land it
+### 5. Land it
 
-Update `CONTEXT.md` if the deepened module is named after a concept the glossary lacks, or if a term the code contradicts needs sharpening. **Do not write an ADR** — propose it under `## Proposed ADR` in the PR body instead.
+Update `CONTEXT.md` if the deepened module is named after a concept the glossary lacks, or if a term the code contradicts needs sharpening. **Do not write an ADR** — propose it in the PR body instead.
 
-Commit with a conventional-commit message. Unless `--no-pr`: push the branch and open a PR with `gh pr create`, whose body carries the problem, the before/after in `codebase-design` vocabulary, a link to the report, the winning candidate's score and the runner-up **candidate**, the runner-up **design** and why it lost, any proposed ADR, and any `CONTEXT.md` terms added. Set the backlog entry to `in-flight` with the PR number, commit that update, and **push again** so that commit lands in the PR. Without the second push, the PR — and the default branch after it merges — keeps a `proposed` entry with no PR number, and the next firing reads the backlog from `origin/<default-branch>`: the `in-flight` reconciliation lookup never fires and already-landed work resurfaces. Under `--no-pr` there is no PR number: leave the entry `proposed` and add a note naming the branch, so the next firing can find the work.
+Commit with a conventional-commit message. Unless `--no-pr`: push and `gh pr create --label pm-deepen`. The PR body is the entire deliverable, so it carries:
 
-The PR is the deliverable. Do not merge it, and do not approve it — see the full side-effect table in [autonomy-contract.md](references/autonomy-contract.md).
+- **Problem** — why the current architecture causes friction. Name the shallowness concretely: the interface is nearly as complex as the implementation, or a caller reaches past the seam, or understanding one concept requires bouncing between modules.
+- **Deletion test** — if the module were deleted, does complexity concentrate or just move?
+- **Solution** — plain English, what changed.
+- **Benefits** — in **leverage** and **locality** terms, and specifically how the test surface improves.
+- **Before / After** — two Mermaid diagrams, in that order, each fenced separately and labelled. A dozen nodes at most: convey the deepening, not the whole subsystem. Solid edges are the interface a caller must learn; dashed edges are inside the implementation. State that legend in the body.
+- **Score** — the total out of 25 and the four axes with their justifications.
+- **Runner-up candidate** — what scored second and why it lost. Say so if the top two were within 1 point: it tells a reviewer the pick was close.
+- **Runner-up design** — the interface that lost adjudication, and why.
+- **Proposed ADR** — under a `## Proposed ADR` heading, with title and decision in full, so a human can accept it with a copy-paste. Unattended, the PR body *is* the offer.
+- **`CONTEXT.md` terms** added or sharpened, and any **degradations** — flags forced, skills absent, sub-agents or advisor unavailable, label fallback in use.
+- **`<!-- pm-deepen -->`** — a marker comment, always, so the prior-run query still finds this PR if the label is ever lost or was never writable.
+
+"Runner-up" is used in two senses and both appear: the runner-up **candidate** scored second in the ranking; the runner-up **design** lost adjudication. Always qualify which — never write a bare "runner-up".
+
+Use `CONTEXT.md` vocabulary for the domain and `codebase-design` vocabulary for the architecture. If `CONTEXT.md` defines "Order", write "the Order intake module" — not "the FooBarHandler", and not "the Order service".
+
+**Do not merge the PR, and do not approve it.**
+
+## Autonomy contract
+
+**May do unilaterally:** add a term to `CONTEXT.md`, or sharpen one the code contradicts (create it lazily if absent; it lands in the PR diff where it is reviewed with everything else). Adopt or create a branch, commit, push, open a PR, create the `pm-deepen` label. Write tests, including tests pinning existing behaviour before it moves.
+
+**May not do without a human:** write a new ADR (propose it in the PR body). Edit, supersede, or contradict an existing one. Merge or approve the PR. Force-push, rebase a shared branch, or touch any branch but its own. Change public/published interfaces beyond what the picked candidate strictly requires — a blast-radius-4 candidate is implementable; expanding one mid-flight is not.
+
+### Bail-outs
+
+Every bail-out **reports and stops**. Silent no-ops are indistinguishable from a crashed run, which is how an unattended routine rots unnoticed. Print this to stdout:
+
+```markdown
+### pm-deepen <YYYY-MM-DD> — <outcome>
+
+- **Outcome**: complete | bailed-preflight | bailed-design | bailed-mid-flight | no-candidates
+- **Stopped at**: step <n> — <one-line reason>
+- **Branch**: <name, and `adopted` or `created`>
+- **Evidence**: <failing command and verbatim output, dirty paths, open PR number>
+- **Next**: <what a human or the next firing should do>
+```
+
+**A bail-out that produced real work opens a draft PR** — `gh pr create --draft --label pm-deepen` — with the exit report as its body. This is what keeps a failure as visible as a success, and what stops tomorrow's firing re-picking the same candidate and failing the same way. Commit the work as `bail: <slug> — <reason>` first. Do not `git checkout` it away.
+
+Under `--no-pr` there is no draft PR either, so a bail-out leaves its work on an unpushed local branch that nothing records — the same invisibility the flag accepts on the success path. That is the trade a human makes by typing the flag; an unattended routine should never pass it.
+
+**Stop before making any change when:** the working tree is dirty (report the dirty paths; never stash). No branch can be settled. An open `pm-deepen` PR exists *and this run would implement something*. The repo has no test runner, or the picked candidate cannot be pinned by a test. No candidate survives the hard filters — outcome `no-candidates`, which is an outcome, not a failure.
+
+**Stop during design (step 3) when:** the adjudication criteria cannot separate the designs. Or the refactor requires a decision the design pass did not settle — a genuine fork with no evidence favouring either side; record both options and leave it for a human. Neither has code yet, so both print and stop.
+
+**Stop mid-implementation (step 4) when:** the quality gate is still red after 3 fix attempts, or the diff exceeds twice the file-count estimate or reaches a public interface the score did not account for. Both have work, so both open a draft PR.
+
+### Definitions of done
+
+Anything short of the matching list is a bail-out with an exit report, not a completion.
+
+**Every run**: it worked on its own branch — adopted or created — never the default branch, and the working tree is clean.
+
+**Default run** adds: the picked candidate is implemented **test-first**, a test pinning the adjudicated interface having been seen to fail and then pass; the project's quality gate passes, each step run as a separate command; and a PR is open, labelled `pm-deepen`, whose body carries everything in step 5. The PR body is the run's only narrative artefact, so a thin one is a shortfall even when the code is right.
+
+**`--no-pr`**: as the default run, minus the PR — the branch is committed and left unpushed.
+
+**`--scan-only`**: the candidates, their scores and the pick are printed to stdout. No implementation and no PR is the *correct* outcome, not a shortfall.
+
+There is no branch of this skill that asks the user anything. Not to pick a candidate, not to confirm a design, not to confirm a seam under test, not to offer an ADR, not to approve a commit. Where upstream asks, this one decides from the evidence and states the reasoning in the PR, so the decision is auditable in review instead of blocking before it.
