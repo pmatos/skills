@@ -11,14 +11,17 @@ against these shapes; change them here first.
 ├── <slug>.state.json             # autosaved review state (resumable)
 └── <slug>.md                     # written on Finish review
 
-<run-dir>/                        # scratch at $TMPDIR/review-offline/<slug>/ (stable per slug: sessions are keyed by cwd)
+<run-dir>/                        # scratch at $TMPDIR/review-offline/<repo-hash>-<slug>/ (stable: sessions are keyed by cwd)
 ├── changeset.json                # resolver output (below)
 ├── graph.json                    # authored by the invoking agent (graph-schema.md)
 ├── prefetch/                     # diff.patch, pr.md, pr-comments.md: all headless agents read
 └── worktree/                     # detached checkout, only when the target is not the current tree
 ```
 
-`slug` is `pr-<n>`, the branch name with `/` → `-`, or `head-<short-sha>`.
+`slug` is `pr-<n>`, the sanitised branch name (`/` and other unsafe characters become
+`-`, so `feat/x` and `feat-x` collide), or `head-<short-sha>`. A path target appends
+`-path-<hash>` and a range target `-range-<hash>`. The omitted target, `HEAD` and the
+branch name share one slug.
 `.reviews/` always lives in the user's repo, never in the run dir.
 
 ## Changeset (`changeset.json`)
@@ -97,7 +100,8 @@ The pass's **final message** is a single fenced `json` block holding an array:
 ```
 
 The runner validates it strictly, retries once feeding back the exact error,
-and downgrades a finding whose lines are not in the diff to `file` scope. A
+and drops a finding whose lines are not in the diff (the store downgrades to `file`
+scope only findings it receives without a matching hash). A
 read-only child cannot spawn subagents, so effort fan-out belongs to the runner:
 one call per angle, then verify calls; `passes` is only the aggregate status.
 Overlapping findings in the same file merge into one comment with several

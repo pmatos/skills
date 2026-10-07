@@ -287,7 +287,9 @@ class Host:
     ) -> HostResult:
         notes: list[str] = []
         if not self.model:
-            notes.append(f"model not pinned: {self.name} runs on its configured default model")
+            notes.append(
+                f"model not pinned: {self.name} runs on its built-in default model, ignoring your settings"
+            )
         level, note = normalize_effort(effort)
         if note:
             notes.append(note)

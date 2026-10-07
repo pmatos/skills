@@ -335,7 +335,7 @@ What it does:
 - Runs the agent features **headless through the same harness that invoked it** (`claude`, `codex` or `omp`), read-only and isolated from your config and MCP servers.
 - **Finish review** writes `<repo>/.reviews/<slug>.md` and ends the background server, which tells the invoking agent: "review complete, results are in …, do you want me to do anything with it?"
 - Autosaves to `<repo>/.reviews/<slug>.state.json`; running it again on the same target resumes.
-- **Never comments, pushes, fixes or edits** anything upstream or in your tree. The page is generated locally and does not need a network connection once open.
+- **Never comments, pushes, fixes or edits** anything upstream or in your tree. The page is generated locally; viewing, commenting and saving need no network, while the agent suggestions and Ask use your agent CLI's own connection.
 
 Trigger phrases: `review this PR in a webpage`, `review offline`, `open a review page`, `review the diff with you in the browser`, `/review-offline`.
 

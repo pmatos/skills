@@ -7,9 +7,11 @@ import hashlib
 import json
 import os
 import signal
+import subprocess
 import sys
 import tempfile
 import threading
+import time
 from pathlib import Path
 
 from . import changeset as changeset_mod
@@ -19,6 +21,27 @@ from . import graph as graph_mod
 def _run_dir_for(slug: str, repo: Path) -> Path:
     repo_id = hashlib.sha1(str(repo).encode("utf-8")).hexdigest()[:8]
     return Path(tempfile.gettempdir()) / "review-offline" / f"{repo_id}-{slug}"
+
+
+LOCK_NAME = "serve.lock"
+
+
+class ServerAlreadyRunning(RuntimeError):
+    pass
+
+
+def _claim_lock(run_dir: Path) -> None:
+    lock = run_dir / LOCK_NAME
+    if lock.exists():
+        try:
+            info = json.loads(lock.read_text(encoding="utf-8"))
+            os.kill(int(info["pid"]), 0)
+        except (OSError, ValueError, KeyError):
+            lock.unlink(missing_ok=True)
+        else:
+            raise ServerAlreadyRunning(
+                f"a review server for this run is already running at {info.get('url')}"
+            )
 
 
 WORKING_TREE_ALIASES = {
@@ -32,8 +55,28 @@ WORKING_TREE_ALIASES = {
 }
 
 
+def _toplevel(path: str) -> Path:
+    out = subprocess.run(
+        ["git", "-C", path, "rev-parse", "--show-toplevel"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if out.returncode != 0:
+        raise changeset_mod.ChangesetError(f"{path!r} is not inside a git repository")
+    return Path(out.stdout.strip()).resolve()
+
+
+def _one_line(text: object) -> str:
+    return " | ".join(part.strip() for part in str(text).splitlines() if part.strip())
+
+
 def cmd_prepare(args: argparse.Namespace) -> int:
-    repo = Path(args.repo).resolve()
+    try:
+        repo = _toplevel(args.repo)
+    except changeset_mod.ChangesetError as exc:
+        print(f"prepare failed: {exc}", file=sys.stderr)
+        return 1
     target = args.target
     if target and target.lower().replace(" ", "-") in WORKING_TREE_ALIASES:
         target = None
@@ -51,7 +94,7 @@ def cmd_prepare(args: argparse.Namespace) -> int:
         return 1
     state_path = repo / ".reviews" / f"{cs['slug']}.state.json"
     if args.fresh and state_path.exists():
-        state_path.rename(state_path.with_name(state_path.name + ".bak"))
+        state_path.rename(state_path.with_name(f"{state_path.name}.{int(time.time())}.bak"))
     meta_path = run_dir / "meta.json"
     graph_path = run_dir / "graph.json"
     previous_head = None
@@ -113,6 +156,7 @@ def cmd_serve(args: argparse.Namespace) -> int:
 
         meta = json.loads((run_dir / "meta.json").read_text(encoding="utf-8"))
         repo = Path(meta["repo"])
+        _claim_lock(run_dir)
         changeset = json.loads((run_dir / "changeset.json").read_text(encoding="utf-8"))
         graph = json.loads((run_dir / "graph.json").read_text(encoding="utf-8"))
         known = frozenset(f["path"] for f in changeset["files"])
@@ -142,9 +186,9 @@ def cmd_serve(args: argparse.Namespace) -> int:
             idle_timeout=args.idle_minutes * 60,
         )
     except Exception as exc:  # noqa: BLE001 - one terminal line for the invoking agent
-        if repo is not None:
+        if repo is not None and not isinstance(exc, ServerAlreadyRunning):
             changeset_mod.cleanup_worktree(repo, run_dir)
-        print(f"REVIEW-ERROR {exc}", flush=True)
+        print(f"REVIEW-ERROR {_one_line(exc)}", flush=True)
         return 1
 
     def on_signal(_signum, _frame) -> None:
@@ -155,13 +199,15 @@ def cmd_serve(args: argparse.Namespace) -> int:
 
     signal.signal(signal.SIGTERM, on_signal)
     signal.signal(signal.SIGINT, on_signal)
+    (run_dir / LOCK_NAME).write_text(json.dumps({"pid": os.getpid(), "url": app.url}))
     print(f"LISTENING {app.url}", flush=True)
     try:
         outcome = app.serve()
     except Exception as exc:  # noqa: BLE001
-        print(f"REVIEW-ERROR {exc}", flush=True)
+        print(f"REVIEW-ERROR {_one_line(exc)}", flush=True)
         return 1
     finally:
+        (run_dir / LOCK_NAME).unlink(missing_ok=True)
         changeset_mod.cleanup_worktree(repo, run_dir)
     if outcome.kind == "complete":
         print(f"REVIEW-COMPLETE {outcome.path}", flush=True)

@@ -188,10 +188,60 @@ def test_prepare_fresh_sets_state_aside(prepared):
     assert json.loads(prepare_json(repo, run_dir).stdout)["resumed"] is True
     fresh = json.loads(prepare_json(repo, run_dir, "--fresh").stdout)
     assert fresh["resumed"] is False
-    assert state.with_name(state.name + ".bak").exists()
+    assert list(state.parent.glob(f"{state.name}.*.bak"))
 
 
 def test_default_run_dirs_differ_per_repo(tmp_path):
     from review_offline.cli import _run_dir_for
 
     assert _run_dir_for("pr-1", tmp_path / "a") != _run_dir_for("pr-1", tmp_path / "b")
+
+
+def test_prepare_from_a_subdirectory_uses_the_repo_toplevel(prepared):
+    repo, run_dir, _info, _ = prepared
+    sub = repo / "pkg"
+    sub.mkdir()
+    out = prepare_json(sub, run_dir)
+    assert out.returncode == 0, out.stderr
+    assert json.loads(out.stdout)["resumed"] is False
+    assert (repo / ".reviews").parent == repo
+    assert not (sub / ".reviews").exists()
+
+
+def test_graph_error_is_a_single_review_error_line(prepared):
+    _, run_dir, _, env = prepared
+    bad = json.loads(json.dumps(GRAPH))
+    bad["nodes"][0]["lane"] = "nope"
+    bad["nodes"][1]["lane"] = "nope2"
+    (run_dir / "graph.json").write_text(json.dumps(bad))
+    proc = subprocess.run(
+        [sys.executable, str(SCRIPT), "serve", str(run_dir), "--host", "claude"],
+        capture_output=True,
+        text=True,
+        env=env,
+        check=False,
+    )
+    lines = proc.stdout.strip().splitlines()
+    assert proc.returncode == 1 and len(lines) == 1
+    assert lines[0].startswith("REVIEW-ERROR ") and "nodes[0].lane" in lines[0]
+
+
+def test_second_server_for_the_same_run_is_refused(prepared):
+    _, run_dir, _, env = prepared
+    proc, _, _ = start(run_dir, env)
+    try:
+        second = subprocess.run(
+            [sys.executable, str(SCRIPT), "serve", str(run_dir), "--host", "claude"],
+            capture_output=True,
+            text=True,
+            env=env,
+            check=False,
+        )
+        assert second.returncode == 1
+        assert second.stdout.startswith("REVIEW-ERROR a review server for this run is already")
+        assert (run_dir / "serve.lock").exists()
+    finally:
+        proc.send_signal(signal.SIGTERM)
+        proc.stdout.read()
+        proc.wait(timeout=10)
+    assert not (run_dir / "serve.lock").exists()

@@ -65,6 +65,7 @@ class ReviewServer:
         handler = _make_handler(self)
         self.httpd = ThreadingHTTPServer(("127.0.0.1", 0), handler)
         self.httpd.daemon_threads = True
+        self.httpd.handle_error = lambda *_args: None
         self.port = self.httpd.server_address[1]
         self.output_path = self.reviews_dir / f"{self.changeset['slug']}.md"
 
@@ -216,6 +217,8 @@ def _make_handler(app: ReviewServer) -> type[BaseHTTPRequestHandler]:
                 self._json(403, {"error": str(exc)})
             except (StoreError, json.JSONDecodeError, ValueError, TypeError) as exc:
                 self._json(400, {"error": str(exc)})
+            except OSError as exc:
+                self._json(500, {"error": f"could not write the review: {exc}"})
 
         def _api(self, method: str, path: str, query: dict) -> None:
             parts = path.strip("/").split("/")[1:]
