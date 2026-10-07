@@ -1,0 +1,93 @@
+{
+  "schemaVersion": "1",
+  "title": "Removed heavy",
+  "summary": "Removed heavy: fixture document.",
+  "lanes": [
+    {
+      "id": "old",
+      "label": "Legacy",
+      "order": 0
+    },
+    {
+      "id": "new",
+      "label": "Replacement",
+      "order": 1
+    }
+  ],
+  "nodes": [
+    {
+      "id": "legacy-a",
+      "label": "legacy-a",
+      "kind": "function",
+      "delta": "removed",
+      "lane": "old",
+      "summary": "legacy-a does a thing."
+    },
+    {
+      "id": "legacy-b",
+      "label": "legacy-b",
+      "kind": "function",
+      "delta": "removed",
+      "lane": "old",
+      "summary": "legacy-b does a thing."
+    },
+    {
+      "id": "shared",
+      "label": "shared",
+      "kind": "function",
+      "delta": "unchanged",
+      "lane": "old",
+      "summary": "shared does a thing."
+    },
+    {
+      "id": "new-a",
+      "label": "new-a",
+      "kind": "function",
+      "delta": "added",
+      "lane": "new",
+      "summary": "new-a does a thing."
+    },
+    {
+      "id": "new-b",
+      "label": "new-b",
+      "kind": "function",
+      "delta": "added",
+      "lane": "new",
+      "summary": "new-b does a thing."
+    }
+  ],
+  "edges": [
+    {
+      "id": "legacy-a--shared",
+      "from": "legacy-a",
+      "to": "shared",
+      "kind": "call",
+      "delta": "removed",
+      "emphasis": "normal"
+    },
+    {
+      "id": "legacy-b--shared",
+      "from": "legacy-b",
+      "to": "shared",
+      "kind": "call",
+      "delta": "removed",
+      "emphasis": "normal"
+    },
+    {
+      "id": "shared--new-a",
+      "from": "shared",
+      "to": "new-a",
+      "kind": "call",
+      "delta": "added",
+      "emphasis": "hero"
+    },
+    {
+      "id": "new-a--new-b",
+      "from": "new-a",
+      "to": "new-b",
+      "kind": "call",
+      "delta": "added",
+      "emphasis": "normal"
+    }
+  ]
+}

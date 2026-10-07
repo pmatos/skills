@@ -1,0 +1,516 @@
+{
+  "schemaVersion": "1",
+  "title": "Thirty nodes",
+  "summary": "Thirty nodes: fixture document.",
+  "lanes": [
+    {
+      "id": "a",
+      "label": "App",
+      "order": 0
+    },
+    {
+      "id": "b",
+      "label": "Core",
+      "order": 1
+    },
+    {
+      "id": "c",
+      "label": "Infra",
+      "order": 2
+    }
+  ],
+  "nodes": [
+    {
+      "id": "m00",
+      "label": "m00",
+      "kind": "function",
+      "delta": "added",
+      "lane": "a",
+      "summary": "m00 does a thing.",
+      "group": "pkg-x"
+    },
+    {
+      "id": "m01",
+      "label": "m01",
+      "kind": "function",
+      "delta": "modified",
+      "lane": "b",
+      "summary": "m01 does a thing.",
+      "group": "pkg-x"
+    },
+    {
+      "id": "m02",
+      "label": "m02",
+      "kind": "function",
+      "delta": "unchanged",
+      "lane": "c",
+      "summary": "m02 does a thing."
+    },
+    {
+      "id": "m03",
+      "label": "m03",
+      "kind": "function",
+      "delta": "removed",
+      "lane": "a",
+      "summary": "m03 does a thing."
+    },
+    {
+      "id": "m04",
+      "label": "m04",
+      "kind": "function",
+      "delta": "added",
+      "lane": "b",
+      "summary": "m04 does a thing."
+    },
+    {
+      "id": "m05",
+      "label": "m05",
+      "kind": "function",
+      "delta": "modified",
+      "lane": "c",
+      "summary": "m05 does a thing."
+    },
+    {
+      "id": "m06",
+      "label": "m06",
+      "kind": "function",
+      "delta": "unchanged",
+      "lane": "a",
+      "summary": "m06 does a thing.",
+      "group": "pkg-x"
+    },
+    {
+      "id": "m07",
+      "label": "m07",
+      "kind": "function",
+      "delta": "removed",
+      "lane": "b",
+      "summary": "m07 does a thing.",
+      "group": "pkg-x"
+    },
+    {
+      "id": "m08",
+      "label": "m08",
+      "kind": "function",
+      "delta": "added",
+      "lane": "c",
+      "summary": "m08 does a thing."
+    },
+    {
+      "id": "m09",
+      "label": "m09",
+      "kind": "function",
+      "delta": "modified",
+      "lane": "a",
+      "summary": "m09 does a thing."
+    },
+    {
+      "id": "m10",
+      "label": "m10",
+      "kind": "function",
+      "delta": "unchanged",
+      "lane": "b",
+      "summary": "m10 does a thing."
+    },
+    {
+      "id": "m11",
+      "label": "m11",
+      "kind": "function",
+      "delta": "removed",
+      "lane": "c",
+      "summary": "m11 does a thing."
+    },
+    {
+      "id": "m12",
+      "label": "m12",
+      "kind": "function",
+      "delta": "added",
+      "lane": "a",
+      "summary": "m12 does a thing.",
+      "group": "pkg-x"
+    },
+    {
+      "id": "m13",
+      "label": "m13",
+      "kind": "function",
+      "delta": "modified",
+      "lane": "b",
+      "summary": "m13 does a thing.",
+      "group": "pkg-x"
+    },
+    {
+      "id": "m14",
+      "label": "m14",
+      "kind": "function",
+      "delta": "unchanged",
+      "lane": "c",
+      "summary": "m14 does a thing."
+    },
+    {
+      "id": "m15",
+      "label": "m15",
+      "kind": "function",
+      "delta": "removed",
+      "lane": "a",
+      "summary": "m15 does a thing."
+    },
+    {
+      "id": "m16",
+      "label": "m16",
+      "kind": "function",
+      "delta": "added",
+      "lane": "b",
+      "summary": "m16 does a thing."
+    },
+    {
+      "id": "m17",
+      "label": "m17",
+      "kind": "function",
+      "delta": "modified",
+      "lane": "c",
+      "summary": "m17 does a thing."
+    },
+    {
+      "id": "m18",
+      "label": "m18",
+      "kind": "function",
+      "delta": "unchanged",
+      "lane": "a",
+      "summary": "m18 does a thing.",
+      "group": "pkg-x"
+    },
+    {
+      "id": "m19",
+      "label": "m19",
+      "kind": "function",
+      "delta": "removed",
+      "lane": "b",
+      "summary": "m19 does a thing.",
+      "group": "pkg-x"
+    },
+    {
+      "id": "m20",
+      "label": "m20",
+      "kind": "function",
+      "delta": "added",
+      "lane": "c",
+      "summary": "m20 does a thing."
+    },
+    {
+      "id": "m21",
+      "label": "m21",
+      "kind": "function",
+      "delta": "modified",
+      "lane": "a",
+      "summary": "m21 does a thing."
+    },
+    {
+      "id": "m22",
+      "label": "m22",
+      "kind": "function",
+      "delta": "unchanged",
+      "lane": "b",
+      "summary": "m22 does a thing."
+    },
+    {
+      "id": "m23",
+      "label": "m23",
+      "kind": "function",
+      "delta": "removed",
+      "lane": "c",
+      "summary": "m23 does a thing."
+    },
+    {
+      "id": "m24",
+      "label": "m24",
+      "kind": "function",
+      "delta": "added",
+      "lane": "a",
+      "summary": "m24 does a thing.",
+      "group": "pkg-x"
+    },
+    {
+      "id": "m25",
+      "label": "m25",
+      "kind": "function",
+      "delta": "modified",
+      "lane": "b",
+      "summary": "m25 does a thing.",
+      "group": "pkg-x"
+    },
+    {
+      "id": "m26",
+      "label": "m26",
+      "kind": "function",
+      "delta": "unchanged",
+      "lane": "c",
+      "summary": "m26 does a thing."
+    },
+    {
+      "id": "m27",
+      "label": "m27",
+      "kind": "function",
+      "delta": "removed",
+      "lane": "a",
+      "summary": "m27 does a thing."
+    },
+    {
+      "id": "m28",
+      "label": "m28",
+      "kind": "function",
+      "delta": "added",
+      "lane": "b",
+      "summary": "m28 does a thing."
+    },
+    {
+      "id": "m29",
+      "label": "m29",
+      "kind": "function",
+      "delta": "modified",
+      "lane": "c",
+      "summary": "m29 does a thing."
+    }
+  ],
+  "edges": [
+    {
+      "id": "m00--m04",
+      "from": "m00",
+      "to": "m04",
+      "kind": "call",
+      "delta": "added",
+      "emphasis": "normal"
+    },
+    {
+      "id": "m01--m11",
+      "from": "m01",
+      "to": "m11",
+      "kind": "call",
+      "delta": "modified",
+      "emphasis": "normal"
+    },
+    {
+      "id": "m02--m18",
+      "from": "m02",
+      "to": "m18",
+      "kind": "call",
+      "delta": "unchanged",
+      "emphasis": "normal"
+    },
+    {
+      "id": "m03--m25",
+      "from": "m03",
+      "to": "m25",
+      "kind": "call",
+      "delta": "removed",
+      "emphasis": "normal"
+    },
+    {
+      "id": "m04--m02",
+      "from": "m04",
+      "to": "m02",
+      "kind": "call",
+      "delta": "added",
+      "emphasis": "normal"
+    },
+    {
+      "id": "m05--m09",
+      "from": "m05",
+      "to": "m09",
+      "kind": "call",
+      "delta": "modified",
+      "emphasis": "normal"
+    },
+    {
+      "id": "m06--m16",
+      "from": "m06",
+      "to": "m16",
+      "kind": "call",
+      "delta": "unchanged",
+      "emphasis": "normal"
+    },
+    {
+      "id": "m07--m23",
+      "from": "m07",
+      "to": "m23",
+      "kind": "call",
+      "delta": "removed",
+      "emphasis": "normal"
+    },
+    {
+      "id": "m08--m00",
+      "from": "m08",
+      "to": "m00",
+      "kind": "call",
+      "delta": "added",
+      "emphasis": "normal"
+    },
+    {
+      "id": "m09--m07",
+      "from": "m09",
+      "to": "m07",
+      "kind": "call",
+      "delta": "modified",
+      "emphasis": "normal"
+    },
+    {
+      "id": "m10--m14",
+      "from": "m10",
+      "to": "m14",
+      "kind": "call",
+      "delta": "unchanged",
+      "emphasis": "normal"
+    },
+    {
+      "id": "m11--m21",
+      "from": "m11",
+      "to": "m21",
+      "kind": "call",
+      "delta": "removed",
+      "emphasis": "normal"
+    },
+    {
+      "id": "m12--m28",
+      "from": "m12",
+      "to": "m28",
+      "kind": "call",
+      "delta": "added",
+      "emphasis": "normal"
+    },
+    {
+      "id": "m13--m05",
+      "from": "m13",
+      "to": "m05",
+      "kind": "call",
+      "delta": "modified",
+      "emphasis": "normal"
+    },
+    {
+      "id": "m14--m12",
+      "from": "m14",
+      "to": "m12",
+      "kind": "call",
+      "delta": "unchanged",
+      "emphasis": "normal"
+    },
+    {
+      "id": "m15--m19",
+      "from": "m15",
+      "to": "m19",
+      "kind": "call",
+      "delta": "removed",
+      "emphasis": "normal"
+    },
+    {
+      "id": "m16--m26",
+      "from": "m16",
+      "to": "m26",
+      "kind": "call",
+      "delta": "added",
+      "emphasis": "normal"
+    },
+    {
+      "id": "m17--m03",
+      "from": "m17",
+      "to": "m03",
+      "kind": "call",
+      "delta": "modified",
+      "emphasis": "normal"
+    },
+    {
+      "id": "m18--m10",
+      "from": "m18",
+      "to": "m10",
+      "kind": "call",
+      "delta": "unchanged",
+      "emphasis": "normal"
+    },
+    {
+      "id": "m19--m17",
+      "from": "m19",
+      "to": "m17",
+      "kind": "call",
+      "delta": "removed",
+      "emphasis": "normal"
+    },
+    {
+      "id": "m20--m24",
+      "from": "m20",
+      "to": "m24",
+      "kind": "call",
+      "delta": "added",
+      "emphasis": "normal"
+    },
+    {
+      "id": "m21--m01",
+      "from": "m21",
+      "to": "m01",
+      "kind": "call",
+      "delta": "modified",
+      "emphasis": "normal"
+    },
+    {
+      "id": "m22--m08",
+      "from": "m22",
+      "to": "m08",
+      "kind": "call",
+      "delta": "unchanged",
+      "emphasis": "normal"
+    },
+    {
+      "id": "m23--m15",
+      "from": "m23",
+      "to": "m15",
+      "kind": "call",
+      "delta": "removed",
+      "emphasis": "normal"
+    },
+    {
+      "id": "m24--m22",
+      "from": "m24",
+      "to": "m22",
+      "kind": "call",
+      "delta": "added",
+      "emphasis": "normal"
+    },
+    {
+      "id": "m25--m29",
+      "from": "m25",
+      "to": "m29",
+      "kind": "call",
+      "delta": "modified",
+      "emphasis": "normal"
+    },
+    {
+      "id": "m26--m06",
+      "from": "m26",
+      "to": "m06",
+      "kind": "call",
+      "delta": "unchanged",
+      "emphasis": "normal"
+    },
+    {
+      "id": "m27--m13",
+      "from": "m27",
+      "to": "m13",
+      "kind": "call",
+      "delta": "removed",
+      "emphasis": "normal"
+    },
+    {
+      "id": "m28--m20",
+      "from": "m28",
+      "to": "m20",
+      "kind": "call",
+      "delta": "added",
+      "emphasis": "normal"
+    },
+    {
+      "id": "m29--m27",
+      "from": "m29",
+      "to": "m27",
+      "kind": "call",
+      "delta": "modified",
+      "emphasis": "normal"
+    }
+  ]
+}

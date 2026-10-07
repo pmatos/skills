@@ -1,0 +1,470 @@
+{
+  "schemaVersion": "1",
+  "title": "review-offline: review a changeset in a local webpage",
+  "summary": "A new skill that turns a PR, branch or diff into a local page. The invoking agent writes an animated graph of what the change does, a background Python server streams in headless correctness and cleanup suggestions, the reviewer accepts, edits and adds comments (or asks the agent), and Finish writes the accepted comments to a markdown file. Nothing is ever posted or edited upstream. The riskiest seam is the headless agent children: they read attacker-controlled diff text, so each host adapter locks them to read-only tools.",
+  "lanes": [
+    {
+      "id": "agent",
+      "label": "Invoking agent",
+      "subtitle": "Claude Code, Codex or omp",
+      "order": 0
+    },
+    {
+      "id": "local",
+      "label": "Local process",
+      "subtitle": "python, stdlib only",
+      "order": 1
+    },
+    {
+      "id": "browser",
+      "label": "Browser page",
+      "subtitle": "Preact + htm, inlined",
+      "order": 2
+    },
+    {
+      "id": "outside",
+      "label": "Outside",
+      "subtitle": "read-only",
+      "order": 3
+    }
+  ],
+  "nodes": [
+    {
+      "id": "skill",
+      "label": "SKILL.md",
+      "kind": "config",
+      "delta": "added",
+      "lane": "agent",
+      "summary": "Tells the agent to prepare, author the graph, serve in the background, then report the final line.",
+      "files": [
+        {
+          "path": "review-offline/SKILL.md"
+        }
+      ],
+      "subtitle": "orchestration"
+    },
+    {
+      "id": "cli",
+      "label": "cli",
+      "kind": "module",
+      "delta": "added",
+      "lane": "local",
+      "summary": "Entry points the skill calls.",
+      "files": [
+        {
+          "path": "review-offline/scripts/review_offline/cli.py"
+        }
+      ],
+      "subtitle": "prepare | serve"
+    },
+    {
+      "id": "changeset",
+      "label": "changeset",
+      "kind": "module",
+      "delta": "added",
+      "lane": "local",
+      "summary": "Resolves a PR, branch, range or working tree into files and hunks without touching the checkout.",
+      "files": [
+        {
+          "path": "review-offline/scripts/review_offline/changeset.py"
+        }
+      ],
+      "subtitle": "target to diff",
+      "group": "inputs"
+    },
+    {
+      "id": "graph",
+      "label": "graph validator",
+      "kind": "module",
+      "delta": "added",
+      "lane": "local",
+      "summary": "Strict validation of the agent-authored graph.",
+      "files": [
+        {
+          "path": "review-offline/scripts/review_offline/graph.py"
+        }
+      ],
+      "subtitle": "names the bad field",
+      "group": "inputs"
+    },
+    {
+      "id": "server",
+      "label": "server",
+      "kind": "service",
+      "delta": "added",
+      "lane": "local",
+      "summary": "Serves the shell and a token-guarded JSON API, long-polls events, ends on finish or idle.",
+      "files": [
+        {
+          "path": "review-offline/scripts/review_offline/server.py"
+        }
+      ],
+      "subtitle": "127.0.0.1 + token",
+      "group": "runtime"
+    },
+    {
+      "id": "store",
+      "label": "store",
+      "kind": "module",
+      "delta": "added",
+      "lane": "local",
+      "summary": "Owns comments, threads and events; merges overlapping suggestions.",
+      "files": [
+        {
+          "path": "review-offline/scripts/review_offline/store.py"
+        }
+      ],
+      "subtitle": "sole writer",
+      "group": "runtime"
+    },
+    {
+      "id": "passes",
+      "label": "review passes",
+      "kind": "job",
+      "delta": "added",
+      "lane": "local",
+      "summary": "Fans out finder angles, verifies, streams findings into the store.",
+      "files": [
+        {
+          "path": "review-offline/scripts/review_offline/passes.py"
+        }
+      ],
+      "subtitle": "angles + verify",
+      "group": "runtime"
+    },
+    {
+      "id": "hosts",
+      "label": "host adapters",
+      "kind": "module",
+      "delta": "added",
+      "lane": "local",
+      "summary": "Runs headless children read-only with config and MCP isolation.",
+      "files": [
+        {
+          "path": "review-offline/scripts/review_offline/hosts.py"
+        }
+      ],
+      "subtitle": "claude | codex | omp",
+      "group": "runtime"
+    },
+    {
+      "id": "markdown",
+      "label": "markdown",
+      "kind": "module",
+      "delta": "added",
+      "lane": "local",
+      "summary": "Renders accepted comments with safe fencing.",
+      "files": [
+        {
+          "path": "review-offline/scripts/review_offline/markdown.py"
+        }
+      ],
+      "subtitle": "accepted only",
+      "group": "runtime"
+    },
+    {
+      "id": "page",
+      "label": "page app",
+      "kind": "ui",
+      "delta": "added",
+      "lane": "browser",
+      "summary": "Bootstrap, long-poll loop, selection and composer routing.",
+      "files": [
+        {
+          "path": "review-offline/scripts/review_offline/page/app.js"
+        }
+      ],
+      "subtitle": "state + API"
+    },
+    {
+      "id": "viz",
+      "label": "visualization",
+      "kind": "ui",
+      "delta": "added",
+      "lane": "browser",
+      "summary": "Lane layout, delta styling and the flow stepper.",
+      "files": [
+        {
+          "path": "review-offline/scripts/review_offline/page/viz.js"
+        },
+        {
+          "path": "review-offline/scripts/review_offline/page/layout.js"
+        }
+      ],
+      "subtitle": "cards over SVG"
+    },
+    {
+      "id": "diff",
+      "label": "diff view",
+      "kind": "ui",
+      "delta": "added",
+      "lane": "browser",
+      "summary": "Line selection and inline comments.",
+      "files": [
+        {
+          "path": "review-offline/scripts/review_offline/page/diff.js"
+        }
+      ],
+      "subtitle": "lazy hunks"
+    },
+    {
+      "id": "panel",
+      "label": "review panel",
+      "kind": "ui",
+      "delta": "added",
+      "lane": "browser",
+      "summary": "Accept, reject, edit and ask.",
+      "files": [
+        {
+          "path": "review-offline/scripts/review_offline/page/panel.js"
+        }
+      ],
+      "subtitle": "comments + ask"
+    },
+    {
+      "id": "reviews",
+      "label": "<repo>/.reviews",
+      "kind": "datastore",
+      "delta": "added",
+      "lane": "outside",
+      "summary": "Autosaved state and the final markdown file.",
+      "subtitle": "state.json + .md"
+    },
+    {
+      "id": "hostcli",
+      "label": "host CLI",
+      "kind": "external",
+      "delta": "unchanged",
+      "lane": "outside",
+      "summary": "The same harness that ran the skill, run headless.",
+      "subtitle": "claude / codex / omp"
+    },
+    {
+      "id": "gitgh",
+      "label": "git and gh reads",
+      "kind": "external",
+      "delta": "unchanged",
+      "lane": "outside",
+      "summary": "Fetches the PR and its comments; never writes.",
+      "subtitle": "read-only"
+    }
+  ],
+  "edges": [
+    {
+      "id": "skill--cli",
+      "from": "skill",
+      "to": "cli",
+      "kind": "call",
+      "delta": "added",
+      "emphasis": "hero",
+      "label": "prepare, serve"
+    },
+    {
+      "id": "cli--changeset",
+      "from": "cli",
+      "to": "changeset",
+      "kind": "call",
+      "delta": "added",
+      "emphasis": "normal"
+    },
+    {
+      "id": "changeset--gitgh",
+      "from": "changeset",
+      "to": "gitgh",
+      "kind": "call",
+      "delta": "added",
+      "emphasis": "normal",
+      "label": "reads"
+    },
+    {
+      "id": "cli--graph",
+      "from": "cli",
+      "to": "graph",
+      "kind": "call",
+      "delta": "added",
+      "emphasis": "normal"
+    },
+    {
+      "id": "cli--server",
+      "from": "cli",
+      "to": "server",
+      "kind": "call",
+      "delta": "added",
+      "emphasis": "normal"
+    },
+    {
+      "id": "server--store",
+      "from": "server",
+      "to": "store",
+      "kind": "call",
+      "delta": "added",
+      "emphasis": "normal"
+    },
+    {
+      "id": "server--passes",
+      "from": "server",
+      "to": "passes",
+      "kind": "call",
+      "delta": "added",
+      "emphasis": "normal"
+    },
+    {
+      "id": "passes--hosts",
+      "from": "passes",
+      "to": "hosts",
+      "kind": "call",
+      "delta": "added",
+      "emphasis": "normal"
+    },
+    {
+      "id": "hosts--hostcli",
+      "from": "hosts",
+      "to": "hostcli",
+      "kind": "call",
+      "delta": "added",
+      "emphasis": "normal",
+      "label": "read-only"
+    },
+    {
+      "id": "passes--store",
+      "from": "passes",
+      "to": "store",
+      "kind": "data",
+      "delta": "added",
+      "emphasis": "normal",
+      "label": "findings"
+    },
+    {
+      "id": "server--markdown",
+      "from": "server",
+      "to": "markdown",
+      "kind": "call",
+      "delta": "added",
+      "emphasis": "normal"
+    },
+    {
+      "id": "markdown--reviews",
+      "from": "markdown",
+      "to": "reviews",
+      "kind": "data",
+      "delta": "added",
+      "emphasis": "normal"
+    },
+    {
+      "id": "store--reviews",
+      "from": "store",
+      "to": "reviews",
+      "kind": "data",
+      "delta": "added",
+      "emphasis": "normal",
+      "label": "autosave"
+    },
+    {
+      "id": "page--server",
+      "from": "page",
+      "to": "server",
+      "kind": "http",
+      "delta": "added",
+      "emphasis": "hero",
+      "label": "API + long poll"
+    },
+    {
+      "id": "viz--page",
+      "from": "viz",
+      "to": "page",
+      "kind": "render",
+      "delta": "added",
+      "emphasis": "normal"
+    },
+    {
+      "id": "diff--page",
+      "from": "diff",
+      "to": "page",
+      "kind": "render",
+      "delta": "added",
+      "emphasis": "normal"
+    },
+    {
+      "id": "panel--page",
+      "from": "panel",
+      "to": "page",
+      "kind": "render",
+      "delta": "added",
+      "emphasis": "normal"
+    }
+  ],
+  "flows": [
+    {
+      "id": "review",
+      "title": "A review, start to finish",
+      "delta": "added",
+      "summary": "From the slash command to the markdown file.",
+      "steps": [
+        {
+          "id": "s1",
+          "edge": "skill--cli",
+          "caption": "The agent resolves the changeset and starts the server in the background, then waits.",
+          "delta": "added"
+        },
+        {
+          "id": "s2",
+          "edge": "cli--server",
+          "caption": "The server opens the page's API on a random local port guarded by a token, and the page loads.",
+          "delta": "added"
+        },
+        {
+          "id": "s3",
+          "edge": "server--passes",
+          "caption": "Two headless passes start while the reviewer reads; their findings stream into the open page.",
+          "delta": "added"
+        },
+        {
+          "id": "s4",
+          "edge": "page--server",
+          "caption": "Accepting, editing and adding comments go through the API; the server is the only writer.",
+          "delta": "added"
+        },
+        {
+          "id": "s5",
+          "edge": "markdown--reviews",
+          "caption": "Finish writes only the accepted comments to the markdown file and the server exits, which wakes the agent.",
+          "delta": "added"
+        }
+      ]
+    },
+    {
+      "id": "ask",
+      "title": "Asking the agent from the page",
+      "delta": "added",
+      "steps": [
+        {
+          "id": "a1",
+          "edge": "page--server",
+          "caption": "The selected lines and question go to the server.",
+          "delta": "added"
+        },
+        {
+          "id": "a2",
+          "edge": "passes--hosts",
+          "caption": "A headless child resumes the thread's session, so earlier questions are remembered.",
+          "delta": "added"
+        },
+        {
+          "id": "a3",
+          "edge": "hosts--hostcli",
+          "caption": "The child can read the tree but cannot run commands, reach MCP servers or the network.",
+          "delta": "added"
+        }
+      ]
+    }
+  ],
+  "panels": [
+    {
+      "id": "files",
+      "title": "layout",
+      "kind": "filetree",
+      "diff": true,
+      "text": "+review-offline/\n+  SKILL.md\n+  references/   # contracts, angles, viz guide\n+  scripts/review_offline/\n+    changeset.py  graph.py  store.py  markdown.py\n+    passes.py  hosts.py  server.py  cli.py\n+    page/       # preact app, layout, styles"
+    }
+  ]
+}

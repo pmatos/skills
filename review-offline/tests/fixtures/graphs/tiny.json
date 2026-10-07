@@ -1,0 +1,126 @@
+{
+  "schemaVersion": "1",
+  "title": "Tiny change",
+  "summary": "Tiny change: fixture document.",
+  "lanes": [
+    {
+      "id": "ui",
+      "label": "UI",
+      "order": 0
+    },
+    {
+      "id": "api",
+      "label": "API",
+      "order": 1
+    },
+    {
+      "id": "db",
+      "label": "Storage",
+      "order": 2
+    }
+  ],
+  "nodes": [
+    {
+      "id": "form",
+      "label": "form",
+      "kind": "ui",
+      "delta": "modified",
+      "lane": "ui",
+      "summary": "form does a thing."
+    },
+    {
+      "id": "handler",
+      "label": "handler",
+      "kind": "function",
+      "delta": "added",
+      "lane": "api",
+      "summary": "handler does a thing.",
+      "files": [
+        {
+          "path": "api/h.py",
+          "start": 1,
+          "end": 20
+        }
+      ]
+    },
+    {
+      "id": "queue",
+      "label": "queue",
+      "kind": "queue",
+      "delta": "unchanged",
+      "lane": "api",
+      "summary": "queue does a thing."
+    },
+    {
+      "id": "store",
+      "label": "store",
+      "kind": "datastore",
+      "delta": "unchanged",
+      "lane": "db",
+      "summary": "store does a thing."
+    }
+  ],
+  "edges": [
+    {
+      "id": "form--handler",
+      "from": "form",
+      "to": "handler",
+      "kind": "http",
+      "delta": "added",
+      "emphasis": "hero",
+      "label": "POST /send"
+    },
+    {
+      "id": "handler--queue",
+      "from": "handler",
+      "to": "queue",
+      "kind": "queue",
+      "delta": "added",
+      "emphasis": "normal"
+    },
+    {
+      "id": "queue--store",
+      "from": "queue",
+      "to": "store",
+      "kind": "data",
+      "delta": "unchanged",
+      "emphasis": "normal"
+    }
+  ],
+  "flows": [
+    {
+      "id": "happy",
+      "title": "A send request",
+      "delta": "added",
+      "steps": [
+        {
+          "id": "s1",
+          "edge": "form--handler",
+          "caption": "The form posts the request.",
+          "delta": "added"
+        },
+        {
+          "id": "s2",
+          "node": "handler",
+          "caption": "The handler validates and enqueues it.",
+          "delta": "added"
+        },
+        {
+          "id": "s3",
+          "edge": "queue--store",
+          "caption": "A worker persists the result.",
+          "delta": "unchanged"
+        }
+      ]
+    }
+  ],
+  "panels": [
+    {
+      "id": "ct",
+      "title": "call tree",
+      "kind": "calltree",
+      "diff": true,
+      "text": " submit\n   validate\n+    enqueue\n     persist"
+    }
+  ]
+}
