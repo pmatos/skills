@@ -320,6 +320,27 @@ Trigger phrases: `walk me through this code`, `tell me the story of this PR`, `e
 
 **Requires**: a git repository. [`gh`](https://cli.github.com/) only for PR targets and issue context — it degrades to history-only when absent. Interactive only; there is no headless mode.
 
+### `/review-offline` — Review a Changeset in a Local Webpage
+
+```bash
+npx skills@latest add pmatos/skills/review-offline
+```
+
+Turns a PR, branch, commit range or working-tree diff into a local webpage where you and an agent review the code together, then writes the accepted comments to a markdown file. What happens to that file afterwards is up to you.
+
+What it does:
+- Opens on an **animated picture of what the change does**: lanes, nodes and flows with added/modified/removed deltas, unchanged neighbours for blast radius, and plain-prose captions for each step. A before/after toggle ghosts what is not part of each side.
+- Arrives **pre-loaded with the agent's suggestions** from correctness and cleanup passes derived from `pm-cr` and `pm-simplify` (embedded, no dependency), streamed into the open page as they finish.
+- Lets you **accept, reject, edit and add comments** on a line range, a file or the whole change, label them `blocking`, `suggestion`, `nit` or `question`, and **ask the agent** about any selection; the thread keeps its context.
+- Runs the agent features **headless through the same harness that invoked it** (`claude`, `codex` or `omp`), read-only and isolated from your config and MCP servers.
+- **Finish review** writes `<repo>/.reviews/<slug>.md` and ends the background server, which tells the invoking agent: "review complete, results are in …, do you want me to do anything with it?"
+- Autosaves to `<repo>/.reviews/<slug>.state.json`; running it again on the same target resumes.
+- **Never comments, pushes, fixes or edits** anything upstream or in your tree. The page is generated locally and does not need a network connection once open.
+
+Trigger phrases: `review this PR in a webpage`, `review offline`, `open a review page`, `review the diff with you in the browser`, `/review-offline`.
+
+**Requires**: Python 3.11+ (standard library only), a git repository, and one of `claude`, `codex` or `omp`. [`gh`](https://cli.github.com/) only for PR targets.
+
 ### `/pm-deepen` — Autonomous Architecture Deepening
 
 ```bash

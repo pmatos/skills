@@ -1,0 +1,453 @@
+{
+  "schemaVersion": "1",
+  "title": "Eight lanes",
+  "summary": "Eight lanes: fixture document.",
+  "lanes": [
+    {
+      "id": "l0",
+      "label": "Lane 0",
+      "subtitle": "tier",
+      "order": 0
+    },
+    {
+      "id": "l1",
+      "label": "Lane 1",
+      "subtitle": "tier",
+      "order": 1
+    },
+    {
+      "id": "l2",
+      "label": "Lane 2",
+      "subtitle": "tier",
+      "order": 2
+    },
+    {
+      "id": "l3",
+      "label": "Lane 3",
+      "subtitle": "tier",
+      "order": 3
+    },
+    {
+      "id": "l4",
+      "label": "Lane 4",
+      "subtitle": "tier",
+      "order": 4
+    },
+    {
+      "id": "l5",
+      "label": "Lane 5",
+      "subtitle": "tier",
+      "order": 5
+    },
+    {
+      "id": "l6",
+      "label": "Lane 6",
+      "subtitle": "tier",
+      "order": 6
+    },
+    {
+      "id": "l7",
+      "label": "Lane 7",
+      "subtitle": "tier",
+      "order": 7
+    }
+  ],
+  "nodes": [
+    {
+      "id": "n0-0",
+      "label": "n0-0",
+      "kind": "function",
+      "delta": "added",
+      "lane": "l0",
+      "summary": "n0-0 does a thing."
+    },
+    {
+      "id": "n0-1",
+      "label": "n0-1",
+      "kind": "function",
+      "delta": "modified",
+      "lane": "l0",
+      "summary": "n0-1 does a thing."
+    },
+    {
+      "id": "n0-2",
+      "label": "n0-2",
+      "kind": "function",
+      "delta": "unchanged",
+      "lane": "l0",
+      "summary": "n0-2 does a thing."
+    },
+    {
+      "id": "n1-0",
+      "label": "n1-0",
+      "kind": "function",
+      "delta": "modified",
+      "lane": "l1",
+      "summary": "n1-0 does a thing."
+    },
+    {
+      "id": "n1-1",
+      "label": "n1-1",
+      "kind": "function",
+      "delta": "unchanged",
+      "lane": "l1",
+      "summary": "n1-1 does a thing."
+    },
+    {
+      "id": "n1-2",
+      "label": "n1-2",
+      "kind": "function",
+      "delta": "added",
+      "lane": "l1",
+      "summary": "n1-2 does a thing."
+    },
+    {
+      "id": "n2-0",
+      "label": "n2-0",
+      "kind": "function",
+      "delta": "unchanged",
+      "lane": "l2",
+      "summary": "n2-0 does a thing."
+    },
+    {
+      "id": "n2-1",
+      "label": "n2-1",
+      "kind": "function",
+      "delta": "added",
+      "lane": "l2",
+      "summary": "n2-1 does a thing."
+    },
+    {
+      "id": "n2-2",
+      "label": "n2-2",
+      "kind": "function",
+      "delta": "modified",
+      "lane": "l2",
+      "summary": "n2-2 does a thing."
+    },
+    {
+      "id": "n3-0",
+      "label": "n3-0",
+      "kind": "function",
+      "delta": "added",
+      "lane": "l3",
+      "summary": "n3-0 does a thing."
+    },
+    {
+      "id": "n3-1",
+      "label": "n3-1",
+      "kind": "function",
+      "delta": "modified",
+      "lane": "l3",
+      "summary": "n3-1 does a thing."
+    },
+    {
+      "id": "n3-2",
+      "label": "n3-2",
+      "kind": "function",
+      "delta": "unchanged",
+      "lane": "l3",
+      "summary": "n3-2 does a thing."
+    },
+    {
+      "id": "n4-0",
+      "label": "n4-0",
+      "kind": "function",
+      "delta": "modified",
+      "lane": "l4",
+      "summary": "n4-0 does a thing."
+    },
+    {
+      "id": "n4-1",
+      "label": "n4-1",
+      "kind": "function",
+      "delta": "unchanged",
+      "lane": "l4",
+      "summary": "n4-1 does a thing."
+    },
+    {
+      "id": "n4-2",
+      "label": "n4-2",
+      "kind": "function",
+      "delta": "added",
+      "lane": "l4",
+      "summary": "n4-2 does a thing."
+    },
+    {
+      "id": "n5-0",
+      "label": "n5-0",
+      "kind": "function",
+      "delta": "unchanged",
+      "lane": "l5",
+      "summary": "n5-0 does a thing."
+    },
+    {
+      "id": "n5-1",
+      "label": "n5-1",
+      "kind": "function",
+      "delta": "added",
+      "lane": "l5",
+      "summary": "n5-1 does a thing."
+    },
+    {
+      "id": "n5-2",
+      "label": "n5-2",
+      "kind": "function",
+      "delta": "modified",
+      "lane": "l5",
+      "summary": "n5-2 does a thing."
+    },
+    {
+      "id": "n6-0",
+      "label": "n6-0",
+      "kind": "function",
+      "delta": "added",
+      "lane": "l6",
+      "summary": "n6-0 does a thing."
+    },
+    {
+      "id": "n6-1",
+      "label": "n6-1",
+      "kind": "function",
+      "delta": "modified",
+      "lane": "l6",
+      "summary": "n6-1 does a thing."
+    },
+    {
+      "id": "n6-2",
+      "label": "n6-2",
+      "kind": "function",
+      "delta": "unchanged",
+      "lane": "l6",
+      "summary": "n6-2 does a thing."
+    },
+    {
+      "id": "n7-0",
+      "label": "n7-0",
+      "kind": "function",
+      "delta": "modified",
+      "lane": "l7",
+      "summary": "n7-0 does a thing."
+    },
+    {
+      "id": "n7-1",
+      "label": "n7-1",
+      "kind": "function",
+      "delta": "unchanged",
+      "lane": "l7",
+      "summary": "n7-1 does a thing."
+    },
+    {
+      "id": "n7-2",
+      "label": "n7-2",
+      "kind": "function",
+      "delta": "added",
+      "lane": "l7",
+      "summary": "n7-2 does a thing."
+    }
+  ],
+  "edges": [
+    {
+      "id": "n0-0--n1-1",
+      "from": "n0-0",
+      "to": "n1-1",
+      "kind": "call",
+      "delta": "added",
+      "emphasis": "normal"
+    },
+    {
+      "id": "n0-1--n1-2",
+      "from": "n0-1",
+      "to": "n1-2",
+      "kind": "call",
+      "delta": "modified",
+      "emphasis": "normal"
+    },
+    {
+      "id": "n0-2--n1-0",
+      "from": "n0-2",
+      "to": "n1-0",
+      "kind": "call",
+      "delta": "unchanged",
+      "emphasis": "normal"
+    },
+    {
+      "id": "n1-0--n2-1",
+      "from": "n1-0",
+      "to": "n2-1",
+      "kind": "call",
+      "delta": "added",
+      "emphasis": "normal"
+    },
+    {
+      "id": "n1-1--n2-2",
+      "from": "n1-1",
+      "to": "n2-2",
+      "kind": "call",
+      "delta": "modified",
+      "emphasis": "normal"
+    },
+    {
+      "id": "n1-2--n2-0",
+      "from": "n1-2",
+      "to": "n2-0",
+      "kind": "call",
+      "delta": "unchanged",
+      "emphasis": "normal"
+    },
+    {
+      "id": "n2-0--n3-1",
+      "from": "n2-0",
+      "to": "n3-1",
+      "kind": "call",
+      "delta": "added",
+      "emphasis": "normal"
+    },
+    {
+      "id": "n2-1--n3-2",
+      "from": "n2-1",
+      "to": "n3-2",
+      "kind": "call",
+      "delta": "modified",
+      "emphasis": "normal"
+    },
+    {
+      "id": "n2-2--n3-0",
+      "from": "n2-2",
+      "to": "n3-0",
+      "kind": "call",
+      "delta": "unchanged",
+      "emphasis": "normal"
+    },
+    {
+      "id": "n3-0--n4-1",
+      "from": "n3-0",
+      "to": "n4-1",
+      "kind": "call",
+      "delta": "added",
+      "emphasis": "normal"
+    },
+    {
+      "id": "n3-1--n4-2",
+      "from": "n3-1",
+      "to": "n4-2",
+      "kind": "call",
+      "delta": "modified",
+      "emphasis": "normal"
+    },
+    {
+      "id": "n3-2--n4-0",
+      "from": "n3-2",
+      "to": "n4-0",
+      "kind": "call",
+      "delta": "unchanged",
+      "emphasis": "normal"
+    },
+    {
+      "id": "n4-0--n5-1",
+      "from": "n4-0",
+      "to": "n5-1",
+      "kind": "call",
+      "delta": "added",
+      "emphasis": "normal"
+    },
+    {
+      "id": "n4-1--n5-2",
+      "from": "n4-1",
+      "to": "n5-2",
+      "kind": "call",
+      "delta": "modified",
+      "emphasis": "normal"
+    },
+    {
+      "id": "n4-2--n5-0",
+      "from": "n4-2",
+      "to": "n5-0",
+      "kind": "call",
+      "delta": "unchanged",
+      "emphasis": "normal"
+    },
+    {
+      "id": "n5-0--n6-1",
+      "from": "n5-0",
+      "to": "n6-1",
+      "kind": "call",
+      "delta": "added",
+      "emphasis": "normal"
+    },
+    {
+      "id": "n5-1--n6-2",
+      "from": "n5-1",
+      "to": "n6-2",
+      "kind": "call",
+      "delta": "modified",
+      "emphasis": "normal"
+    },
+    {
+      "id": "n5-2--n6-0",
+      "from": "n5-2",
+      "to": "n6-0",
+      "kind": "call",
+      "delta": "unchanged",
+      "emphasis": "normal"
+    },
+    {
+      "id": "n6-0--n7-1",
+      "from": "n6-0",
+      "to": "n7-1",
+      "kind": "call",
+      "delta": "added",
+      "emphasis": "normal"
+    },
+    {
+      "id": "n6-1--n7-2",
+      "from": "n6-1",
+      "to": "n7-2",
+      "kind": "call",
+      "delta": "modified",
+      "emphasis": "normal"
+    },
+    {
+      "id": "n6-2--n7-0",
+      "from": "n6-2",
+      "to": "n7-0",
+      "kind": "call",
+      "delta": "unchanged",
+      "emphasis": "normal"
+    },
+    {
+      "id": "n0-0--n4-0",
+      "from": "n0-0",
+      "to": "n4-0",
+      "kind": "event",
+      "delta": "added",
+      "emphasis": "hero",
+      "label": "skip"
+    },
+    {
+      "id": "n6-1--n1-1",
+      "from": "n6-1",
+      "to": "n1-1",
+      "kind": "rpc",
+      "delta": "modified",
+      "emphasis": "normal",
+      "label": "back"
+    },
+    {
+      "id": "n3-0--n3-2",
+      "from": "n3-0",
+      "to": "n3-2",
+      "kind": "call",
+      "delta": "added",
+      "emphasis": "normal"
+    },
+    {
+      "id": "n5-1--n5-0",
+      "from": "n5-1",
+      "to": "n5-0",
+      "kind": "call",
+      "delta": "modified",
+      "emphasis": "normal"
+    }
+  ]
+}
