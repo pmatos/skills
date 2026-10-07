@@ -44,6 +44,7 @@ textarea { width: 100%; resize: vertical; }
 .ro-top-right { display: flex; gap: 8px; align-items: center; }
 .ro-banner, .ro-confirm { margin: 10px 0; padding: 10px 14px; border-radius: 8px; border: 1px solid var(--modified); background: var(--modified-bg); display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
 .ro-confirm p { margin: 0; flex: 1 1 320px; }
+.ro-confirm { position: fixed; left: 16px; right: 16px; bottom: 16px; z-index: 30; margin: 0 auto; max-width: 960px; box-shadow: var(--shadow), 0 8px 28px rgba(0, 0, 0, .25); }
 .ro-tag { display: inline-block; font-size: 11.5px; padding: 0 7px; border-radius: 999px; border: 1px solid var(--border); background: var(--surface-2); color: var(--muted); }
 .ro-tag.warn { color: var(--modified); border-color: var(--modified); background: var(--modified-bg); }
 .ro-tag.v-confirmed { color: var(--added); border-color: var(--added); }
