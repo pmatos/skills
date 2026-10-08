@@ -211,6 +211,8 @@ model, API shape, UX, where the feature lives):
   ```
   investigate: feature request #<N> is ambiguous and cannot be designed non-interactively. Provide more details or run interactively.
   ```
+  `/pm-plan` answers its own questions headlessly, so a guess on one of these
+  decisions recorded in its `## Assumptions` section counts as ambiguous.
 
 If the request is concrete enough that no design choices remain open (e.g. "add a
 `--quiet` flag that suppresses progress output"), proceed without a design pass.

@@ -50,6 +50,8 @@ Assess blast radius of a change with two parallel subagents:
 
 ## Plan Templates
 
+Any template below takes the `## Assumptions` section from SKILL.md Step 4, directly after `## Goal`.
+
 ### Bug Fix (Minimal)
 ```markdown
 # Plan: Fix <bug description>
