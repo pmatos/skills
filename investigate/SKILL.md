@@ -207,7 +207,9 @@ model, API shape, UX, where the feature lives):
   resolve each via AskUserQuestion before writing code. Update the plan with the
   answers.
 - Non-interactive: if the design is ambiguous, fail with exactly this message
-  (substitute the issue number):
+  (substitute the issue number). `/pm-plan` answers its own questions headlessly,
+  so a plan from 4B.1 does not prove the design is settled: a guess on any of
+  these decisions recorded in its `## Assumptions` section counts as ambiguity.
   ```
   investigate: feature request #<N> is ambiguous and cannot be designed non-interactively. Provide more details or run interactively.
   ```

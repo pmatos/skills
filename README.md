@@ -153,7 +153,8 @@ What it does:
 - Assesses task complexity and scales exploration depth accordingly (Small/Medium/Large).
 - Dispatches parallel read-only `Explore` subagents (via the native `Agent`/`Task` tool) to systematically map affected code areas.
 - Drafts a structured plan with exact `file:line` references, ordered steps, and verification criteria.
-- Validates all file references exist, then gets an independent critique of the draft plan — consulting the advisor when one is available in the session, falling back to an inline self-review otherwise.
+- Validates all file references exist, then (for Medium and Large tasks) gets an independent critique of the draft plan — from the advisor when one is available in the session, else a read-only `Plan` subagent, else an inline self-review. Small tasks skip subagents and adversarial review.
+- Safe to run headlessly (cron, routines, `claude -p`): never blocks on a question. The advisor or a best guess answers it, and every guessed answer is recorded under `## Assumptions` in the plan.
 - Operates in strict read-only mode for the source tree — only `.ultraplan/<plan-name>.md` is written.
 
 Trigger phrases: `plan this`, `make a plan`, `implementation plan`, `deep plan`, `thorough plan`.
