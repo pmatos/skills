@@ -1,14 +1,14 @@
 ---
 name: pm-plan
 description: This skill should be used when the user asks to "plan this", "make a plan", "create an implementation plan", "how should I implement", "design the implementation", "plan the refactor", "plan the migration", "plan the feature", "break this down into steps", "implementation strategy", "deep plan", "thorough plan", or wants a thorough, multi-phase implementation plan with codebase exploration before writing any code.
-version: 4.1.0
+version: 4.2.0
 argument-hint: "<task description or feature request>"
 user-invocable: true
 ---
 
 # Deep Implementation Planning
 
-This skill produces a validated, adversarially-reviewed implementation plan at `.ultraplan/<plan-name>.md` after exploring the codebase — without writing any production code.
+This skill produces a validated implementation plan (adversarially reviewed unless the task is Small) at `.ultraplan/<plan-name>.md` after exploring the codebase — without writing any production code.
 
 ## Task
 
@@ -36,6 +36,8 @@ Bad questions (find the answer yourself by reading code):
 - "What framework are you using?"
 - "Where is the config file?"
 
+**Headless runs.** This skill may run with no one to answer (a cron job, a routine, `claude -p`, or any session where asking the user is unavailable). In that case never block on a question. Answer each clarifying question yourself, in this order: (1) consult the advisor if one is available — state the questions and the options in-transcript, then call it; (2) otherwise pick the best-guess answer, preferring the smallest change that satisfies the request. Record every answer you supplied under `## Assumptions` in the plan so the reader can see what was guessed.
+
 If the task is clear, skip straight to Step 2.
 
 ### Step 2: Assess Complexity
@@ -59,7 +61,7 @@ Classify the task:
 
 | Size | Criteria | Exploration Depth |
 |------|----------|-------------------|
-| **Small** | 1-2 files, clear approach, follows existing patterns | Single pass, no exploration subagents |
+| **Small** | 1-2 files, clear approach, follows existing patterns (includes trivial changes) | Single pass, no subagents, no adversarial review |
 | **Medium** | 3-5 files, one subsystem, some ambiguity | 1-2 parallel Explore subagents |
 | **Large** | Many files, cross-cutting, architectural decisions needed | 3 parallel Explore subagents (Three-Concern Decomposition) |
 
@@ -99,11 +101,11 @@ Each subagent has a strict boundary: architecture doesn't propose changes, chang
 
 #### Plan naming (cheap/fast model)
 
-If a native subagent tool is available, dispatch a one-shot `Agent` call pinned to a fast, cheap model (`model: "haiku"`) to generate the name. The mission:
+For Small tasks, pick the name yourself inline — a subagent round-trip costs more than it saves. For Medium and Large tasks, if a native subagent tool is available, dispatch a one-shot `Agent` call pinned to a fast, cheap model (`model: "haiku"`) to generate the name. The mission:
 
 > "Generate a short kebab-case name (2-3 words) that summarizes this task: \<task description\>. Reply with ONLY the name, nothing else. Example: auth-token-refresh"
 
-**Without a native subagent tool**, pick the name yourself inline instead — the dispatch exists mainly to keep naming cheap, not because the task requires delegation.
+**Without a native subagent tool**, pick the name yourself inline as well — the dispatch exists mainly to keep naming cheap, not because the task requires delegation.
 
 Sanitize the returned (or self-picked) name: strip everything except lowercase letters, digits, and hyphens (`[^a-z0-9-]`), truncate to 50 characters, and trim leading/trailing hyphens. If the result is empty, fall back to `plan`. Then check if `.ultraplan/<plan-name>.md` already exists — if so, append `-2`, `-3`, etc. until the name is unique. Use the final name as `<plan-name>` for the rest of this session. The plan file path is `.ultraplan/<plan-name>.md`.
 
@@ -143,6 +145,9 @@ Write (or update) `.ultraplan/<plan-name>.md` with this structure:
 
 ## Risks
 - <risk>: <mitigation>
+
+## Assumptions
+<only when a clarifying question was answered without the user: question, answer chosen, source (advisor or best guess)>
 ```
 
 **Plan quality rules:**
@@ -169,15 +174,19 @@ Fix any issues found.
 
 ### Step 6: Adversarial Review
 
-Get an independent critique of the plan before presenting it. State in-transcript what you want checked — the plan is already on disk at `.ultraplan/<plan-name>.md`, so name the file and list the checks: (1) file references that don't exist, (2) steps that depend on undeclared changes, (3) missing edge cases, (4) steps that could be simplified or merged, (5) scope creep beyond the stated goal — then consult the advisor. The advisor takes no separate prompt; it reviews your conversation as it stands, so make sure the checklist above is stated in-transcript immediately before you call it.
+**Small tasks skip this step** — validation in Step 5 is enough. For Medium and Large tasks, get an independent critique of the plan before presenting it. The checks, with the plan already on disk at `.ultraplan/<plan-name>.md`: (1) file references that don't exist, (2) steps that depend on undeclared changes, (3) missing edge cases, (4) steps that could be simplified or merged, (5) scope creep beyond the stated goal.
 
-If no advisor is available in this session, perform the same review yourself inline instead: re-read the plan and the source files it references, and check it against the same five criteria.
+**Reviewer, in order of preference:**
+
+1. **The advisor**, when available. State the plan file and the five checks in-transcript immediately before calling it — the advisor takes no separate prompt and reviews your conversation as it stands.
+2. **A read-only `Explore` subagent**, when no advisor is available. Its prompt must be self-contained: the task description, the plan file path, the five checks, the project conventions from CLAUDE.md/AGENTS.md, and an instruction to read the plan and the source files it references and report findings only (no edits).
+3. **Inline self-review**, only when neither exists: re-read the plan and the referenced source files and check against the same five criteria.
 
 Incorporate valid criticisms into the plan. If the review finds phantom references or critical issues, fix them and re-validate.
 
 ### Step 7: Present to User
 
-Display the final plan with a summary of exploration findings. Ask directly: **"Ready to execute this plan, or do you want changes?"**
+Display the final plan with a summary of exploration findings. Ask directly: **"Ready to execute this plan, or do you want changes?"** In a headless run, skip the question: end with the plan summary, the exact plan path, and any assumptions made.
 
 The plan file persists at `.ultraplan/<plan-name>.md` for reference during implementation. Tell the user the exact filename.
 
@@ -185,26 +194,27 @@ The plan file persists at `.ultraplan/<plan-name>.md` for reference during imple
 
 - **Read-only mode for source**: Do NOT create, modify, or delete any file except inside `.ultraplan/`.
 - **No implementation**: Do not write code, modify source files, or run build/test commands.
-- **No false completion**: Do not present the plan until validation and adversarial review are complete.
+- **No false completion**: Do not present the plan until validation (and, for Medium and Large tasks, adversarial review) are complete.
 - **No plan bloat**: Every line in the plan must carry actionable implementation information.
 - **No phantom references**: Every `file:line` reference to existing files must be verified against the actual codebase. New files must be marked `[new]`.
 - **No scope creep**: If exploration reveals the task is larger than expected, flag it to the user and ask whether to expand scope or decompose.
 - **No findable questions**: Never ask the user something you could determine by reading code.
+- **No blocking when headless**: Never wait for an answer nobody can give. Resolve questions via the advisor or a recorded best guess (Step 1).
 - **Single orchestrator**: You are the orchestrator. Never nest another orchestrator inside this session.
 
 ## Complexity Scaling
 
-| Task Size | Explore subagents | Clarification Depth |
-|-----------|-------------------|---------------------|
-| Small (1-2 files) | 0 | Light — 0-2 questions |
-| Medium (3-5 files) | 1-2 (parallel) | Moderate — 2-4 questions |
-| Large (many files, architectural) | 3 (parallel, Three-Concern) | Deep — 4-6 questions |
+| Task Size | Explore subagents | Clarification Depth | Adversarial review |
+|-----------|-------------------|---------------------|--------------------|
+| Small (1-2 files) | 0 | Light — 0-2 questions | None |
+| Medium (3-5 files) | 1-2 (parallel) | Moderate — 2-4 questions | Advisor, else Explore subagent |
+| Large (many files, architectural) | 3 (parallel, Three-Concern) | Deep — 4-6 questions | Advisor, else Explore subagent |
 
-Adversarial review (Step 6) is not gated by task size — it's gated by whether an advisor is available: advisor if present, inline self-review otherwise, for every task size.
+Headless runs answer the clarification questions themselves (advisor, else recorded best guess) instead of asking.
 
 ## Prerequisites
 
-- A native subagent tool (the `Agent`/`Task` tool) and the read-only `Explore` agent type are preferred, not required — Step 3's exploration and plan naming fall back to inline execution without one (slower, not different).
+- A native subagent tool (the `Agent`/`Task` tool) and the read-only `Explore` agent type are preferred, not required — Step 3's exploration and plan naming fall back to inline execution without one (slower, not different). Step 6's reviewer is the advisor when present, otherwise an `Explore` subagent; only without both does it fall back to inline self-review.
 - Standard POSIX shell utilities for recon and validation: `git`, `find`, `grep` (or `rg`), `sed`, `test`.
 
 ## Additional Resources
