@@ -57,7 +57,7 @@ class ReviewServer:
     def __post_init__(self) -> None:
         self.token = secrets.token_urlsafe(24)
         self.outcome = Outcome()
-        self._pending: set[str] = set()
+        self._pending: dict[str, int] = {}
         self._thread_locks: dict[str, threading.Lock] = {}
         self._guard = threading.Lock()
         self._last_activity = self.clock()
@@ -78,7 +78,7 @@ class ReviewServer:
 
     def snapshot(self) -> dict:
         with self._guard:
-            pending = sorted(self._pending)
+            pending = sorted(key for key, count in self._pending.items() if count > 0)
         return {"state": self.store.snapshot(), "pending_threads": pending}
 
     def bootstrap(self) -> dict:
@@ -100,26 +100,37 @@ class ReviewServer:
         else:
             thread_id = self.store.add_thread(anchor, text)["id"]
         with self._guard:
-            self._pending.add(thread_id)
+            self._pending[thread_id] = self._pending.get(thread_id, 0) + 1
             lock = self._thread_locks.setdefault(thread_id, threading.Lock())
-        threading.Thread(target=self._answer, args=(thread_id, lock), daemon=True).start()
+        # Bind the exact question now: a second queued ask must not shift "last message".
+        threading.Thread(target=self._answer, args=(thread_id, lock, text), daemon=True).start()
         return thread_id
 
-    def _answer(self, thread_id: str, lock: threading.Lock) -> None:
+    def _answer(self, thread_id: str, lock: threading.Lock, text: str) -> None:
         with lock:
             try:
                 thread = self.store.get_thread(thread_id)
-                answer, session = self.service.ask(thread, thread["messages"][-1]["text"])
+                answer, session = self.service.ask(thread, text)
             except Exception as exc:  # noqa: BLE001 - surfaced to the reviewer in the thread
                 answer, session = f"The agent request failed: {exc}", None
             self.store.append_message(thread_id, "agent", answer, session=session)
             with self._guard:
-                self._pending.discard(thread_id)
+                self._pending[thread_id] -= 1
+                if self._pending[thread_id] <= 0:
+                    del self._pending[thread_id]
             self.store.publish("ask_done", {"id": thread_id})
+
+    def set_outcome(self, kind: str, path: str) -> bool:
+        """Set the outcome if still running; reports whether this call set it."""
+        with self._guard:
+            if self.outcome.kind != "running":
+                return False
+            self.outcome = Outcome(kind, path)
+            return True
 
     def finish(self) -> str:
         markdown.write(self.store.snapshot(), self.changeset, self.output_path)
-        self.outcome = Outcome("complete", str(self.output_path))
+        self.set_outcome("complete", str(self.output_path))
         threading.Timer(0.3, self.stop).start()
         return str(self.output_path)
 
@@ -128,13 +139,18 @@ class ReviewServer:
         self.httpd.shutdown()
 
     def _watchdog(self) -> None:
-        while self.outcome.kind == "running":
-            time.sleep(min(5.0, max(0.05, self.idle_timeout / 10)))
-            if self.clock() - self._last_activity > self.idle_timeout:
-                if self.outcome.kind == "running":
-                    self.outcome = Outcome("suspended", str(self._state_path()))
-                    self.stop()
-                return
+        if self.idle_timeout <= 0:
+            return  # 0 disables the idle timeout
+        while True:
+            with self._guard:
+                if self.outcome.kind != "running":
+                    return
+            time.sleep(min(5.0, self.idle_timeout / 10))
+            if self.clock() - self._last_activity <= self.idle_timeout:
+                continue
+            if self.set_outcome("suspended", str(self._state_path())):
+                self.stop()
+            return
 
     def _state_path(self) -> Path:
         return self.reviews_dir / f"{self.changeset['slug']}.state.json"
@@ -146,8 +162,7 @@ class ReviewServer:
             self.httpd.serve_forever(poll_interval=0.2)
         finally:
             self.httpd.server_close()
-        if self.outcome.kind == "running":
-            self.outcome = Outcome("suspended", str(self._state_path()))
+        self.set_outcome("suspended", str(self._state_path()))
         return self.outcome
 
 
@@ -184,13 +199,14 @@ def _make_handler(app: ReviewServer) -> type[BaseHTTPRequestHandler]:
 
         def _body(self) -> dict:
             length = int(self.headers.get("Content-Length") or 0)
+            if length < 0:
+                # Bogus framing: read(-1) would drain until EOF and hang the thread.
+                self.close_connection = True
+                raise StoreError("invalid Content-Length")
             if length > MAX_BODY:
-                remaining = min(length, 10 * MAX_BODY)
-                while remaining > 0:
-                    chunk = self.rfile.read(min(65536, remaining))
-                    if not chunk:
-                        break
-                    remaining -= len(chunk)
+                # Do not partially drain a body this big: close the connection so the
+                # next request on it cannot desync on unread bytes.
+                self.close_connection = True
                 raise StoreError("request body too large")
             raw = self.rfile.read(length) if length else b""
             if not raw:
@@ -208,7 +224,8 @@ def _make_handler(app: ReviewServer) -> type[BaseHTTPRequestHandler]:
                 return self._send(200, app._shell.encode("utf-8"), "text/html; charset=utf-8")
             if not url.path.startswith("/api/") or not self._authed():
                 return self._json(403 if url.path.startswith("/api/") else 404, {"error": "no"})
-            app.touch()
+            if url.path != "/api/events":
+                app.touch()
             try:
                 self._api(method, url.path, parse_qs(url.query))
             except NotFoundError as exc:
@@ -229,7 +246,6 @@ def _make_handler(app: ReviewServer) -> type[BaseHTTPRequestHandler]:
             if method == "GET" and parts == ["events"]:
                 since = int(query.get("since", ["0"])[0])
                 events, last = app.store.events_since(since, LONG_POLL_SECONDS)
-                app.touch()
                 return self._json(200, {"events": events, "last": last})
             if method == "POST" and parts == ["comments"]:
                 data = self._body()

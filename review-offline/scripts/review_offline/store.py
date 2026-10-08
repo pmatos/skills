@@ -211,6 +211,8 @@ class Store:
             return False
         if anchor["scope"] == "file":
             return anchor["path"] not in self._files
+        if anchor["path"] not in self._files:
+            return True  # a None-vs-None hash comparison must not read as "not stale"
         current = self._hash(anchor["path"], anchor["side"], anchor["start"], anchor["end"])
         return anchor.get("hash") != current
 
@@ -458,6 +460,7 @@ class Store:
             if c["origin"] == "agent"
             and c["status"] == "pending"
             and not c["edited"]
+            and not c["stale"]
             and c["anchor"]["scope"] == "line"
             and c["anchor"]["path"] == anchor["path"]
             and c["anchor"]["side"] == anchor["side"]

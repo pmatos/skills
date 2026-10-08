@@ -106,6 +106,11 @@ def test_extract_json_block_takes_last_block_and_reports_errors():
         passes.extract_json_block("```json\n[oops\n```")
 
 
+def test_extract_json_block_tolerates_nested_fences_inside_strings():
+    payload = json.dumps({"suggestion": "```python\nfoo()\n```", "verdict": "PLAUSIBLE"})
+    assert passes.extract_json_block(f"reasoning\n```json\n{payload}\n```\n") == json.loads(payload)
+
+
 def test_dedupe_keeps_most_severe_of_overlapping():
     a = finding("x", 2, 3, "nit")
     b = finding("y", 3, 4, "blocking")
@@ -139,8 +144,13 @@ def test_full_high_effort_run_streams_verified_findings(store, tmp_path):
     bodies = sorted(c["body"] for c in snap["comments"])
     assert any("correctness-scan" in b for b in bodies)
     assert not any("99" in b for b in bodies)
-    lines = sorted((c["anchor"]["start"], c["verdict"]) for c in snap["comments"])
-    assert lines == [(2, "CONFIRMED"), (4, "CONFIRMED")]
+    lines = sorted((c["anchor"].get("start") or -1, c["verdict"]) for c in snap["comments"])
+    assert lines == [(-1, "CONFIRMED"), (2, "CONFIRMED"), (4, "CONFIRMED")]
+    downgraded = [c for c in snap["comments"] if c["anchor"]["scope"] == "file"]
+    assert [(c["body"], c["anchor"]["path"]) for c in downgraded] == [
+        ("cleanup-reuse body", "a.py")
+    ]
+    assert downgraded[0]["suggestion"] is None
     assert all(c["origin"] == "agent" and c["status"] == "pending" for c in snap["comments"])
     assert {c["effort"] for c in host.calls} == {"high"}
     assert any("untrusted" in c["prompt"] for c in host.calls)

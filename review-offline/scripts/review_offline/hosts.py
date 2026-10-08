@@ -1,9 +1,26 @@
 """Run read-only, config-isolated child agents through the same harness as the caller.
 
 Review content is attacker-controlled and the machine may hold powerful MCP tools, so every
-child is started with its tools restricted to reading, MCP/hooks/skills/plugins/memory
-switched off and the harness-identifying environment removed. The prompt always goes through
-stdin, never argv, so it can start with `-` and is not limited by ARG_MAX.
+child is started with its tools restricted to reading and the harness-identifying environment
+removed. The prompt always goes through stdin, never argv, so it can start with `-` and is
+not limited by ARG_MAX.
+
+Isolation is enforced as far as each CLI allows:
+
+- claude: `--strict-mcp-config`, empty setting sources, `--restricted` (command tools gone,
+  file tools confined to the working directories). The one flag that also kills auto-memory
+  and hooks outright, `--bare`, is unusable here because it restricts auth to API keys.
+- codex: `--ignore-user-config` plus `-c mcp_servers={}` (codex has no project-level config)
+  and the disabled-features list. Its read-only sandbox limits writes only: the child can
+  read the whole filesystem, unlike claude/omp whose file tools are confined by --add-dir.
+- omp: `--no-extensions` (which is also what disables hooks: they are discovered inside
+  extension packages), `--no-skills`, `--no-rules`, and the overlay, whose
+  `mcp.enableProjectConfig: false` blocks OMP-native project MCP files (verified on omp
+  18.8.0). There is no supported switch for the user-level `~/.omp/agent/mcp.json`, the
+  portable root `.mcp.json` fallback, or third-party tool configs, and relocating the whole
+  config root would also drop stored auth; those sources stay reachable and are documented
+  in SKILL.md's limitations.
+
 
 Effort mapping (our level -> native option; the first three are passed through unchanged):
 
@@ -206,9 +223,11 @@ def parse_codex(stdout: str) -> tuple[str, str]:
         None,
     )
     failed = [e for e in events if e.get("type") in ("turn.failed", "error")]
-    if any(e.get("type") == "turn.failed" for e in failed):
-        detail = failed[-1].get("error", {}).get("message") or failed[-1].get("message")
-        raise HostError(f"codex turn failed: {detail}")
+    if failed:
+        # Prefer a turn.failed's detail over a later, unrelated protocol error.
+        event = next((e for e in failed if e.get("type") == "turn.failed"), failed[0])
+        detail = event.get("error", {}).get("message") or event.get("message")
+        raise HostError(f"codex {event.get('type')}: {detail}")
     messages = [
         e["item"]["text"]
         for e in events
@@ -310,12 +329,18 @@ class Host:
                 support_dir=support_dir,
                 env=env,
             )
-            code, out, err = _spawn(command, cwd, timeout)
-            if "Unknown --effort" in err and current:
-                notes.append(f"effort ignored by {self.name}")
+            try:
+                code, out, err = _spawn(command, cwd, timeout)
+            except HostTimeout as exc:
+                # A timed-out resume must be recoverable like any other resume failure.
+                if session:
+                    raise ResumeFailed(str(exc)) from None
+                raise
             if code != 0 and current and _EFFORT_REJECTED.search(out + err):
                 notes.append(f"effort ignored by {self.name}")
                 continue
+            if "Unknown --effort" in err and current:
+                notes.append(f"effort ignored by {self.name}")
             break
 
         failure = None
@@ -392,7 +417,9 @@ class CodexHost(Host):
         session_id=None,
         env=None,
     ):
-        # The read-only sandbox already lets the child read everywhere, so readonly_dirs is moot.
+        # codex's read-only sandbox limits writes, not reads: there is no read-confinement
+        # flag, so unlike claude/omp (--add-dir plus a read-only tool set) the child can
+        # read anywhere the invoking user can. Documented in SKILL.md's limitations.
         argv = [self.binary, "exec"]
         if session:
             argv += ["resume", session]
@@ -407,6 +434,10 @@ class CodexHost(Host):
             'sandbox_mode="read-only"',
             "-c",
             'web_search="disabled"',
+            # Belt and braces: force the MCP server map empty no matter which config
+            # scope a future codex release teaches to load (verified on codex 0.160).
+            "-c",
+            "mcp_servers={}",
         ]
         for feature in CODEX_DISABLED_FEATURES:
             argv += ["-c", f"features.{feature}=false"]

@@ -2,14 +2,12 @@
 
 from __future__ import annotations
 
-import atexit
 import hashlib
 import json
 import os
 import re
 import shlex
 import shutil
-import signal
 import subprocess
 from collections.abc import Callable, Iterator, Sequence
 from pathlib import Path
@@ -471,11 +469,28 @@ def slug_for(target: str | None, repo: Path, *, runner: Runner | None = None) ->
     return _slug(g, _classify(g, top, target))
 
 
+def _is_shallow(g: _Git) -> bool:
+    return g.try_line("rev-parse", "--is-shallow-repository") == "true"
+
+
 def _merge_base(g: _Git, a: str, b: str) -> str:
     base = g.try_line("merge-base", a, b)
-    if base is None:
-        raise ChangesetError(f"no merge base between {a!r} and {b!r}")
-    return base
+    if base is not None:
+        return base
+    if _is_shallow(g):
+        # Shallow checkouts (actions/checkout, bot checkouts) have no common ancestor.
+        try:
+            g.out("fetch", "--unshallow")
+            base = g.try_line("merge-base", a, b)
+        except ChangesetError:
+            pass
+        if base is not None:
+            return base
+        raise ChangesetError(
+            f"no merge base between {a!r} and {b!r}: the clone is shallow and "
+            "unshallowing failed; run `git fetch --unshallow` manually"
+        )
+    raise ChangesetError(f"no merge base between {a!r} and {b!r}")
 
 
 def _committed_base(g: _Git, head: str) -> tuple[str, str]:
@@ -594,7 +609,7 @@ def _pr_changes(g: _Git, spec: dict) -> tuple[str, dict, dict[str, str]]:
     except ValueError as exc:
         raise ChangesetError(f"gh pr view returned invalid JSON: {exc}") from exc
     number = spec["number"]
-    g.out("fetch", "--refmap=", "origin", f"pull/{number}/head")
+    g.out("fetch", "--refmap=", "origin", "--", f"pull/{number}/head")
     head = g.line("rev-parse", "--verify", "FETCH_HEAD^{commit}")
     if view.get("headRefOid") and view["headRefOid"] != head:
         raise ChangesetError(
@@ -603,7 +618,7 @@ def _pr_changes(g: _Git, spec: dict) -> tuple[str, dict, dict[str, str]]:
         )
     tip = view.get("baseRefOid")
     if not (tip and g.rev(tip)):
-        g.out("fetch", "--refmap=", "origin", view["baseRefName"])
+        g.out("fetch", "--refmap=", "origin", "--", view["baseRefName"])
         tip = g.line("rev-parse", "--verify", "FETCH_HEAD^{commit}")
     base = _merge_base(g, tip, head)
     inline, inline_error = _fetch_inline_comments(g, spec)
@@ -708,32 +723,3 @@ def cleanup_worktree(repo: Path, run_dir: Path, *, runner: Runner | None = None)
         attempt([*git, "worktree", "remove", "--force", str(path)])
         shutil.rmtree(path, ignore_errors=True)
     attempt([*git, "worktree", "prune"])
-
-
-def register_cleanup(
-    repo: Path, run_dir: Path, *, runner: Runner | None = None
-) -> Callable[[], None]:
-    """Clean the worktree at exit and on SIGTERM/SIGINT; returns the cleanup callable."""
-
-    def cleanup() -> None:
-        cleanup_worktree(repo, run_dir, runner=runner)
-
-    atexit.register(cleanup)
-    for signum in (signal.SIGTERM, signal.SIGINT):
-        previous = signal.getsignal(signum)
-        if previous == signal.SIG_IGN:
-            continue
-
-        def handler(sig: int, frame: object, previous: object = previous) -> None:
-            cleanup()
-            if callable(previous):
-                previous(sig, frame)
-                return
-            signal.signal(sig, signal.SIG_DFL)
-            os.kill(os.getpid(), sig)
-
-        try:
-            signal.signal(signum, handler)
-        except ValueError:
-            break
-    return cleanup

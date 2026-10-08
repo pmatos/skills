@@ -172,6 +172,25 @@ def test_body_size_limit(app):
     assert status == 400
 
 
+def test_negative_content_length_is_rejected(app):
+    conn = http.client.HTTPConnection("127.0.0.1", app.port, timeout=5)
+    conn.request(
+        "PUT",
+        "/api/summary",
+        body="{}",
+        headers={
+            "Host": f"127.0.0.1:{app.port}",
+            "X-Review-Token": app.token,
+            "Content-Length": "-1",
+        },
+    )
+    resp = conn.getresponse()
+    raw = resp.read()
+    conn.close()
+    assert resp.status == 400
+    assert b"invalid Content-Length" in raw
+
+
 def test_events_long_poll_wakes(app):
     _, snap = jcall(app, "GET", "/api/snapshot")
     since = snap["state"]["events"]
@@ -204,6 +223,29 @@ def test_ask_flow_and_pending_tracking(app):
     assert thread["messages"][1]["text"] == "answer to why?"
     status, _ = jcall(app, "POST", "/api/ask", {"anchor": anchor, "text": "more", "thread_id": tid})
     assert status == 202
+
+
+def test_rapid_double_ask_answers_each_question_in_order(app):
+    anchor = {"scope": "line", "path": "a.py", "side": "new", "start": 1, "end": 1}
+    _, first = jcall(app, "POST", "/api/ask", {"anchor": anchor, "text": "why?"})
+    tid = first["thread_id"]
+    _, second = jcall(
+        app, "POST", "/api/ask", {"anchor": anchor, "text": "and now?", "thread_id": tid}
+    )
+    assert second["thread_id"] == tid
+    for _ in range(200):
+        _, snap = jcall(app, "GET", "/api/snapshot")
+        if tid not in snap["pending_threads"]:
+            break
+        time.sleep(0.02)
+    thread = next(t for t in snap["state"]["threads"] if t["id"] == tid)
+    assert [m["role"] for m in thread["messages"]] == ["user", "agent", "user", "agent"]
+    assert [m["text"] for m in thread["messages"]] == [
+        "why?",
+        "answer to why?",
+        "and now?",
+        "answer to and now?",
+    ]
 
 
 def test_ask_failure_is_reported_in_thread(app):
@@ -255,3 +297,53 @@ def test_idle_timeout_suspends(tmp_path):
     assert result["o"].kind == "suspended"
     assert result["o"].path.endswith(".state.json")
     assert svc.stopped
+
+
+def test_idle_timeout_zero_disables_the_watchdog(tmp_path):
+    review = ReviewServer(
+        store=Store.open(tmp_path / ".reviews", CHANGESET["slug"], CHANGESET),
+        changeset=CHANGESET,
+        graph=GRAPH,
+        reviews_dir=tmp_path / ".reviews",
+        service=FakeService(),
+        host="claude",
+        effort="high",
+        idle_timeout=0,
+    )
+    review._watchdog()  # returns immediately instead of suspending
+    assert review.outcome.kind == "running"
+
+
+def test_events_polling_does_not_reset_the_idle_clock(tmp_path):
+    clock = {"t": 0.0}
+    review = ReviewServer(
+        store=Store.open(tmp_path / ".reviews", CHANGESET["slug"], CHANGESET),
+        changeset=CHANGESET,
+        graph=GRAPH,
+        reviews_dir=tmp_path / ".reviews",
+        service=FakeService(),
+        host="claude",
+        effort="high",
+        idle_timeout=0.2,
+        clock=lambda: clock["t"],
+    )
+    result = {}
+    thread = threading.Thread(target=lambda: result.update(o=review.serve()), daemon=True)
+    thread.start()
+    stop = threading.Event()
+
+    def poll():
+        while not stop.is_set():
+            try:
+                jcall(review, "GET", "/api/events?since=0")
+            except OSError:
+                return  # the server stopped; that is what we are waiting for
+            time.sleep(0.02)
+
+    poller = threading.Thread(target=poll, daemon=True)
+    poller.start()
+    clock["t"] = 10.0
+    thread.join(5)
+    stop.set()
+    poller.join(5)
+    assert result["o"].kind == "suspended"
