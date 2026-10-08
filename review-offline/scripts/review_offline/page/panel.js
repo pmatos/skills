@@ -125,6 +125,7 @@
     var accepted = st.comments.filter(function (c) { return c.status === "accepted"; }).length;
     var summaryRef = useRef(null);
 
+    var flashTimer = useRef(null);
     useEffect(function () {
       if (!props.focusComment) return undefined;
       setTab("comments");
@@ -134,10 +135,13 @@
         if (el) {
           el.scrollIntoView({ block: "nearest" });
           el.classList.add("flash");
-          setTimeout(function () { el.classList.remove("flash"); }, 1600);
+          flashTimer.current = setTimeout(function () { el.classList.remove("flash"); }, 1600);
         }
       }, 50);
-      return function () { clearTimeout(t); };
+      return function () {
+        clearTimeout(t);
+        clearTimeout(flashTimer.current);
+      };
     }, [props.focusComment]);
 
     return html`<aside class="ro-panel" aria-label="Review">

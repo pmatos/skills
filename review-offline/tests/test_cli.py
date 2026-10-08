@@ -245,3 +245,51 @@ def test_second_server_for_the_same_run_is_refused(prepared):
         proc.stdout.read()
         proc.wait(timeout=10)
     assert not (run_dir / "serve.lock").exists()
+
+
+class TestClaimLock:
+    def test_live_holder_is_refused_with_its_url(self, tmp_path, monkeypatch):
+        from review_offline.cli import ServerAlreadyRunning, _claim_lock
+
+        lock = tmp_path / "serve.lock"
+        lock.write_text(json.dumps({"pid": os.getpid(), "url": "http://x/#t=k"}))
+        with pytest.raises(ServerAlreadyRunning, match="http://x"):
+            _claim_lock(tmp_path)
+        assert lock.exists()
+
+    def test_gone_holder_is_treated_as_stale(self, tmp_path, monkeypatch):
+        from review_offline import cli
+
+        lock = tmp_path / "serve.lock"
+        lock.write_text(json.dumps({"pid": 999_999, "url": None}))
+        monkeypatch.setattr(cli.os, "kill", lambda *a: (_ for _ in ()).throw(ProcessLookupError()))
+        cli._claim_lock(tmp_path)  # replaced with our pid
+        info = json.loads(lock.read_text())
+        assert info["pid"] == os.getpid()
+
+    def test_unsignallable_holder_is_treated_as_live(self, tmp_path, monkeypatch):
+        from review_offline import cli
+        from review_offline.cli import ServerAlreadyRunning, _claim_lock
+
+        lock = tmp_path / "serve.lock"
+        lock.write_text(json.dumps({"pid": 999_999, "url": "http://x/#t=k"}))
+        monkeypatch.setattr(cli.os, "kill", lambda *a: (_ for _ in ()).throw(PermissionError()))
+        with pytest.raises(ServerAlreadyRunning):
+            _claim_lock(tmp_path)
+
+    def test_fresh_lock_without_pid_is_refused(self, tmp_path):
+        from review_offline.cli import ServerAlreadyRunning, _claim_lock
+
+        lock = tmp_path / "serve.lock"
+        lock.write_text("")
+        with pytest.raises(ServerAlreadyRunning, match="starting"):
+            _claim_lock(tmp_path)
+
+    def test_claimed_lock_is_owner_only(self, tmp_path):
+        import stat
+
+        from review_offline.cli import _claim_lock
+
+        _claim_lock(tmp_path)
+        mode = stat.S_IMODE((tmp_path / "serve.lock").stat().st_mode)
+        assert mode == 0o600

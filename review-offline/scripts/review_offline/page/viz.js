@@ -38,6 +38,7 @@
 
   function Viz(props) {
     var graph = props.graph;
+    var edges = graph.edges || [];
     var layout = useMemo(function () { return RO.layout.layoutGraph(graph); }, [graph]);
     var modeS = useState("both"), mode = modeS[0], setMode = modeS[1];
     var flowS = useState(graph.flows && graph.flows.length ? graph.flows[0].id : null);
@@ -62,7 +63,7 @@
       });
       if (flow) flow.steps.forEach(function (st) {
         if (st.edge) {
-          var e = graph.edges.find(function (x) { return x.id === st.edge; });
+          var e = edges.find(function (x) { return x.id === st.edge; });
           if (e) { s.nodes[e.from] = true; s.nodes[e.to] = true; }
         }
       });
@@ -102,7 +103,7 @@
       return function () { cancelAnimationFrame(raf); };
     }, [cur, flowId]);
 
-    var showLabels = graph.edges.length <= 15;
+    var showLabels = edges.length <= 15;
     var focusNode = selected && graph.nodes.find(function (n) { return n.id === selected; });
 
     function nodeClass(n) {
@@ -169,7 +170,7 @@
                   return html`<marker id=${"ro-arrow-" + d} viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" class=${"ro-arrow d-" + d} /></marker>`;
                 })}
               </defs>
-              ${graph.edges.map(function (e) {
+              ${edges.map(function (e) {
                 var r = layout.edges[e.id];
                 return html`<g class=${edgeClass(e)} onMouseEnter=${function () { setHoverEdge(e.id); }} onMouseLeave=${function () { setHoverEdge(null); }}>
                   <path d=${r.d} class="ro-hit" />
@@ -178,7 +179,7 @@
               })}
               <circle ref=${dotRef} r="5" class="ro-dot" style="display:none" />
             </svg>
-            ${graph.edges.map(function (e) {
+            ${edges.map(function (e) {
               var r = layout.edges[e.id];
               if (!e.label || !(showLabels || hoverEdge === e.id || (cur && cur.edge === e.id))) return null;
               return html`<div class=${"ro-edgelabel d-" + e.delta + (ghosted(e.delta, mode) ? " ghost" : "")} style=${{ left: r.label.x + "px", top: r.label.y + "px" }}>${e.label}</div>`;

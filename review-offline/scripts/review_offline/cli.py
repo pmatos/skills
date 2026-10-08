@@ -7,7 +7,6 @@ import hashlib
 import json
 import os
 import signal
-import subprocess
 import sys
 import tempfile
 import threading
@@ -30,18 +29,63 @@ class ServerAlreadyRunning(RuntimeError):
     pass
 
 
+def _lock_holder(lock: Path) -> dict | None:
+    try:
+        info = json.loads(lock.read_text(encoding="utf-8"))
+        int(info["pid"])
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+    return info if isinstance(info, dict) else None
+
+
+def _pid_alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True  # exists but unsignallable (another user/sandbox): treat as live
+    except OSError:
+        return True
+    return True
+
+
+LOCK_STARTUP_GRACE = 10.0
+
+
 def _claim_lock(run_dir: Path) -> None:
+    """Claim the run lock with an exclusive create, before any expensive setup.
+
+    Raises ServerAlreadyRunning when a live server holds the lock. A holder
+    whose pid is gone is stale and removed; a lock without a usable pid is
+    given a grace window (a concurrent server may still be writing it).
+    """
     lock = run_dir / LOCK_NAME
-    if lock.exists():
+    while True:
         try:
-            info = json.loads(lock.read_text(encoding="utf-8"))
-            os.kill(int(info["pid"]), 0)
-        except (OSError, ValueError, KeyError):
+            fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+        except FileExistsError:
+            info = _lock_holder(lock)
+            if info is not None and _pid_alive(int(info["pid"])):
+                raise ServerAlreadyRunning(
+                    f"a review server for this run is already running at {info.get('url')}"
+                ) from None
+            if info is None:
+                try:
+                    fresh = time.time() - lock.stat().st_mtime <= LOCK_STARTUP_GRACE
+                except OSError:
+                    fresh = True
+                if fresh:
+                    raise ServerAlreadyRunning("a review server for this run is starting") from None
             lock.unlink(missing_ok=True)
-        else:
-            raise ServerAlreadyRunning(
-                f"a review server for this run is already running at {info.get('url')}"
-            )
+            continue
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            json.dump({"pid": os.getpid(), "url": None}, handle)
+        return
+
+
+def _release_lock(run_dir: Path) -> None:
+    (run_dir / LOCK_NAME).unlink(missing_ok=True)
 
 
 WORKING_TREE_ALIASES = {
@@ -56,12 +100,8 @@ WORKING_TREE_ALIASES = {
 
 
 def _toplevel(path: str) -> Path:
-    out = subprocess.run(
-        ["git", "-C", path, "rev-parse", "--show-toplevel"],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    # Through the hardened runner: timeout, no stdin, no terminal prompts.
+    out = changeset_mod.default_runner(["git", "-C", path, "rev-parse", "--show-toplevel"], path)
     if out.returncode != 0:
         raise changeset_mod.ChangesetError(f"{path!r} is not inside a git repository")
     return Path(out.stdout.strip()).resolve()
@@ -83,11 +123,16 @@ def cmd_prepare(args: argparse.Namespace) -> int:
     try:
         slug = changeset_mod.slug_for(target, repo)
         run_dir = Path(args.run_dir) if args.run_dir else _run_dir_for(slug, repo)
-        run_dir.mkdir(parents=True, exist_ok=True)
+        run_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
         cs = changeset_mod.resolve(target, repo, run_dir)
     except changeset_mod.ChangesetError as exc:
+        changeset_mod.cleanup_worktree(repo, run_dir)
         print(f"prepare failed: {exc}", file=sys.stderr)
         return 1
+    except BaseException:
+        # resolve may have created the run worktree before the unexpected failure.
+        changeset_mod.cleanup_worktree(repo, run_dir)
+        raise
     if not cs["files"]:
         changeset_mod.cleanup_worktree(repo, run_dir)
         print(f"prepare failed: no changes found for target {cs['target']!r}", file=sys.stderr)
@@ -148,15 +193,18 @@ def cmd_cleanup(args: argparse.Namespace) -> int:
 def cmd_serve(args: argparse.Namespace) -> int:
     run_dir = Path(args.run_dir).resolve()
     repo: Path | None = None
+    claimed = False
     try:
         from .hosts import get_host
         from .passes import Asker, HostService, Passes
         from .server import ReviewServer
         from .store import Store
 
+        # Claim exclusivity before any setup so two servers cannot race past the check.
+        _claim_lock(run_dir)
+        claimed = True
         meta = json.loads((run_dir / "meta.json").read_text(encoding="utf-8"))
         repo = Path(meta["repo"])
-        _claim_lock(run_dir)
         changeset = json.loads((run_dir / "changeset.json").read_text(encoding="utf-8"))
         graph = json.loads((run_dir / "graph.json").read_text(encoding="utf-8"))
         known = frozenset(f["path"] for f in changeset["files"])
@@ -173,7 +221,7 @@ def cmd_serve(args: argparse.Namespace) -> int:
                 notes.append(text)
 
         passes = Passes(host, store, changeset, run_dir, args.effort, on_note=note)
-        service = HostService(passes, Asker(host, changeset, run_dir, args.effort))
+        service = HostService(passes, Asker(host, changeset, run_dir, args.effort, on_note=note))
         app = ReviewServer(
             store=store,
             changeset=changeset,
@@ -186,15 +234,15 @@ def cmd_serve(args: argparse.Namespace) -> int:
             idle_timeout=args.idle_minutes * 60,
         )
     except Exception as exc:  # noqa: BLE001 - one terminal line for the invoking agent
+        if claimed:
+            _release_lock(run_dir)
         if repo is not None and not isinstance(exc, ServerAlreadyRunning):
             changeset_mod.cleanup_worktree(repo, run_dir)
         print(f"REVIEW-ERROR {_one_line(exc)}", flush=True)
         return 1
 
     def on_signal(_signum, _frame) -> None:
-        if app.outcome.kind == "running":
-            app.outcome.kind = "suspended"
-            app.outcome.path = str(reviews_dir / f"{changeset['slug']}.state.json")
+        app.set_outcome("suspended", str(reviews_dir / f"{changeset['slug']}.state.json"))
         threading.Thread(target=app.stop, daemon=True).start()
 
     signal.signal(signal.SIGTERM, on_signal)
@@ -207,7 +255,7 @@ def cmd_serve(args: argparse.Namespace) -> int:
         print(f"REVIEW-ERROR {_one_line(exc)}", flush=True)
         return 1
     finally:
-        (run_dir / LOCK_NAME).unlink(missing_ok=True)
+        _release_lock(run_dir)
         changeset_mod.cleanup_worktree(repo, run_dir)
     if outcome.kind == "complete":
         print(f"REVIEW-COMPLETE {outcome.path}", flush=True)

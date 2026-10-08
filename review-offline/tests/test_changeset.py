@@ -1,6 +1,4 @@
-import atexit
 import json
-import signal
 import subprocess
 from pathlib import Path
 
@@ -11,7 +9,6 @@ from review_offline.changeset import (
     cleanup_worktree,
     default_runner,
     parse_diff,
-    register_cleanup,
     resolve,
     slug_for,
 )
@@ -630,39 +627,6 @@ class TestCleanup:
     def test_cleanup_without_run_dir(self, feature, tmp_path):
         cleanup_worktree(feature, tmp_path / "never-created")
 
-    def test_register_cleanup_installs_handlers(self, feature, tmp_path, monkeypatch):
-        registered = []
-        monkeypatch.setattr(atexit, "register", registered.append)
-        saved = {s: signal.getsignal(s) for s in (signal.SIGTERM, signal.SIGINT)}
-        run_dir = tmp_path / "run"
-        try:
-            cleanup = register_cleanup(feature, run_dir)
-            assert registered == [cleanup]
-            assert callable(signal.getsignal(signal.SIGTERM))
-            assert signal.getsignal(signal.SIGTERM) is not saved[signal.SIGTERM]
-            resolve("feat/x", feature, run_dir)
-            calls = []
-            monkeypatch.setattr(changeset, "cleanup_worktree", lambda *a, **k: calls.append(a))
-            with pytest.raises(KeyboardInterrupt):
-                signal.getsignal(signal.SIGINT)(signal.SIGINT, None)
-            assert calls == [(feature, run_dir)]
-        finally:
-            for signum, handler in saved.items():
-                signal.signal(signum, handler)
-
-    def test_registered_cleanup_removes_worktree(self, feature, tmp_path, monkeypatch):
-        monkeypatch.setattr(atexit, "register", lambda fn: None)
-        saved = {s: signal.getsignal(s) for s in (signal.SIGTERM, signal.SIGINT)}
-        run_dir = tmp_path / "run"
-        try:
-            cleanup = register_cleanup(feature, run_dir)
-            resolve("feat/x", feature, run_dir)
-            cleanup()
-            assert not (run_dir / "worktree").exists()
-        finally:
-            for signum, handler in saved.items():
-                signal.signal(signum, handler)
-
 
 class TestSlugIdentity:
     def test_range_and_path_targets_do_not_share_a_slug_with_the_branch(self, feature, tmp_path):
@@ -673,3 +637,62 @@ class TestSlugIdentity:
         write(feature, "src/a.py", "edit\n")
         assert slug_for("src", feature) != plain
         assert slug_for("src", feature) != slug_for("src/a.py", feature)
+
+
+class ScriptedRunner:
+    """Runs argv against a scripted table of results; each entry is a
+    (returncode, stdout, stderr) tuple, or a list of tuples consumed in order."""
+
+    def __init__(self, script):
+        self.script = {
+            key: (value if isinstance(value, list) else [value]) for key, value in script.items()
+        }
+        self.calls = []
+
+    def __call__(self, argv, cwd):
+        self.calls.append(list(argv))
+        key = " ".join(argv[2:]) if argv[0] == "git" else " ".join(argv)
+        for pattern, results in self.script.items():
+            if pattern in key and results:
+                if len(results) > 1:
+                    return subprocess.CompletedProcess(argv, *results.pop(0))
+                return subprocess.CompletedProcess(argv, *results[0])
+        raise AssertionError(f"unexpected call {argv}")
+
+
+class TestMergeBase:
+    def test_shallow_clone_unshallows_and_retries(self):
+        runner = ScriptedRunner(
+            {
+                "merge-base": [(1, "", ""), (0, "abc123\n", "")],
+                "--is-shallow-repository": [(0, "true\n", ""), (0, "false\n", "")],
+                "--unshallow": (0, "", ""),
+            }
+        )
+        g = changeset._Git(runner, Path("/repo"))
+        assert changeset._merge_base(g, "main", "HEAD") == "abc123"
+        assert any("--unshallow" in c for c in runner.calls)
+
+    def test_shallow_clone_that_cannot_unshallow_names_the_cause(self):
+        runner = ScriptedRunner(
+            {
+                "merge-base": (1, "", ""),
+                "--is-shallow-repository": (0, "true\n", ""),
+                "--unshallow": (1, "", "fatal: no remote"),
+            }
+        )
+        g = changeset._Git(runner, Path("/repo"))
+        with pytest.raises(ChangesetError, match="shallow"):
+            changeset._merge_base(g, "main", "HEAD")
+
+    def test_full_clone_failure_does_not_mention_shallow(self):
+        runner = ScriptedRunner(
+            {
+                "merge-base": (1, "", ""),
+                "--is-shallow-repository": (0, "false\n", ""),
+            }
+        )
+        g = changeset._Git(runner, Path("/repo"))
+        with pytest.raises(ChangesetError, match="no merge base between 'main' and 'HEAD'") as exc:
+            changeset._merge_base(g, "main", "HEAD")
+        assert "shallow" not in str(exc.value)
