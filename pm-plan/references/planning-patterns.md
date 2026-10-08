@@ -50,7 +50,7 @@ Assess blast radius of a change with two parallel subagents:
 
 ## Plan Templates
 
-Any template below takes an `## Assumptions` section directly after `## Goal` when any decision was made without the user (SKILL.md Step 4).
+Any template below takes the `## Assumptions` section from SKILL.md Step 4, directly after `## Goal`.
 
 ### Bug Fix (Minimal)
 ```markdown

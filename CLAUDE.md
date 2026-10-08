@@ -64,7 +64,7 @@ Slash command `/rebase-pr` that rebases a PR branch onto its base branch, resolv
 
 ## pm-plan
 
-Skill `/pm-plan` that performs deep, multi-phase implementation planning before writing any code. Dispatches parallel `Explore` subagents (via the native `Agent`/`Task` tool) for codebase exploration, plus a one-shot Haiku call for plan-name generation. Small tasks (which include trivial ones) skip subagents and adversarial review; Medium and Large tasks get an adversarial review of the draft plan from the advisor when one is available, otherwise from a read-only `Plan` subagent (inline when neither exists). Safe to run headlessly: clarifying questions and scope calls are answered by the advisor or a best guess recorded under `## Assumptions`, never blocked on. Produces a structured plan at `.ultraplan/<plan-name>.md`.
+Skill `/pm-plan` that performs deep, multi-phase implementation planning before writing any code. Dispatches parallel `Explore` subagents (via the native `Agent`/`Task` tool) for codebase exploration, plus a one-shot Haiku call for plan-name generation. Small tasks (which include trivial ones) skip subagents and adversarial review; Medium and Large tasks get an adversarial review from the advisor, else a read-only `Plan` subagent. Safe to run headlessly: it never blocks on a question, recording guesses under `## Assumptions`. Produces a structured plan at `.ultraplan/<plan-name>.md`.
 
 ## pm-cr
 
