@@ -368,6 +368,32 @@ Trigger phrases: `deepen a module`, `find shallow modules`, `run an architecture
 
 **Credit**: forked from Matt Pocock's [`improve-codebase-architecture`](https://github.com/mattpocock/skills) (`mattpocock/skills`), which is interactive by design — it opens an HTML report and grills you through whichever candidate you pick. The exploration heuristics, candidate-card fields and vocabulary discipline are his; this fork replaces the three interactive joints (the pick, the grilling loop, the GUI deliverable) and adds a terminal step. Upstream is MIT-licensed, Copyright (c) Matt Pocock — compatible with this repo's MIT licence.
 
+### `/vibe` — Drive an Epic to Done
+
+```bash
+npx skills@latest add pmatos/skills/vibe
+```
+
+Solves an issue marked `epic` end to end under **ultracode** (multi-agent `Workflow` orchestration; type `/vibe 123 ultracode` to turn it on): triage every child issue against the current default branch, fix the real gaps in small gated PRs, keep the default branch green, report on a schedule, and hand the human only the decisions that are theirs.
+
+What it does:
+- Resolves the epic (the `epic` label, an `Epic` issue type or an `epic(...)` title) and its open children from the paginated sub-issues API, task lists and `Part of #N` lines, and reads the epic's gate criteria as the definition of done.
+- Runs a **read-only triage wave** per theme (`done` / `partial` / `open` / `needs-ruling`, with evidence; the orchestrator verifies before it closes anything), then fixes the implementable gaps with one issue per agent and one idea per PR, staged with a stop rule so nothing is forced.
+- Treats parallelism as a **parameter**: parallel tracks only for disjoint files and non-measurement criteria, serial (`--serial`) when criteria are performance numbers or tracks share a hot file.
+- Runs every heavy job through the bundled `scripts/capped.sh` — a transient systemd scope under one shared slice with a memory cap, no swap, an optional wall limit and a shared lock — after an uncapped runaway job once took down a whole terminal and every agent with it.
+- Enforces merge discipline: the orchestrator merges one PR at a time, whole-suite gates on the final head SHA, post-merge checks run locally first, the post-merge workflows green before the next merge, and **nothing merges onto a red default branch except its fix**.
+- Never moves a gate threshold, exclusion rule, baseline, contract, language semantics or a release step without a human ruling; each question is a short decision memo, recorded in one rulings comment on the epic (with a list of what proceeded without a ruling, and why).
+- Reports from `gh` and CI, never from memory, on a session cron that **starts no work**; completion notices drive the loop so nothing sits idle.
+- Closes with a **read-only close-out audit** of every merged-but-open child, and writes the gap list instead of closing an epic that is not done.
+
+Flags: `ultracode`, `--serial`, `--max-parallel N`, `--no-merge`, `--report-every 1h`.
+
+Trigger phrases: `vibe an epic`, `vibe #N`, `drive epic #N to done`, `solve the epic`, `work through the epic's sub-issues`.
+
+**Requires**: [`gh`](https://cli.github.com/) with write access, a git repository whose CI is the merge gate, and Linux with `systemd-run --user` for the memory caps (the wrapper refuses to run uncapped unless told to). Multi-agent workflows need the word `ultracode` in your own message; without it the skill continues with a few `Agent` calls.
+
+**Credit**: the per-issue brief, the staging stop rule, the read-only close-out audit and the report-only cron come from the jsse epic loop (`pmatos/jsse`).
+
 ## License
 
 MIT
