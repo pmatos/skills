@@ -112,6 +112,9 @@ When a criterion is a number:
   and no closing words near the number, epic number included. A bare `(#N)` suffix is
   harmless but jsse-style repos avoid it on partial stages as a precaution.
 - A merged-but-open child goes through the close-out audit, not an optimistic close.
+- **Closed-as-measured**: criteria unmet but with numbers, the reason, and a stated decision
+  rule ("regression-free, or don't force it"). Allowed only when the user stated the rule up
+  front or confirms the list before the epic closes; the thread records the miss.
 - Every closure comment states evidence: the commit, the measured values, the fixtures.
 - Triage agents never close; the orchestrator verifies the evidence first.
 

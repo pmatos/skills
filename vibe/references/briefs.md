@@ -28,10 +28,12 @@ Rules that never bend:
   delegates the merge: before merging check that the default branch's latest CI run is
   green or that this PR is the declared fix.]
 
-Waiting: run long steps with run_in_background (or a Monitor until-loop), writing a log and
-an exit-code file; a finished background command wakes you. Foreground waits are at most
-about ten minutes per call. A detached process or a lock queue does not wake you: never end
-your turn on one. Leave durable state: push branches, comment on the PR or issue as you go.
+Waiting: wait in the FOREGROUND, in blocking calls (an until loop on a log and an exit-code
+file, or a blocking flock) of at most about ten minutes each, repeated until the job is done.
+A background job, a detached process or a lock queue does not reliably wake a subagent:
+never end your turn while work is pending. [Workflow steps and the orchestrator may use
+run_in_background; subagents should not rely on it.] Leave durable state: push branches,
+comment on the PR or issue as you go.
 Do not end your turn until the task is complete or you hit a real blocker; the output of a
 review or simplify step is one step, keep going.
 ```
@@ -58,7 +60,8 @@ stage where the next cannot be had without a regression; comment the measurement
 
 Hard constraints: no regressions [project: the control set and tolerances]; if the
 improvement cannot be had without one, do NOT force it: comment on the issue with
-measurements instead. Known hazards in this codebase: <layout-sensitive hot paths, size
+measurements instead (the orchestrator may close the issue as measured under a stated
+decision rule). Known hazards in this codebase: <layout-sensitive hot paths, size
 ratchet, generated files, dual-implementation rules>. A ruling-bound part is not yours:
 comment the exact question on the issue and report it in needsRuling.
 
@@ -67,7 +70,9 @@ whether #<N> is done; anything filed; cleanup done.
 ```
 
 Workflow result schema: `pr` (number), `sha` (string), `gatesRun` (array of strings),
-`gatesNotRun` (array), `needsRuling` (string, empty if none), `notes` (string).
+`gatesNotRun` (array), `needsRuling` (string, empty if none), `notes` (string). Plain `Agent`
+subagents return prose: end the brief with "finish your report with a block: PR, SHA, gates
+run, gates NOT run, needsRuling", parse it, and verify from `git` and `gh`.
 
 ## Triage brief (read-mostly)
 
@@ -93,7 +98,9 @@ documents, decide which criteria are met or unmet (cite numbers), and judge whet
 worthwhile regression-free implementation remains or whether to close with documented
 measurements. Final report: one table row per issue: number | title | criteria met/unmet
 with numbers | recommendation (CLOSE-with-measurements | IMPLEMENT-remaining: what, size,
-risk | KEEP-OPEN: why) | draft closing comment (at most 6 lines) for CLOSE rows.
+risk | KEEP-OPEN: why) | draft closing comment (at most 6 lines) for CLOSE rows. A child with
+unmet criteria but solid numbers is CLOSE-as-measured: state the unmet criteria, the numbers, the
+reason and the decision rule that justifies it.
 ```
 
 ## Gate-evidence brief

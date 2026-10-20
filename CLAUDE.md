@@ -104,4 +104,4 @@ Slash command `/review-offline` that turns a changeset (PR, branch, range, `HEAD
 
 ## vibe
 
-Slash command `/vibe` that drives an issue marked `epic` to closure under ultracode: read-only triage of every child against the current default branch, gated fix PRs under memory caps (`scripts/capped.sh`), orchestrator-owned merges that keep the default branch green, a report-only schedule, and decision memos for the rulings only a human can make. Ends with a read-only close-out audit; an epic that is not fully met gets a gap list, not a closure.
+Slash command `/vibe` that drives an issue marked `epic` to closure under ultracode: read-only triage of every child against the current default branch, gated fix PRs under memory caps (`scripts/capped.sh`), orchestrator-owned merges that keep the default branch green, a report-only schedule, and decision memos for the rulings only a human can make. Ends with a read-only close-out audit; children may be closed-as-measured under a rule the user stated, and an epic that is not fully met gets a gap list, not a closure.

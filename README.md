@@ -384,7 +384,7 @@ What it does:
 - Enforces merge discipline: the orchestrator merges one PR at a time, whole-suite gates on the final head SHA, post-merge checks run locally first, the post-merge workflows green before the next merge, and **nothing merges onto a red default branch except its fix**.
 - Never moves a gate threshold, exclusion rule, baseline, contract, language semantics or a release step without a human ruling; each question is a short decision memo, recorded in one rulings comment on the epic (with a list of what proceeded without a ruling, and why).
 - Reports from `gh` and CI, never from memory, on a session cron that **starts no work**; completion notices drive the loop so nothing sits idle.
-- Closes with a **read-only close-out audit** of every merged-but-open child, and writes the gap list instead of closing an epic that is not done.
+- Closes with a **read-only close-out audit** of every merged-but-open child. A child can be closed-as-measured under a decision rule you stated; an epic that is not fully met gets a gap list, not a closure.
 
 Flags: `ultracode`, `--serial`, `--max-parallel N`, `--no-merge`, `--report-every 1h`.
 
@@ -392,7 +392,7 @@ Trigger phrases: `vibe an epic`, `vibe #N`, `drive epic #N to done`, `solve the 
 
 **Requires**: [`gh`](https://cli.github.com/) with write access, a git repository whose CI is the merge gate, and Linux with `systemd-run --user` for the memory caps (the wrapper refuses to run uncapped unless told to). Multi-agent workflows need the word `ultracode` in your own message; without it the skill continues with a few `Agent` calls.
 
-**Credit**: the per-issue brief, the staging stop rule, the read-only close-out audit and the report-only cron come from the jsse epic loop (`pmatos/jsse`).
+**Credit**: the per-issue brief, the staging stop rule, the read-only close-out audit, the closed-as-measured verdict and the report-only cron come from the jsse epic loop (`pmatos/jsse`). The orchestrator-owned merges, post-merge waits and memory caps are this skill's own design.
 
 ## License
 

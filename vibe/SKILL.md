@@ -11,7 +11,8 @@ Take a GitHub issue marked **epic** and push it to closure the way a long, super
 engineering push works: triage every child against the code as it is now, fix the real
 gaps in small gated PRs, keep the default branch green, report on a schedule, and hand
 the human only the decisions that are theirs. The epic closes only when every child is
-met with evidence; whatever is not met is reported as a gap, never glossed.
+met with evidence or closed-as-measured under a rule the user stated; whatever is not met is
+reported as a gap, never glossed.
 
 Use it for a multi-issue epic. A single issue is `investigate`; an unattended,
 question-free run is `pm-deepen`. This skill reports to a person and asks for rulings.
@@ -36,7 +37,9 @@ compaction), and paste the **absolute path** into every brief; later text abbrev
 
 - `<epic>`: an issue number, `#N`, `owner/repo#N` or a URL. Parse it first.
 - `ultracode`: see below; this word is how the user turns the mode on.
-- `--serial`: one pipeline agent at a time (Step 4). Default: parallel only where safe.
+- `--serial`: one pipeline agent at a time (Step 4). Default: parallel only where safe, and
+  serial whenever the epic's criteria mention benchmarks or other measured numbers; pass
+  `--max-parallel N` to override.
 - `--max-parallel N`: cap on concurrent fix agents (default 3 on the `Agent` path; on the
   `Workflow` path shape the pipeline's concurrency to it).
 - `--no-merge`: every PR stops at "rebased, gated on its final head, checklist ticked,
@@ -124,11 +127,14 @@ These go verbatim into every agent's brief (`references/briefs.md`).
   is a finding to report (cap kill or timeout), never a reason to raise the cap.
 - Scratch lives in a per-agent directory; worktrees and branches are removed when a PR
   merges. Stage explicit paths.
-- Waiting: start long steps with `run_in_background: true` (or a Monitor until-loop),
-  writing a log and an exit-code file; the finished command wakes you. Foreground waits are
-  at most about ten minutes per call. Only harness-tracked commands wake an agent: a
-  detached process (`nohup`, `setsid`) or a lock queue does not, so never end a turn on
-  one. The orchestrator also ends turns between events so scheduled ticks can fire.
+- Waiting. The **orchestrator** and **Workflow** steps start long jobs with
+  `run_in_background: true` (or a Monitor until-loop), writing a log and an exit-code
+  file; the finished command wakes them, and the orchestrator ends turns between events so
+  scheduled ticks can fire. **Named subagents (Agent tool) are not reliably woken** by a
+  background job: an agent that ended its turn on one was never resumed. Subagents wait in
+  the foreground, in blocking calls (an `until` loop or a blocking `flock`) of at most about
+  ten minutes each, repeated until the job is done, and never end a turn while work is
+  pending. A detached process (`nohup`, `setsid`) or a lock queue wakes nobody.
 - Leave durable state (pushed branches, PR and issue comments) so a restart can continue;
   agents die on transient API errors.
 
@@ -156,6 +162,8 @@ or checks the evidence, then closes with the evidence comment. See `references/b
   `gates green at <sha>` PR comment if the template has none), required checks green. They
   return `{pr, sha, gatesRun, gatesNotRun, needsRuling}`. The orchestrator merges
   (Step 5). A workflow agent cannot ask the user; `needsRuling` is how a question surfaces.
+  `Agent`-tool subagents return prose, not a schema: ask for those fields in a fixed block at
+  the end of the final report, parse it, and verify from `git` and `gh` anyway.
 - Reviews run inline (read the PR's own diff in the agent's own worktree). Skill-launched
   review forks end the agent's turn early or review the wrong checkout; if a review skill is
   used, its output is one step and the agent keeps going.
@@ -225,8 +233,13 @@ If no answer arrives, continue other work and list the question in every report.
 - **Resume**: `references/loop.md`, Resuming.
 - **Close-out**: launch a **read-only audit agent**: for every child merged but still open,
   a table of acceptance criteria met or unmet with numbers, a recommendation, and a draft
-  closing comment. Close children with a measurements comment. Close the epic only when all
-  are done with evidence; otherwise write the gap list. When the queue is empty and only
+  closing comment. Close children with a measurements comment. A child whose criteria are
+  not all met may be **closed-as-measured** (a fourth verdict next to done, partial and
+  open): the numbers, the reason, and the decision rule that justifies it (for example
+  "regression-free or don't force it"). That needs the user to have stated the rule up front
+  or to confirm the list before the epic closes; record it in the rulings comment. Close the
+  epic only when every child is done or closed-as-measured with evidence; otherwise write
+  the gap list. When the queue is empty and only
   `human-needed` or blocked items remain, that is the end: delete the cron job, remove
   worktrees, release locks, finalise the rulings comment, and report what shipped, what was
   measured, what was ruled by whom, and what remains.
