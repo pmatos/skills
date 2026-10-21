@@ -15,19 +15,22 @@
 #
 #   -n          do not take the shared lock (small runs); default cap drops to 12 GB
 #   -m GB       RAM cap in whole GB (default 24 with the lock, 12 without, never above
-#               70% of RAM; refused above VIBE_MAX_MEM_GB (default 32) or total RAM)
+#               70% of RAM; refused above VIBE_MAX_MEM_GB (default 32) or the shared slice cap)
 #   -t SECONDS  kill the command after this wall-clock time, counted after the lock is held
-#   -w SECONDS  give up waiting for the lock after this long (exit 75)
+#   -w SECONDS  give up waiting for the lock after this long (exit 75; incompatible with -n)
 #   -l LOCKFILE lock path (default $VIBE_LOCK, else $XDG_RUNTIME_DIR/vibe-heavy.lock,
 #               else /tmp/vibe-heavy.lock)
 #   -h          print this help
 #
 # Exit codes: the command's own; 124 timeout; 137 or 143 mean a signal killed the command
-# (the memory cap or the timeout's kill; check `journalctl --user -k | grep -i oom` and
+# (the whole job is killed if any worker hits the memory cap; check `journalctl --user -k | grep -i oom` and
 # report it as a finding, never raise the cap); 2 usage error; 3 user scopes unavailable
 # (set VIBE_ALLOW_UNCAPPED=1 to run uncapped, without the memory cap); 75 lock wait timed out.
 #
 # The lock is not inherited by processes the command leaves behind (flock -o).
+# Stop a running job with systemctl --user stop <printed-scope>, then wait for this wrapper.
+# Killing only the wrapper PID leaves its scope running. A queued lock waiter has no scope
+# yet; cancel that wait by its recorded flock PID.
 
 set -euo pipefail
 
@@ -69,16 +72,24 @@ shift $((OPTIND - 1))
 
 positive_int() { [[ "$1" =~ ^[1-9][0-9]*$ ]]; }
 
+positive_int "$max_mem" || die "VIBE_MAX_MEM_GB wants a positive whole number of GB, got '$max_mem'"
+[[ "$use_lock" == 1 || -z "$lock_wait" ]] || die "-w requires the shared lock; do not combine it with -n"
+
 total_gb=0
 if [[ -r /proc/meminfo ]]; then
   total_gb=$(awk '/^MemTotal:/ { print int($2 / 1048576) }' /proc/meminfo)
 fi
 limit_gb=$((total_gb * 7 / 10))
-((limit_gb >= 1)) || limit_gb=$max_mem
+if ((total_gb > 0)); then
+  ((limit_gb >= 1)) || die "70% of host RAM is below the minimum 1 GB cap"
+else
+  die "cannot determine host RAM from /proc/meminfo" 3
+fi
 
 if [[ -z "$mem" ]]; then
   if [[ "$use_lock" == 1 ]]; then mem=24; else mem=12; fi
   ((mem <= limit_gb)) || mem=$limit_gb
+  ((mem <= max_mem)) || mem=$max_mem
 else
   positive_int "$mem" || die "-m wants a positive whole number of GB, got '$mem'"
 fi
@@ -87,15 +98,17 @@ if [[ -n "$lock_wait" ]]; then positive_int "$lock_wait" || die "-w wants a posi
 if ((mem > max_mem)); then
   die "refusing a cap above ${max_mem} GB (raise VIBE_MAX_MEM_GB deliberately)"
 fi
-if ((total_gb > 0 && mem > total_gb)); then
-  die "refusing a cap of ${mem} GB on a host with ${total_gb} GB of RAM"
+if ((mem > limit_gb)); then
+  die "refusing a cap of ${mem} GB above the shared slice cap of ${limit_gb} GB (70% of host RAM)"
 fi
 high=$((mem * 9 / 10))
 ((high >= 1)) || high=1
 
-cmd=("$@")
+# Exec via bash so missing/non-executable commands consistently return 127/126, with
+# or without timeout (systemd-run itself otherwise returns a different setup status).
+cmd=(bash -c 'exec "$@"' capped-command "$@")
 if [[ -n "$tmo" ]]; then
-  cmd=(timeout -k 20 "$tmo" "$@")
+  cmd=(timeout -k 20 "$tmo" "${cmd[@]}")
 fi
 
 lock=()
@@ -111,20 +124,28 @@ run_uncapped() {
   "${lock[@]}" "${cmd[@]}"
 }
 
-stamp="${XDG_RUNTIME_DIR:-/tmp}/vibe-capped.ok"
 if ! command -v systemd-run >/dev/null 2>&1; then
   rc=0
   run_uncapped "systemd-run not found" || rc=$?
   exit "$rc"
 fi
-if [[ ! -e "$stamp" ]]; then
-  if systemd-run --user --scope --quiet --collect -p MemoryMax=64M true >/dev/null 2>&1; then
-    : >"$stamp" 2>/dev/null || true
-  else
-    rc=0
-    run_uncapped "systemd-run --user scopes are unavailable (no user bus or no memory controller)" || rc=$?
-    exit "$rc"
-  fi
+# Probe the kernel effect, not just acceptance of systemd properties. Do this each
+# invocation: a cached success can outlive controller delegation or manager changes.
+# The probe expands its own cgroup path inside the scope.
+# shellcheck disable=SC2016
+if ! systemd-run --user --scope --quiet --collect --expand-environment=no --slice=vibe.slice \
+  -p MemoryMax=64M -p MemorySwapMax=0 -p OOMPolicy=kill \
+  sh -c '
+    group=$(sed -n "s/^0:://p" /proc/self/cgroup)
+    test -n "$group" || exit 1
+    base=/sys/fs/cgroup$group
+    test "$(cat "$base/memory.max")" = 67108864 &&
+      test "$(cat "$base/memory.swap.max")" = 0 &&
+      test "$(cat "$base/memory.oom.group")" = 1
+  ' >/dev/null 2>&1; then
+  rc=0
+  run_uncapped "user scopes cannot enforce memory/swap caps and group-wide OOM killing" || rc=$?
+  exit "$rc"
 fi
 
 # One shared slice caps the sum of all jobs; best effort, the per-job caps still apply.
@@ -132,12 +153,21 @@ if ((total_gb > 0)); then
   systemctl --user set-property --runtime vibe.slice "MemoryMax=${limit_gb}G" MemorySwapMax=0 >/dev/null 2>&1 || true
 fi
 
-scope=(systemd-run --user --scope --quiet --collect --slice=vibe.slice
-  -p "MemoryMax=${mem}G" -p "MemoryHigh=${high}G" -p MemorySwapMax=0 -p TasksMax=4096 --)
+scope_unit="vibe-capped-$$.scope"
+scope=(systemd-run --user --scope --quiet --collect --expand-environment=no --slice=vibe.slice --unit="$scope_unit"
+  -p OOMPolicy=kill -p "MemoryMax=${mem}G" -p "MemoryHigh=${high}G" -p MemorySwapMax=0 -p TasksMax=4096 --)
 
 rc=0
-"${lock[@]}" "${scope[@]}" "${cmd[@]}" || rc=$?
-if [[ "$rc" == 137 || "$rc" == 143 ]]; then
+# Announce the stop handle only after acquiring the lock; a queued job has no scope.
+# shellcheck disable=SC2016 # Positional parameters belong to the launcher shell.
+"${lock[@]}" bash -c '
+  echo "capped.sh: scope $1; stop with: systemctl --user stop $1" >&2
+  shift
+  exec "$@"
+' capped-launch "$scope_unit" "${scope[@]}" "${cmd[@]}" || rc=$?
+if [[ "$rc" == 124 ]]; then
+  echo "capped.sh: exit 124: timeout status (wall limit or command's own exit); report it" >&2
+elif [[ "$rc" == 137 || "$rc" == 143 ]]; then
   echo "capped.sh: exit $rc: killed by a signal (memory cap, or the timeout's kill); check 'journalctl --user -k | grep -i oom' and report it" >&2
 fi
 exit "$rc"
