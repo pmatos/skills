@@ -17,18 +17,31 @@ The scheduled report only reports.
 
 Fix agents stop at **ready** (rebased, gated on the final head, checklist ticked or a
 `gates green at <sha>` comment, required checks green) and return a structured result. The
-orchestrator merges, one PR at a time, under a merge lock so two merges never race:
+single orchestrator merges, one PR at a time; it finishes post-merge CI before starting
+the next merge:
 
-1. Check the default branch's CI is green: `gh run list --branch <default> --limit 5 --json status,conclusion,headSha`
-   against `git rev-parse origin/<default>`; refuse unless it is green or this PR is the
-   declared fix.
-2. Rebase on the newest default branch; if the head changed, the gates restart.
+1. Fetch the default branch and record its current SHA (`git fetch origin <default>`,
+   then `git rev-parse origin/<default>`). Query **all pages** of workflows for that SHA:
+   `gh api --method GET --paginate repos/{owner}/{repo}/actions/runs -f branch=<default>
+   -f head_sha=<sha> -f per_page=100
+   --jq '.workflow_runs[] | {id,workflow_id,event,status,conclusion,head_sha}'`.
+   Match the expected workflows from the repo's CI policy; a missing, queued or running
+   required workflow is not green. Require completed successful required workflows (or an
+   explicit policy-allowed neutral/skipped result); record advisory results separately.
+   No runs is not evidence of green: wait for expected runs or record a policy-backed
+   "no CI applies" decision. Refuse a red branch unless this PR is its declared fix.
+   Re-check the remote head before merging; if it moved, repeat this check.
+2. Rebase on the newest default branch with `rebase-pr`: capture the remote PR head before
+   rebasing, and publish only with its explicit-SHA `--force-with-lease`. If the head
+   changed, restart the gates on the pushed final head.
 3. Merge by the method the repo allows. Never `--auto` unless auto-merge is enabled.
-4. Wait for the post-merge workflows on the merge commit to be green before releasing the
-   lock. A merge that touched `CLAUDE.md`, `AGENTS.md`, `docs/agents/`, hooks, CI or lint
+4. Wait for the post-merge workflows on the merge commit to be green before starting the
+   next merge. Use the same paginated SHA-specific query and expected-workflow check above.
+   A merge that touched `CLAUDE.md`, `AGENTS.md`, `docs/agents/`, hooks, CI or lint
    config triggers a policy re-read (SKILL.md Step 6).
 
-If the user passes `--no-merge`, stop at step 0 and report the PR as ready.
+If the user passes `--no-merge`, complete steps 1 and 2 and all final-head gates and
+required checks, then stop before step 3 and report the PR as ready.
 
 ## Throughput, honestly
 
@@ -49,7 +62,9 @@ many agents you start. So:
 ## The gate set (generic)
 
 Derive the project's list from its CI workflows and contributor docs, then run, on the
-**final head SHA** after the last rebase and push:
+**final head SHA** after the last rebase and push. First review the PR's own diff inline
+in the agent's own worktree, apply findings, and simplify. Finish these edits before the
+final push and the gate chain below; any later edit or rebase restarts the gates:
 
 1. The full build and the project's self-hosting or bootstrap check, if it has one.
 2. The **whole** test suite exactly as CI runs it, including any parity or differential
@@ -62,7 +77,6 @@ Derive the project's list from its CI workflows and contributor docs, then run, 
    propose it with a memo.
 5. Touched-area checks (generated files up to date, docs regenerated, schema or contract
    checks).
-6. A review of the PR's own diff, inline, in the agent's own worktree, and a simplify pass.
 
 Never regenerate a baseline, snapshot, expected-output file or skip list to make a failure
 pass; only when the change legitimately adds passing tests, and say so in the PR.
@@ -143,6 +157,6 @@ the revert command. When in doubt, ask.
 
 A session restart loses the schedule and the in-memory queue. Rebuild from durable state:
 the rulings comment on the epic (capped.sh path, cron id, run ids), `gh pr list --state all
---search 'Part of #<epic>'`, `git worktree list`, the open children, and the default branch's
+--search '"Part of #<epic>" in:body'`, `git worktree list`, the open children, and the default branch's
 CI. Recreate the cron job, resume dead named agents by name, relaunch workflows with
 `resumeFromRunId`, and continue from the first unmet step. Say what was found.
