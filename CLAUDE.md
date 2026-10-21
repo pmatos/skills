@@ -101,3 +101,7 @@ Slash command `/pm-triage` that runs a per-project decision session over open Gi
 ## review-offline
 
 Slash command `/review-offline` that turns a changeset (PR, branch, range, `HEAD`, path or working tree) into a local webpage where the user and an agent review the code together. The page opens on an animated architecture and data-flow picture (rebuilt from `show-me` and `pr-lens`, with no dependency on either), arrives pre-loaded with correctness and cleanup suggestions (embedded angles derived from `pm-cr` and `pm-simplify`), and lets the user accept, edit and add comments or ask the agent. **Finish review** writes `.reviews/<slug>.md` and the background server's exit tells the invoking agent. The agent features run headless through the invoking harness (`claude`, `codex` or `omp`), read-only and config-isolated. It never posts, comments, pushes or edits. Python stdlib only; Preact + htm are vendored with no build step. Run its tests with `uv run --with pytest pytest review-offline/tests`.
+
+## vibe
+
+Slash command `/vibe` that drives an issue marked `epic` to closure under ultracode: read-only triage of every child against the current default branch, gated fix PRs under memory caps (`scripts/capped.sh`), orchestrator-owned merges that keep the default branch green, a report-only schedule, and decision memos for the rulings only a human can make. Ends with a read-only close-out audit; children may be closed-as-measured under a rule the user stated, and an epic that is not fully met gets a gap list, not a closure.
