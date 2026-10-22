@@ -1,7 +1,8 @@
 # Agent briefs and workflow templates
 
-Fill the `<…>` slots. `<CAPPED>` is the absolute path of `vibe/scripts/capped.sh` resolved
-in Step 0: substitute it before dispatch. Mark project-specific rules in a brief so the next
+Fill the `<…>` slots. `<CAPPED>` is the absolute path of `vibe/scripts/capped.sh` and
+`<REBASE_PR>` that of the `rebase-pr` skill directory, both resolved in Step 0: substitute
+them before dispatch. Mark project-specific rules in a brief so the next
 epic can swap them. The per-issue brief is adapted from a long-running epic loop.
 
 ## Common preamble for every agent
@@ -13,6 +14,11 @@ Work in your OWN git worktree and scratch directory, never the main checkout. Co
 <identity from the run config>. Use the newest default branch (git fetch) and rebase before
 gating: resolve conflicts by hand, run <REBASE_PR>/scripts/capture-lease.sh <remote> <branch> BEFORE
 the rebase and <REBASE_PR>/scripts/safe-force-push.sh <remote> <branch> <captured-sha> to publish.
+<remote> is the remote you push to (normally origin) and <branch> is your PR branch; push the
+branch once with git push -u origin HEAD BEFORE the first capture. capture-lease.sh exit 0 or
+3 (3 = you have unpushed commits) means proceed with the SHA it prints; exit 2, 4 or 5 means
+stop and report (4 = another writer is active, 5 = this checkout is not the PR branch).
+safe-force-push.sh exit 4 or 5 also means stop; never retry with --force.
 Do not use rebase-pr's own gate step: your gates go through <CAPPED>. Never plain --force;
 if the lease fails, stop and re-inspect. Publish initially with git push -u origin HEAD.
 
@@ -147,16 +153,19 @@ Landing is not a workflow: the orchestrator merges inline (SKILL.md Step 5).
 ```text
 // Workflow 1 — triage only; return every theme, including failures
 export const meta = { name: 'epic-<N>-triage', description: '…', phases: [{title: 'Triage'}] }
-// Themes run in parallel; when the reproducers are measurements, replace Promise.all with
-// a sequential for-loop so themes do not confound each other.
-const results = await Promise.all(THEMES.map(async theme => {
-  const triage = await agent(TRIAGE_BRIEF(theme), {schema: TRIAGE, effort: 'medium'})
-  if (!triage || !Array.isArray(triage.items)) {
+// THEME_BATCHES holds <= MAX_PARALLEL themes per batch (one when the reproducers are
+// measurements, so themes do not confound each other).
+const results = []
+for (const batch of THEME_BATCHES) {
+  results.push(...await Promise.all(batch.map(async theme => {
+    try {
+      const triage = await agent(TRIAGE_BRIEF(theme), {schema: TRIAGE, effort: 'medium'})
+      if (triage && Array.isArray(triage.items)) return {theme, triage, incomplete: false}
+    } catch (e) { log('Triage theme threw: ' + theme) }
     log('Incomplete triage theme: ' + theme)
     return {theme, triage: null, incomplete: true}
-  }
-  return {theme, triage, incomplete: false}
-}))
+  })))
+}
 return results
 
 // ORCHESTRATOR BARRIER: retain triage evidence; retry incomplete themes, verify done
@@ -183,9 +192,8 @@ return fixes
 // With --no-merge, ensure latest rebase, final-head gates and required checks, then stop.
 ```
 
-`THEMES`, `TRIAGE`, `FIX_BATCHES`, `MAX_PARALLEL`, `READY`, and the brief functions are
-yours to define from the templates above. `<REBASE_PR>` is the absolute path of the
-`rebase-pr` skill directory, resolved like `<CAPPED>`. Notes that cost time once:
+`THEME_BATCHES`, `TRIAGE`, `FIX_BATCHES`, `MAX_PARALLEL`, `READY`, and the brief functions are
+yours to define from the templates above.  Notes that cost time once:
 
 - Prompts are template literals: use single quotes inside them. A stray backtick ends the
   string and the script fails to parse.

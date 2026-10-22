@@ -31,12 +31,16 @@ the next merge:
    No runs is not evidence of green: wait for expected runs or record a policy-backed
    "no CI applies" decision. Refuse a red branch unless this PR is its declared fix.
    Re-check the remote head before merging; if it moved, repeat this check.
-2. Rebase on the newest default branch, resolving conflicts by hand. Use only
+2. Rebase on the newest default branch, resolving conflicts by hand, in the PR's own
+   worktree: reuse the agent's (idle at READY, tracking `origin/<branch>`), or if it is gone
+   `git worktree add -B <branch> <dir> origin/<branch>` then
+   `git -C <dir> branch --set-upstream-to=origin/<branch>`. Run the scripts and the gates
+   from that directory, never the main checkout: the scripts compare and push `HEAD`. Use only
    `rebase-pr`'s scripts: `capture-lease.sh <remote> <branch>` before the rebase and
    `safe-force-push.sh <remote> <branch> <captured-sha>` to publish (explicit-SHA
    `--force-with-lease`). Do not run `rebase-pr`'s own gate step: it would run the whole
    suite uncapped. If the head changed, run the final-head gates (The gate set, through
-   `capped.sh`) on the pushed head; this is the only PR gated just in time (SKILL.md Step 5).
+   `capped.sh`) on the pushed head; there is no exemption (SKILL.md Step 5).
 3. Merge by the method the repo allows. Never `--auto`.
 4. Wait for the post-merge workflows on the merge commit to be green before starting the
    next merge. Use the same paginated SHA-specific query and expected-workflow check above.
@@ -55,8 +59,8 @@ many agents you start. So:
 - Start agents to investigate and code in parallel, but queue gates once, behind the lock,
   and let them wait; never cancel a queued gate because it has waited.
 - Do not add a fourth agent to a three-deep lock queue: it adds latency, not throughput.
-- Prefer one correct PR to three that each need a rebase and a re-gate; gate only the PR
-  next to merge on its final head, and let the others wait as development gates.
+- Prefer one correct PR to three that each need a rebase and a re-gate: every merge moves
+  the default branch, so each queued PR pays the gate again after the merge ahead of it.
 - Gates that must not share the machine (timings, memory peaks) run only when the load is
   low, by a bar you set in preflight (an example from the runs this was written from: other
   runnable tasks at p95 of 6 or fewer); a contended number is labelled, never scored.

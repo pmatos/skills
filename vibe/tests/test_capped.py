@@ -184,3 +184,43 @@ def test_scope_stop_kills_children_and_releases_lock(tmp_path):
             if process.poll() is None:
                 process.kill()
                 process.wait(timeout=10)
+
+
+def fake_systemd_run(tmp_path, body):
+    fake = tmp_path / "systemd-run"
+    fake.write_text(f"#!/bin/sh\n{body}\n")
+    fake.chmod(0o755)
+    return {"PATH": f"{tmp_path}:{os.environ['PATH']}"}
+
+
+def test_probe_error_is_surfaced_in_refusal(tmp_path):
+    env = fake_systemd_run(tmp_path, "echo 'Unknown option --bogus' >&2; exit 1")
+    result = run("-n", "-m", "1", "--", "echo", "UNSAFE_COMMAND_RAN", env=env)
+    assert result.returncode == 3
+    assert "cannot enforce" in result.stderr
+    assert "Unknown option --bogus" in result.stderr
+    assert "UNSAFE_COMMAND_RAN" not in result.stdout
+
+
+def test_uncapped_override_runs_the_command(tmp_path):
+    env = fake_systemd_run(tmp_path, "exit 1")
+    env["VIBE_ALLOW_UNCAPPED"] = "1"
+    result = run("-n", "-m", "1", "--", "echo", "RAN", env=env)
+    assert result.returncode == 0
+    assert result.stdout.strip() == "RAN"
+    assert "WITHOUT a memory cap" in result.stderr
+
+
+def test_lock_wait_timeout_exits_75_and_says_so(tmp_path):
+    lock = tmp_path / "held.lock"
+    env = fake_systemd_run(tmp_path, "exit 1")
+    env["VIBE_ALLOW_UNCAPPED"] = "1"
+    holder = subprocess.Popen(["flock", str(lock), "sleep", "10"])
+    try:
+        time.sleep(0.5)
+        result = run("-m", "1", "-w", "1", "-l", str(lock), "--", "true", env=env)
+    finally:
+        holder.kill()
+        holder.wait(timeout=10)
+    assert result.returncode == 75
+    assert "lock wait timed out" in result.stderr

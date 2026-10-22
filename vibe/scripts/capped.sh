@@ -37,6 +37,11 @@
 
 set -euo pipefail
 
+if ((BASH_VERSINFO[0] < 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] < 4))); then
+  echo "capped.sh: needs bash 4.4 or newer" >&2
+  exit 2
+fi
+
 usage() {
   local code="${1:-2}"
   if [[ "$code" == 0 ]]; then
@@ -78,6 +83,15 @@ positive_int() { [[ "$1" =~ ^[1-9][0-9]*$ ]]; }
 positive_int "$max_mem" || die "VIBE_MAX_MEM_GB wants a positive whole number of GB, got '$max_mem'"
 [[ "$use_lock" == 1 || -z "$lock_wait" ]] || die "-w requires the shared lock; do not combine it with -n"
 
+if [[ -n "$mem" ]]; then
+  positive_int "$mem" || die "-m wants a positive whole number of GB, got '$mem'"
+fi
+if [[ -n "$tmo" ]]; then positive_int "$tmo" || die "-t wants a positive whole number of seconds, got '$tmo'"; fi
+if [[ -n "$lock_wait" ]]; then positive_int "$lock_wait" || die "-w wants a positive whole number of seconds, got '$lock_wait'"; fi
+if [[ -n "$mem" ]] && ((mem > max_mem)); then
+  die "refusing a cap above ${max_mem} GB (raise VIBE_MAX_MEM_GB deliberately)"
+fi
+
 total_gb=0
 if [[ -r /proc/meminfo ]]; then
   total_gb=$(awk '/^MemTotal:/ { print int($2 / 1048576) }' /proc/meminfo)
@@ -93,13 +107,6 @@ if [[ -z "$mem" ]]; then
   if [[ "$use_lock" == 1 ]]; then mem=24; else mem=12; fi
   ((mem <= limit_gb)) || mem=$limit_gb
   ((mem <= max_mem)) || mem=$max_mem
-else
-  positive_int "$mem" || die "-m wants a positive whole number of GB, got '$mem'"
-fi
-if [[ -n "$tmo" ]]; then positive_int "$tmo" || die "-t wants a positive whole number of seconds, got '$tmo'"; fi
-if [[ -n "$lock_wait" ]]; then positive_int "$lock_wait" || die "-w wants a positive whole number of seconds, got '$lock_wait'"; fi
-if ((mem > max_mem)); then
-  die "refusing a cap above ${max_mem} GB (raise VIBE_MAX_MEM_GB deliberately)"
 fi
 if ((mem > limit_gb)); then
   die "refusing a cap of ${mem} GB above the shared slice cap of ${limit_gb} GB (70% of host RAM)"
@@ -121,24 +128,33 @@ if [[ "$use_lock" == 1 ]]; then
   lock+=("$lockfile")
 fi
 
+explain_rc() {
+  case "$1" in
+    75) [[ -z "$lock_wait" ]] || echo "capped.sh: exit 75: lock wait timed out (or the command exited 75 itself)" >&2 ;;
+    124) echo "capped.sh: exit 124: timeout status (wall limit or command's own exit); report it" >&2 ;;
+    137 | 143) echo "capped.sh: exit $1: killed by a signal (memory cap, or the timeout's kill); check 'journalctl --user -k | grep -i oom' and report it" >&2 ;;
+  esac
+}
+
 run_uncapped() {
   [[ "${VIBE_ALLOW_UNCAPPED:-}" == 1 ]] || die "$1; refusing to run uncapped (VIBE_ALLOW_UNCAPPED=1 overrides, without the memory cap)" 3
   echo "capped.sh: warning: running WITHOUT a memory cap ($1)" >&2
-  "${lock[@]}" "${cmd[@]}"
+  local status=0
+  "${lock[@]}" "${cmd[@]}" || status=$?
+  explain_rc "$status"
+  return "$status"
 }
 
 if ! command -v systemd-run >/dev/null 2>&1; then
   rc=0
-  run_uncapped "systemd-run not found" || rc=$?
+  run_uncapped "cannot enforce caps: systemd-run not found" || rc=$?
   exit "$rc"
 fi
 # Probe the kernel effect, not just acceptance of systemd properties. Do this each
 # invocation: a cached success can outlive controller delegation or manager changes.
 # The probe expands its own cgroup path inside the scope.
-probe_err=$(mktemp "${TMPDIR:-/tmp}/capped-probe.XXXXXX")
-trap 'rm -f "$probe_err"' EXIT
 # shellcheck disable=SC2016
-if ! systemd-run --user --scope --quiet --collect --expand-environment=no --slice=vibe.slice \
+probe_err=$(systemd-run --user --scope --quiet --collect --expand-environment=no --slice=vibe.slice \
   -p MemoryMax=64M -p MemorySwapMax=0 -p OOMPolicy=kill \
   sh -c '
     group=$(sed -n "s/^0:://p" /proc/self/cgroup)
@@ -147,13 +163,14 @@ if ! systemd-run --user --scope --quiet --collect --expand-environment=no --slic
     test "$(cat "$base/memory.max")" = 67108864 &&
       test "$(cat "$base/memory.swap.max")" = 0 &&
       test "$(cat "$base/memory.oom.group")" = 1
-  ' >/dev/null 2>"$probe_err"; then
-  reason="user scopes cannot enforce memory/swap caps and group-wide OOM killing"
-  [[ ! -s "$probe_err" ]] || reason="$reason: $(head -c 300 "$probe_err" | tr '\n' ' ')"
+  ' 2>&1 >/dev/null) || {
+  reason="cannot enforce memory/swap caps and group-wide OOM killing with user scopes"
+  probe_err=$(printf '%s' "$probe_err" | head -c 300 | tr '\n' ' ')
+  [[ -z "${probe_err// /}" ]] || reason="$reason (${probe_err% })"
   rc=0
   run_uncapped "$reason" || rc=$?
   exit "$rc"
-fi
+}
 
 # One shared slice caps the sum of all jobs; best effort, the per-job caps still apply.
 if ((total_gb > 0)); then
@@ -172,11 +189,5 @@ rc=0
   shift
   exec "$@"
 ' capped-launch "$scope_unit" "${scope[@]}" "${cmd[@]}" || rc=$?
-if [[ "$rc" == 124 ]]; then
-  echo "capped.sh: exit 124: timeout status (wall limit or command's own exit); report it" >&2
-elif [[ "$rc" == 75 && -n "$lock_wait" ]]; then
-  echo "capped.sh: exit 75: lock wait timed out (or the command exited 75 itself)" >&2
-elif [[ "$rc" == 137 || "$rc" == 143 ]]; then
-  echo "capped.sh: exit $rc: killed by a signal (memory cap, or the timeout's kill); check 'journalctl --user -k | grep -i oom' and report it" >&2
-fi
+explain_rc "$rc"
 exit "$rc"

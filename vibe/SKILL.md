@@ -30,7 +30,9 @@ Step 1 creates or finds it (it must survive a context compaction), and paste the
 - **`scripts/capped.sh`**: memory-capped systemd scope, shared lock, wall limit.
 - **`rebase-pr` skill** (prerequisite): only its `scripts/capture-lease.sh` and
   `scripts/safe-force-push.sh` are used (Step 5); its own quality-gate step is not, because
-  it would run the whole suite uncapped.
+  it would run the whole suite uncapped. It is a sibling of this skill: `<REBASE_PR>` is
+  `${CLAUDE_PLUGIN_ROOT}/rebase-pr`, or `../rebase-pr` beside this SKILL.md's base directory
+  when loaded standalone.
 - **`references/loop.md`**: the loop, throughput, the gate set, keeping main green,
   resuming. Read before Step 4, and before Step 1 when resuming.
 - **`references/briefs.md`**: agent brief and workflow templates. Read before Step 3.
@@ -41,11 +43,12 @@ Step 1 creates or finds it (it must survive a context compaction), and paste the
 
 - `<epic>`: an issue number, `#N`, `owner/repo#N` or a URL. Parse it first.
 - `ultracode`: see below; this word is how the user turns the mode on.
-- `--serial`: same as `--max-parallel 1` (Step 4). Default: parallel only where safe, and
-  serial whenever the epic's criteria mention benchmarks or other measured numbers; an
-  explicit `--max-parallel N` overrides that default.
-- `--max-parallel N`: cap on concurrent fix agents (default 3 on both the `Agent` and
-  `Workflow` paths, subject to the serial default above).
+- `--serial`: same as `--max-parallel 1` (Step 4), and it wins over `--max-parallel`.
+  Without it, the default is parallel only where safe, and serial whenever the epic's
+  criteria mention benchmarks or other measured numbers; an explicit `--max-parallel N`
+  overrides that implicit default.
+- `--max-parallel N`: cap on concurrent triage and fix agents (default 3 on both the `Agent`
+  and `Workflow` paths, unless the measurement default above applies).
 - `--no-merge`: every PR stops at "rebased, gated on its final head, checklist ticked,
   required checks green" and is reported; nothing is merged and no brief says to merge.
   Without it, invoking `/vibe` authorises merging green PRs into the default branch
@@ -66,7 +69,8 @@ user turn) contains `ultracode`, or a system reminder says it is on.
 
 ## Rules that never bend
 
-Every agent's brief carries the substance of these (`references/briefs.md` has the wording).
+Every row addressed to agents goes verbatim into their briefs (`references/briefs.md` has the
+wording). The red-main merge check and verifying reports belong to the orchestrator.
 
 | Rule | Why |
 |---|---|
@@ -78,7 +82,7 @@ Every agent's brief carries the substance of these (`references/briefs.md` has t
 | Stop capped jobs by their printed scope name; kill other processes by recorded PID only, never `pkill -f <pattern>` | The pattern matched the agent's own shell |
 | Do not edit a worktree while its gate runs; a changed head restarts the gates | The gates would be claims about a tree that no longer exists |
 | A report is a claim, not a fact: verify merges from `git log origin/<default>` and `gh`, never from an agent's say-so | Agents overstate "merged" and "closed" |
-| Closing keywords (close, fix, resolve) next to an issue number close it on merge, even negated ("does not close #N"). Partial work says `Part of #N` | A negated phrase once closed an epic |
+| Closing keywords (close, fix, resolve) next to an issue number close it on merge, even negated ("does not close #N"). Agent PRs say `Part of #N`, never a closing keyword; the orchestrator closes after verifying | A negated phrase once closed an epic |
 
 ## Step 0 — Preflight
 
@@ -94,11 +98,13 @@ Every agent's brief carries the substance of these (`references/briefs.md` has t
 3. The main checkout is the orchestrator's: do not switch its branch. Agents get worktrees:
    `git worktree add --no-track <scratch>/<name> -b vibe/<N>-<slug> origin/<default>`.
    Agents publish with `git push -u origin HEAD`, never a bare push to the default branch.
-4. Resolve the absolute paths of `capped.sh` and of the `rebase-pr` skill directory (see
-   Bundled resources) and probe
-   `<CAPPED> -n -m 1 -- true`. Exit 3 with a "cannot enforce" message means no
-   `systemd-run --user` scopes: stop and ask whether to run uncapped (set
-   `VIBE_ALLOW_UNCAPPED=1` only on a yes). Exit 3 for `/proc/meminfo` cannot be overridden.
+4. Resolve the absolute paths of `capped.sh` and `<REBASE_PR>` (see Bundled resources).
+   Check `test -x` on `<REBASE_PR>/scripts/capture-lease.sh` and `safe-force-push.sh`; if
+   either is missing, stop and tell the user to install `rebase-pr`. Probe
+   `<CAPPED> -n -m 1 -- true`. Exit 3 with "refusing to run uncapped" means no enforceable
+   `systemd-run --user` scopes (including a missing `systemd-run`): stop and ask whether to
+   run uncapped (set `VIBE_ALLOW_UNCAPPED=1` only on a yes). Exit 3 for an unreadable
+   `/proc/meminfo` cannot be overridden.
 5. Derive the gate list, time limits, title rules, the commit identity for briefs, the merge
    method and a quiet-machine bar from the repo. If it supplies no quiet bar, use at most six
    other runnable tasks at p95 as the stated default; record contaminated measurements and
@@ -116,7 +122,7 @@ Every agent's brief carries the substance of these (`references/briefs.md` has t
   --jq '.[]|{number,title,state,repository_url,sub_issues_summary}'` (direct children only;
   recurse where `sub_issues_summary.total > 0` **before** filtering to open issues, even
   through a closed child), both checked and unchecked task-list references in the body,
-  and `gh api search/issues --paginate -f q='repo:{owner}/{repo} "Part of #<N>" in:body'`.
+  and `gh api --method GET --paginate search/issues -F q='repo:{owner}/{repo} is:issue "Part of #<N>" in:body' --jq '.items[]|{number,title,state,repository_url}'`.
   Use each issue's repository for
   cross-repository children. Deduplicate by repository and number. Closed issues also
   resolve blockers (`repos/{owner}/{repo}/issues/<N>/dependencies/blocked_by` or the
@@ -168,8 +174,8 @@ Every agent's brief carries the substance of these (`references/briefs.md` has t
 
 ## Step 3 — Triage wave (read-only)
 
-One agent per theme (at most about eight related children each), concurrently unless the
-reproducers are measurements, in which case themes run one after another. Each reads the issue and
+One agent per theme (at most about eight related children each), at most `--max-parallel` at a time, and one after another
+when the reproducers are measurements. Each reads the issue and
 every comment, runs the reproducer on the current default branch, and returns, per child,
 `done`, `partial`, `open` or `needs-ruling` with evidence, the exact remaining work,
 whether an agent can do it without a ruling, and a priority. No code changes, comments,
@@ -215,12 +221,12 @@ it with `rebase-pr`'s `capture-lease.sh` before and `safe-force-push.sh` after (
 head changed, merge by the repo's allowed method, then wait for the post-merge workflows on
 the merge commit to be green before the next merge.
 
-**Gate just in time.** Every merge moves the default branch, so a queued PR's gate goes
-stale. Agents' gates before their turn are development gates; the full final-head gate
-(`references/loop.md`, The gate set) runs on the one PR next to merge, after its last
-rebase. If the rebase onto the newest default branch is clean and the intervening commits
-touch files disjoint from the PR's, the orchestrator may keep the agent's gate as the final
-one and records that judgement in the PR; otherwise it re-gates.
+**Every merge changes the next PR's head.** After a merge, the next PR's rebase produces a
+new head, so its final-head gate runs again; there is no exemption for a "clean" rebase or
+disjoint files, because a renamed function or changed signature breaks new code in an
+untouched file. Merge in priority order, keep PRs small, and ask each agent to rebase
+immediately before gating so a queued PR rarely needs a second gate. A PR whose head is
+unchanged since its gate (nothing merged ahead of it) needs none.
 
 ## Step 6 — Keep main green
 
@@ -253,13 +259,14 @@ If no answer arrives, continue other work and list the question in every report.
   hours that divide 24, never :00 or :30). It fires only while the REPL is idle, may run up
   to half a period late, is session-only, and expires after seven days: tell the user, quote
   the next-run time from the tool result, record the job id, and recreate it on the final
-  fire. Its prompt **reports in under 150 words and starts no new feature work** (relaunching queued work is the exception below): done, in
+  fire. Its prompt **reports in under 150 words and starts no new feature work**: done, in
   progress, blocked, next, pending rulings. Facts come from `gh` and CI, never from memory.
 - Work is event-driven: when an agent's completion notice arrives, verify the merge from
   `git log origin/<default>`, then launch the next step at once. If a tick finds nothing
-  running while work remains, that is an idle bug: nothing else will wake the orchestrator,
-  so the tick itself launches the already-queued next step (never new feature work), says
-  so in its report, and the orchestrator verifies it on its next turn.
+  running while work remains, it reports "idle with work remaining" and starts nothing. Once
+  the report is out, the orchestrator (the same session) repairs the queue as its own action
+  and says so, after checking `git`, `gh` and the transcript directory (below) that nothing
+  is in flight, so it never duplicates running work.
 - `ListAgents` shows named subagents only; workflow agents are invisible to it and to
   `SendMessage`. Watch the workflow's transcript directory (`agent-*.jsonl`, `journal.jsonl`
   modification times; record the path from the `Workflow` result). A transcript with no write

@@ -18,7 +18,7 @@ marked (example) come from one project and illustrate the guard rather than defi
 | An agent's `git checkout --detach` in the main checkout blocked every shell through a hook | Agents use their own worktree, never the main checkout | rules table, Step 0 |
 | `pkill -f <pattern>` killed the agent's own shell | Kill by recorded PID only | rules table |
 | A scratch-file sweep put hundreds of files into a merged PR | Stage explicit paths; never `git add -A` | rules table |
-| A negated phrase ("does not close #N") closed an epic | Closing keywords near an issue number close it, even negated; partial work says `Part of #N` | rules table, loop.md closing children |
+| A negated phrase ("does not close #N") closed an epic | Closing keywords near an issue number close it, even negated; agent PRs say `Part of #N` and the orchestrator closes after verifying | rules table, loop.md closing children |
 | One shared heavy lock queued gate chains for hours; extra agents only added latency | Queue each gate once; do not add agents to a deep queue; serial mode when measuring | SKILL.md Step 4, loop.md throughput |
 | Timing runs shared the machine with other gates and unrelated jobs | Timing only when the quiet-machine bar holds; label contaminated runs; never score them | loop.md throughput |
 | A size/lint gate blocked a legitimate PR | Use the repo's own budget; a ratchet (over-limit files may change if they do not grow) is the repo's call, proposed by memo | loop.md gate set 4 |
