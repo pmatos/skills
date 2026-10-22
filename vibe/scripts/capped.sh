@@ -22,10 +22,13 @@
 #               else /tmp/vibe-heavy.lock)
 #   -h          print this help
 #
+# Needs bash 4.4 or newer.
+#
 # Exit codes: the command's own; 124 timeout; 137 or 143 mean a signal killed the command
 # (the whole job is killed if any worker hits the memory cap; check `journalctl --user -k | grep -i oom` and
 # report it as a finding, never raise the cap); 2 usage error; 3 user scopes unavailable
-# (set VIBE_ALLOW_UNCAPPED=1 to run uncapped, without the memory cap); 75 lock wait timed out.
+# (set VIBE_ALLOW_UNCAPPED=1 to run uncapped, without the memory cap; /proc/meminfo being
+# unreadable also exits 3 and cannot be overridden); 75 lock wait timed out.
 #
 # The lock is not inherited by processes the command leaves behind (flock -o).
 # Stop a running job with systemctl --user stop <printed-scope>, then wait for this wrapper.
@@ -132,6 +135,8 @@ fi
 # Probe the kernel effect, not just acceptance of systemd properties. Do this each
 # invocation: a cached success can outlive controller delegation or manager changes.
 # The probe expands its own cgroup path inside the scope.
+probe_err=$(mktemp "${TMPDIR:-/tmp}/capped-probe.XXXXXX")
+trap 'rm -f "$probe_err"' EXIT
 # shellcheck disable=SC2016
 if ! systemd-run --user --scope --quiet --collect --expand-environment=no --slice=vibe.slice \
   -p MemoryMax=64M -p MemorySwapMax=0 -p OOMPolicy=kill \
@@ -142,9 +147,11 @@ if ! systemd-run --user --scope --quiet --collect --expand-environment=no --slic
     test "$(cat "$base/memory.max")" = 67108864 &&
       test "$(cat "$base/memory.swap.max")" = 0 &&
       test "$(cat "$base/memory.oom.group")" = 1
-  ' >/dev/null 2>&1; then
+  ' >/dev/null 2>"$probe_err"; then
+  reason="user scopes cannot enforce memory/swap caps and group-wide OOM killing"
+  [[ ! -s "$probe_err" ]] || reason="$reason: $(head -c 300 "$probe_err" | tr '\n' ' ')"
   rc=0
-  run_uncapped "user scopes cannot enforce memory/swap caps and group-wide OOM killing" || rc=$?
+  run_uncapped "$reason" || rc=$?
   exit "$rc"
 fi
 
@@ -167,6 +174,8 @@ rc=0
 ' capped-launch "$scope_unit" "${scope[@]}" "${cmd[@]}" || rc=$?
 if [[ "$rc" == 124 ]]; then
   echo "capped.sh: exit 124: timeout status (wall limit or command's own exit); report it" >&2
+elif [[ "$rc" == 75 && -n "$lock_wait" ]]; then
+  echo "capped.sh: exit 75: lock wait timed out (or the command exited 75 itself)" >&2
 elif [[ "$rc" == 137 || "$rc" == 143 ]]; then
   echo "capped.sh: exit $rc: killed by a signal (memory cap, or the timeout's kill); check 'journalctl --user -k | grep -i oom' and report it" >&2
 fi

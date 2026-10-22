@@ -2,7 +2,7 @@
 
 Fill the `<…>` slots. `<CAPPED>` is the absolute path of `vibe/scripts/capped.sh` resolved
 in Step 0: substitute it before dispatch. Mark project-specific rules in a brief so the next
-epic can swap them. The per-issue brief is adapted from the jsse epic loop.
+epic can swap them. The per-issue brief is adapted from a long-running epic loop.
 
 ## Common preamble for every agent
 
@@ -10,8 +10,10 @@ epic can swap them. The per-issue brief is adapted from the jsse epic loop.
 Repo <owner/repo> at <path>, epic #<E> (<epic goal>). Read CLAUDE.md/AGENTS.md and the
 docs they link; provision the repo's hooks in your worktree; never bypass hooks.
 Work in your OWN git worktree and scratch directory, never the main checkout. Commit as
-<identity>. Use the newest default branch (git fetch) and rebase before gating via rebase-pr's
-pre-rebase remote-head capture and explicit-SHA --force-with-lease. Never plain --force;
+<identity from the run config>. Use the newest default branch (git fetch) and rebase before
+gating: resolve conflicts by hand, run <REBASE_PR>/scripts/capture-lease.sh <remote> <branch> BEFORE
+the rebase and <REBASE_PR>/scripts/safe-force-push.sh <remote> <branch> <captured-sha> to publish.
+Do not use rebase-pr's own gate step: your gates go through <CAPPED>. Never plain --force;
 if the lease fails, stop and re-inspect. Publish initially with git push -u origin HEAD.
 
 Rules that never bend:
@@ -25,12 +27,12 @@ Rules that never bend:
   the question in your result (needsRuling) and stop that part.
 - Stage explicit paths, never git add -A. Never --no-verify or SKIP. Stop capped jobs with
   systemctl --user stop <printed-scope>; use recorded PIDs for other processes, never pkill -f. Do not edit a worktree while its gate runs.
+- "Green locally" names the final head SHA and means the WHOLE suite CI runs, not a
+  filtered slice. Report a claim older than your last push as not run.
 - Closing keywords (close, fix, resolve) next to an issue number close it on merge, even
-  negated: partial work says "Part of #N".
+  negated: your PR body says "Part of #N" and "Part of #<E>", never a closing keyword.
 - Do not merge. Stop at READY: rebased, gated on the final head SHA, checklist ticked (or a
-  "gates green at <sha>" PR comment), required checks green. [Only when the orchestrator
-  delegates the merge: before merging check that the default branch's required workflows at its current SHA are all
-  green or that this PR is the declared fix.]
+  "gates green at <sha>" PR comment), required checks green.
 
 Waiting: Agent-tool subagents wait in the FOREGROUND, in blocking calls (an until loop on a log and an exit-code
 file, or a blocking flock) of at most about ten minutes each, repeated until the job is done.
@@ -53,8 +55,8 @@ Pipeline (sequential):
 1. Investigate. Reproduce on the current default branch before changing anything.
 2. Implement in small PRs, one idea each; add tests for the observable behaviour and
    guard fixtures that fail on a wrong model. Follow <the repo's commit and PR-title rules>.
-   "Closes #<N>" only if the acceptance criteria are truly met; for a partial stage
-   "Part of #<N>". Every PR body also includes the non-closing epic reference "Part of #<E>".
+   The PR body says "Part of #<N>" even when the
+   acceptance criteria look met (the orchestrator verifies and closes), and also "Part of #<E>".
 3. Review your own PR diff inline, high effort; apply findings by hand; comment a summary.
 4. Simplify pass, inline.
 5. Gates on the FINAL head SHA: <the project's whole-suite gate list>. Tick the PR
@@ -62,6 +64,9 @@ Pipeline (sequential):
 
 Staging (large issues): each stage its own PR, ready before the next starts. Stop after any
 stage where the next cannot be had without a regression; comment the measurements.
+
+One stage per agent call under a Workflow (see the notes below); an Agent-tool agent
+may run several stages in sequence.
 
 Hard constraints: no regressions [project: the control set and tolerances]; if the
 improvement cannot be had without one, do NOT force it: comment on the issue with
@@ -74,10 +79,11 @@ Final report, short, facts first: what shipped; the numbers; gates run and any N
 whether #<N> is done; anything filed; cleanup done.
 ```
 
-Workflow result schema: `pr` (number), `sha` (string), `gatesRun` (array of strings),
-`gatesNotRun` (array), `needsRuling` (string, empty if none), `notes` (string). Plain `Agent`
-subagents return prose: end the brief with "finish your report with a block: PR, SHA, gates
-run, gates NOT run, needsRuling", parse it, and verify from `git` and `gh`.
+Workflow result schema (`READY`): `repo` (string), `issue` (number), `pr` (number, the PR
+this stage opened), `sha` (string), `gatesRun` (array of strings), `gatesNotRun` (array),
+`needsRuling` (string, empty if none), `notes` (string). Plain `Agent` subagents return
+prose: end the brief with "finish your report with a block: repo, issue, PR, SHA, gates run,
+gates NOT run, needsRuling", parse it, and verify from `git` and `gh`.
 
 ## Triage brief (read-only)
 
@@ -92,8 +98,9 @@ comments. Do not post comments, close issues, or change code: for a done child r
 evidence and the orchestrator verifies and closes.
 ```
 
-Workflow schema: an `items` array of objects with `issue`, `title`, `status` (enum), `evidence`,
-`remaining`, `implementable` (boolean), `priority` (number), all required.
+Workflow schema (`TRIAGE`): an `items` array of objects with `repo`, `issue`, `title`,
+`status` (enum `done | partial | open | needs-ruling`), `evidence`, `remaining`,
+`implementable` (boolean), `priority` (number), all required.
 
 ## Read-only close-out audit brief
 
@@ -132,30 +139,34 @@ recommend merge; merge only when the invoking user explicitly authorised it, as 
 PR's branch.
 ```
 
-## Workflow skeleton: triage, fix to ready, land sequentially
+## Workflow skeleton: triage, then fix to ready
 
 One workflow per phase; read the result between phases (per `workflow-authoring`).
+Landing is not a workflow: the orchestrator merges inline (SKILL.md Step 5).
 
 ```text
 // Workflow 1 — triage only; return every theme, including failures
 export const meta = { name: 'epic-<N>-triage', description: '…', phases: [{title: 'Triage'}] }
-const results = []
-for (const theme of THEMES) {
+// Themes run in parallel; when the reproducers are measurements, replace Promise.all with
+// a sequential for-loop so themes do not confound each other.
+const results = await Promise.all(THEMES.map(async theme => {
   const triage = await agent(TRIAGE_BRIEF(theme), {schema: TRIAGE, effort: 'medium'})
   if (!triage || !Array.isArray(triage.items)) {
     log('Incomplete triage theme: ' + theme)
-    results.push({theme, triage: null, incomplete: true})
-  } else results.push({theme, triage, incomplete: false})
-}
+    return {theme, triage: null, incomplete: true}
+  }
+  return {theme, triage, incomplete: false}
+}))
 return results
 
 // ORCHESTRATOR BARRIER: retain triage evidence; retry incomplete themes, verify done
 // children, surface needs-ruling items. Select only implementable open/partial items,
-// deduplicate by repo/issue, sort by priority. Decide serial vs disjoint parallel batches
+// deduplicate by repo and issue, sort by priority. Decide serial vs disjoint parallel batches
 // in Step 4. FIX_BATCHES has <= MAX_PARALLEL items per batch (one under --serial);
 // all items in a parallel batch must have disjoint files and non-measurement criteria.
 
-// Workflow 2 — fixes to READY; no merges
+// Workflow 2 — fixes to READY; no merges. FIX_BRIEF(item) covers ONE stage; a staged issue
+// is launched once per stage, the next stage only after the previous one is merged.
 export const meta = { name: 'epic-<N>-fix', description: '…', phases: [{title: 'Fix'}] }
 const fixes = []
 for (const batch of FIX_BATCHES) {
@@ -170,20 +181,11 @@ return fixes
 
 // ORCHESTRATOR BARRIER: retain triage AND fixes, verify every READY result from git/gh.
 // With --no-merge, ensure latest rebase, final-head gates and required checks, then stop.
-
-// Workflow 3 — land (orchestrator-owned, one PR per agent, sequential)
-export const meta = { name: 'epic-<N>-land', description: '…', phases: [{title: 'Land'}] }
-for (const pr of READY_PRS) {
-  // LAND checks all current-default-SHA workflows, lease-safe rebases/pushes,
-  // re-runs gates if the head changed, merges, then waits for all required post-merge CI.
-  const result = await agent(LAND_BRIEF(pr), {schema: LANDED})
-  if (!result || !result.merged || !result.postMergeGreen) break
-}
-
 ```
 
-`THEMES`, `TRIAGE`, `FIX_BATCHES`, `MAX_PARALLEL`, `READY`, `LANDED`, and the brief functions are yours to define from the
-templates above. Notes that cost time once:
+`THEMES`, `TRIAGE`, `FIX_BATCHES`, `MAX_PARALLEL`, `READY`, and the brief functions are
+yours to define from the templates above. `<REBASE_PR>` is the absolute path of the
+`rebase-pr` skill directory, resolved like `<CAPPED>`. Notes that cost time once:
 
 - Prompts are template literals: use single quotes inside them. A stray backtick ends the
   string and the script fails to parse.

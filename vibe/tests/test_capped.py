@@ -39,14 +39,38 @@ def test_lock_wait_requires_lock():
     assert "-w requires the shared lock" in result.stderr
 
 
+@pytest.mark.parametrize(
+    "args,message",
+    [
+        (["-m", "abc"], "-m wants a positive whole number"),
+        (["-t", "0"], "-t wants a positive whole number"),
+        (["-w", "x"], "-w wants a positive whole number"),
+        (["-m", "999"], "refusing a cap above"),
+    ],
+)
+def test_invalid_limits_are_refused_before_running(args, message):
+    result = run(*args, "--", "echo", "UNSAFE_COMMAND_RAN")
+    assert result.returncode == 2
+    assert message in result.stderr
+    assert "UNSAFE_COMMAND_RAN" not in result.stdout
+
+
+def test_no_command_is_usage_error():
+    assert run("-n").returncode == 2
+
+
+def test_help_exits_zero():
+    result = run("-h")
+    assert result.returncode == 0
+    assert "Usage:" in result.stdout
+
+
 def test_accepting_properties_without_enforcement_is_refused(tmp_path):
     fake = tmp_path / "systemd-run"
     fake.write_text(
         '#!/bin/sh\nwhile [ "$#" -gt 0 ] && [ "$1" != sh ]; do shift; done\nexec "$@"\n'
     )
     fake.chmod(0o755)
-    # A stale success stamp must not bypass the current enforcement check.
-    (tmp_path / "vibe-capped.ok").touch()
     result = run(
         "-n",
         "-m",
