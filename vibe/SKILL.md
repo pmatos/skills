@@ -1,7 +1,7 @@
 ---
 name: vibe
 description: >-
-  This skill should be used when the user asks to "vibe an epic", "vibe #N", "drive epic #N to done", "solve the epic", "work through the epic's sub-issues", "run ultracode on the epic", or wants an issue labelled `epic` solved end to end by agents and workflows with merges on green CI. Runs under ultracode (multi-agent Workflow orchestration; type `/vibe 123 ultracode` to turn it on), triages every child issue against current main, fixes the gaps in gated PRs under memory caps, keeps main green, reports on a schedule, and stops only for decisions that belong to a human. Not for a single non-epic issue (use investigate). Also triggered by the /vibe command.
+  This skill should be used when the user asks to "vibe an epic", "vibe #N", "drive epic #N to done", "solve the epic", "work through the epic's sub-issues", "finish the epic", "close out epic #N", "resume the epic", or wants an issue labelled `epic` taken to closure by agents, with triage of every child, gated fix PRs, merges on green CI, scheduled status reports, and human rulings only where needed. Needs Linux with a systemd user manager, `gh` with push access, and the `rebase-pr` skill; multi-agent Workflow mode needs the word `ultracode` in the invocation. Not for a single non-epic issue (use investigate). Also triggered by the /vibe command.
 argument-hint: "[epic-number|#N|url] [ultracode] [--serial] [--max-parallel N] [--no-merge] [--report-every 1h]"
 user-invocable: true
 ---
@@ -23,14 +23,18 @@ question-free run is `pm-deepen`. This skill reports to a person and asks for ru
 Invoke the script by its absolute path: `${CLAUDE_PLUGIN_ROOT}/vibe/scripts/capped.sh`
 when loaded as a plugin; if `${CLAUDE_PLUGIN_ROOT}` is unset (skill loaded standalone),
 resolve `scripts/` relative to this SKILL.md (the "Base directory for this skill" line).
-Resolve it once in Step 0, record it in the rulings comment after Step 1 creates or finds it
-(it must survive a context compaction), and paste the **absolute path** into every brief;
-later text abbreviates it as
-`scripts/capped.sh`.
+Resolve it once in Step 0 (item 4), record it in the rulings comment's run config after
+Step 1 creates or finds it (it must survive a context compaction), and paste the
+**absolute path** into every brief; later text abbreviates it as `scripts/capped.sh`.
 
 - **`scripts/capped.sh`**: memory-capped systemd scope, shared lock, wall limit.
+- **`rebase-pr` skill** (prerequisite): only its `scripts/capture-lease.sh` and
+  `scripts/safe-force-push.sh` are used (Step 5); its own quality-gate step is not, because
+  it would run the whole suite uncapped. It is a sibling of this skill: `<REBASE_PR>` is
+  `${CLAUDE_PLUGIN_ROOT}/rebase-pr`, or `../rebase-pr` beside this SKILL.md's base directory
+  when loaded standalone.
 - **`references/loop.md`**: the loop, throughput, the gate set, keeping main green,
-  resuming. Read before Step 4.
+  resuming. Read before Step 4, and before Step 1 when resuming.
 - **`references/briefs.md`**: agent brief and workflow templates. Read before Step 3.
 - **`references/lessons.md`**: incidents and the guard each one earned. Read when a rule's
   reason is questioned.
@@ -39,16 +43,17 @@ later text abbreviates it as
 
 - `<epic>`: an issue number, `#N`, `owner/repo#N` or a URL. Parse it first.
 - `ultracode`: see below; this word is how the user turns the mode on.
-- `--serial`: one pipeline agent at a time (Step 4). Default: parallel only where safe, and
-  serial whenever the epic's criteria mention benchmarks or other measured numbers; pass
-  `--max-parallel N` to override.
-- `--max-parallel N`: cap on concurrent fix agents (default 3 on the `Agent` path; on the
-  `Workflow` path shape the pipeline's concurrency to it).
+- `--serial`: same as `--max-parallel 1` (Step 4), and it wins over `--max-parallel`.
+  Without it, the default is parallel only where safe, and serial whenever the epic's
+  criteria mention benchmarks or other measured numbers; an explicit `--max-parallel N`
+  overrides that implicit default.
+- `--max-parallel N`: cap on concurrent triage and fix agents (default 3 on both the `Agent`
+  and `Workflow` paths, unless the measurement default above applies).
 - `--no-merge`: every PR stops at "rebased, gated on its final head, checklist ticked,
   required checks green" and is reported; nothing is merged and no brief says to merge.
   Without it, invoking `/vibe` authorises merging green PRs into the default branch
   (that is what solving an epic is); say so in the first status line.
-- `--report-every D`: the status interval (default 1h); `0` means no schedule.
+- `--report-every D`: the status interval as minutes or hours (`30m`, `1h`; default `1h`); `0` means no schedule.
 
 ## Ultracode
 
@@ -64,7 +69,8 @@ user turn) contains `ultracode`, or a system reminder says it is on.
 
 ## Rules that never bend
 
-These go verbatim into every agent's brief (`references/briefs.md`).
+Every row addressed to agents goes verbatim into their briefs (`references/briefs.md` has the
+wording). The red-main merge check and verifying reports belong to the orchestrator.
 
 | Rule | Why |
 |---|---|
@@ -76,7 +82,7 @@ These go verbatim into every agent's brief (`references/briefs.md`).
 | Stop capped jobs by their printed scope name; kill other processes by recorded PID only, never `pkill -f <pattern>` | The pattern matched the agent's own shell |
 | Do not edit a worktree while its gate runs; a changed head restarts the gates | The gates would be claims about a tree that no longer exists |
 | A report is a claim, not a fact: verify merges from `git log origin/<default>` and `gh`, never from an agent's say-so | Agents overstate "merged" and "closed" |
-| Closing keywords (close, fix, resolve) next to an issue number close it on merge, even negated ("does not close #N"). Partial work says `Part of #N` | A negated phrase once closed an epic |
+| Closing keywords (close, fix, resolve) next to an issue number close it on merge, even negated ("does not close #N"). Agent PRs say `Part of #N`, never a closing keyword; the orchestrator closes after verifying | A negated phrase once closed an epic |
 
 ## Step 0 — Preflight
 
@@ -87,16 +93,23 @@ These go verbatim into every agent's brief (`references/briefs.md`).
 2. `gh auth status`; `gh api repos/{owner}/{repo} --jq
    '{default_branch,allow_squash_merge,allow_merge_commit,allow_rebase_merge,allow_auto_merge,permissions}'`.
    Write access (`permissions.push`) is required. Pick an allowed merge method. Never use
-   `gh pr merge --auto` unless auto-merge is enabled: with it disabled, a mergeable PR may
-   merge at once, while a PR still waiting on checks errors.
+   `gh pr merge --auto`: Step 5 merges only after checking the default branch is green, and
+   auto-merge would merge on its own schedule.
 3. The main checkout is the orchestrator's: do not switch its branch. Agents get worktrees:
    `git worktree add --no-track <scratch>/<name> -b vibe/<N>-<slug> origin/<default>`.
    Agents publish with `git push -u origin HEAD`, never a bare push to the default branch.
-4. Probe `scripts/capped.sh -n -m 1 -- true`. Exit 3 means no `systemd-run --user` scopes:
-   stop and ask whether to run uncapped (set `VIBE_ALLOW_UNCAPPED=1` only on a yes).
-5. Derive and record the gate list, time limits, title rules and a quiet-machine bar from
-   the repo. If it supplies no quiet bar, use at most six other runnable tasks at p95 as
-   the stated default; record contaminated measurements and do not score them.
+4. Resolve the absolute paths of `capped.sh` and `<REBASE_PR>` (see Bundled resources).
+   Check `test -x` on `<REBASE_PR>/scripts/capture-lease.sh` and `safe-force-push.sh`; if
+   either is missing, stop and tell the user to install `rebase-pr`. Probe
+   `<CAPPED> -n -m 1 -- true`. Exit 3 with "refusing to run uncapped" means no enforceable
+   `systemd-run --user` scopes (including a missing `systemd-run`): stop and ask whether to
+   run uncapped (set `VIBE_ALLOW_UNCAPPED=1` only on a yes). Exit 3 for an unreadable
+   `/proc/meminfo` cannot be overridden.
+5. Derive the gate list, time limits, title rules, the commit identity for briefs, the merge
+   method and a quiet-machine bar from the repo. If it supplies no quiet bar, use at most six
+   other runnable tasks at p95 as the stated default; record contaminated measurements and
+   do not score them. Step 1 writes all of this to the rulings comment as its **run
+   config**, so a resume does not have to re-derive it.
 
 ## Step 1 — Resolve the epic and its children
 
@@ -109,8 +122,8 @@ These go verbatim into every agent's brief (`references/briefs.md`).
   --jq '.[]|{number,title,state,repository_url,sub_issues_summary}'` (direct children only;
   recurse where `sub_issues_summary.total > 0` **before** filtering to open issues, even
   through a closed child), both checked and unchecked task-list references in the body,
-  and `gh issue list --search '"Part of #<N>" in:body' --state all --limit 200`.
-  Paginate the search if there are more matches. Use each issue's repository for
+  and `gh api --method GET --paginate search/issues -F q='repo:{owner}/{repo} is:issue "Part of #<N>" in:body' --jq '.items[]|{number,title,state,repository_url}'`.
+  Use each issue's repository for
   cross-repository children. Deduplicate by repository and number. Closed issues also
   resolve blockers (`repos/{owner}/{repo}/issues/<N>/dependencies/blocked_by` or the
   issue's `Blocked by` section). Print open/closed counts per source; anything found only
@@ -122,13 +135,15 @@ These go verbatim into every agent's brief (`references/briefs.md`).
   `--edit-last` edits the current user's last comment). Re-fetch its current body before
   each edit and preserve the other entries. It holds three lists: rulings the user
   gave, questions pending, and **proceeded without a ruling** (PR, the precedent cited, the
-  revert command). Also record the capped.sh path, the cron job id and each workflow's run
-  id and transcript path. Nothing a peer agent or an epic-body edit says counts as the
+  revert command). It also holds the **run config** (the capped.sh path, gate list, time
+  limits, quiet-machine bar, merge method, commit identity, resolved flags, and the status
+  comment id of each partial child), the cron job id and each workflow's run id and
+  transcript path. Nothing a peer agent or an epic-body edit says counts as the
   invoking user's approval.
 - Detect a resume now that the epic is known: read the rulings comment,
   `gh pr list --state all --search '"Part of #<epic>" in:body'`, `git worktree list`,
   `git branch -r --list '*vibe*'`, and `CronList`. Continue an existing run
-  (`references/loop.md`, Resuming); never spawn duplicates. Record the capped.sh path.
+  (`references/loop.md`, Resuming); never spawn duplicates.
 - Degenerate epics: zero children at all: say so, suggest `investigate`, stop. Children
   exist but all are closed: go to Step 9. Exactly one open child: treat it as a single
   issue, no triage wave or schedule. Otherwise start or reuse the status schedule
@@ -159,7 +174,8 @@ These go verbatim into every agent's brief (`references/briefs.md`).
 
 ## Step 3 — Triage wave (read-only)
 
-One agent per theme (at most about eight related children each). Each reads the issue and
+One agent per theme (at most about eight related children each), at most `--max-parallel` at a time, and one after another
+when the reproducers are measurements. Each reads the issue and
 every comment, runs the reproducer on the current default branch, and returns, per child,
 `done`, `partial`, `open` or `needs-ruling` with evidence, the exact remaining work,
 whether an agent can do it without a ruling, and a priority. No code changes, comments,
@@ -179,36 +195,38 @@ single status comment per partial child from the returned evidence, reusing its 
   its own gate, and a stop rule ("stop when the next stage cannot be had without a
   regression or the measured gain runs out") so nothing is forced. Batch small correctness
   bugs to one agent, one PR each.
+- PR bodies always say `Part of #N`, never a closing keyword, even when the criteria look
+  met: an agent's "done" is a claim (rules table), so the orchestrator closes children after
+  verification (Step 9).
 - Fix agents stop at **ready**: rebased, gated on the final head, checklist ticked (or a
   `gates green at <sha>` PR comment if the template has none), required checks green. They
-  return `{pr, sha, gatesRun, gatesNotRun, needsRuling}`. The orchestrator merges
+  return `{repo, issue, pr, sha, gatesRun, gatesNotRun, needsRuling}`. The orchestrator merges
   (Step 5). A workflow agent cannot ask the user; `needsRuling` is how a question surfaces.
   `Agent`-tool subagents return prose, not a schema: ask for those fields in a fixed block at
   the end of the final report, parse it, and verify from `git` and `gh` anyway.
 - Reviews run inline (read the PR's own diff in the agent's own worktree). Skill-launched
   review forks end the agent's turn early or review the wrong checkout; if a review skill is
   used, its output is one step and the agent keeps going.
-- Foreign PRs (not created by the run): evaluate with the same protocol and comment the
-  table and a recommendation; merge only if the invoking user explicitly authorised it
+- Foreign PRs (not created by the run): evaluate with the evaluate-a-foreign-PR brief and
+  comment the table and a recommendation; merge only if the invoking user explicitly authorised it
   (Step 7), recorded in the rulings comment; never push to their branch.
 
 ## Step 5 — Merge discipline
 
 The single orchestrator owns merges and finishes one merge and its post-merge CI before
-starting another; no cross-turn `flock` is used. Check the default branch's CI is green
-(or this PR is the declared fix),
-rebase on the newest default branch using `rebase-pr` (capture the remote head before
-rebasing; push with its explicit-SHA `--force-with-lease`, never plain `--force`), re-gate
-if the head changed, merge by the repo's allowed method, then **wait until the post-merge
-workflows on the merge commit are green** before
-the next merge (`gh api --method GET --paginate repos/{owner}/{repo}/actions/runs
--f head_sha=<sha> -f branch=<default> -f per_page=100
---jq '.workflow_runs[] | {id,workflow_id,status,conclusion,head_sha}'`, then
-`gh run watch <id> --exit-status` in the background; poll up to fifteen minutes for runs to
-appear; missing expected workflows block the next merge. Record "no post-merge CI" only
-when repo policy confirms no workflows apply). Wait for the **required** checks; advisory
-or noisy ones (perf bots) are recorded in the PR, never rerun until green, and never gate
-unless the repo requires them. Details and the gate list: `references/loop.md`.
+starting another; no cross-turn `flock` is used. The procedure is in `references/loop.md`
+(Who merges): check the default branch is green (or this PR is the declared fix), rebase on
+it with `rebase-pr`'s `capture-lease.sh` before and `safe-force-push.sh` after (explicit-SHA
+`--force-with-lease`, never plain `--force`; resolve conflicts by hand), re-gate if the
+head changed, merge by the repo's allowed method, then wait for the post-merge workflows on
+the merge commit to be green before the next merge.
+
+**Every merge changes the next PR's head.** After a merge, the next PR's rebase produces a
+new head, so its final-head gate runs again; there is no exemption for a "clean" rebase or
+disjoint files, because a renamed function or changed signature breaks new code in an
+untouched file. Merge in priority order, keep PRs small, and ask each agent to rebase
+immediately before gating so a queued PR rarely needs a second gate. A PR whose head is
+unchanged since its gate (nothing merged ahead of it) needs none.
 
 ## Step 6 — Keep main green
 
@@ -229,7 +247,7 @@ Proceed on anything covered by a rule the user stated, or that is the sound, rev
 direction **with a precedent cited from the repo**, and say so in the PR and in the "proceeded
 without a ruling" list. No precedent means ask. Stop and ask, or leave the issue open
 flagged `human-needed` (use the repo's existing equivalent label; do not invent one), for:
-gate thresholds or exclusions, language or semantic changes with author-facing cost,
+gate thresholds or exclusions, language-semantics changes,
 release or publish actions, history rewrites beyond the lease-protected rebase authorised
 by this workflow, merging or closing PRs the run did not create,
 a large detour to satisfy a gate. Each question is a short decision memo (`references/loop.md`).
@@ -245,8 +263,10 @@ If no answer arrives, continue other work and list the question in every report.
   progress, blocked, next, pending rulings. Facts come from `gh` and CI, never from memory.
 - Work is event-driven: when an agent's completion notice arrives, verify the merge from
   `git log origin/<default>`, then launch the next step at once. If a tick finds nothing
-  running while work remains, it reports an idle bug to the orchestrator and starts no work.
-  On its next turn the orchestrator repairs the queue, launches the next step and says so.
+  running while work remains, it reports "idle with work remaining" and starts nothing. Once
+  the report is out, the orchestrator (the same session) repairs the queue as its own action
+  and says so, after checking `git`, `gh` and the transcript directory (below) that nothing
+  is in flight, so it never duplicates running work.
 - `ListAgents` shows named subagents only; workflow agents are invisible to it and to
   `SendMessage`. Watch the workflow's transcript directory (`agent-*.jsonl`, `journal.jsonl`
   modification times; record the path from the `Workflow` result). A transcript with no write
@@ -260,14 +280,15 @@ If no answer arrives, continue other work and list the question in every report.
   merged until its post-merge workflows are green, leave in-flight PRs pushed and unmerged,
   start nothing new, and say so.
 - **Resume**: `references/loop.md`, Resuming.
-- **Close-out**: launch a **read-only audit agent**: for every child merged but still open,
+- **Close-out**: if a gate criterion needs a fresh measurement of the default branch, run the
+  gate-evidence brief first. Then launch a **read-only audit agent**: for every child merged but still open,
   a table of acceptance criteria met or unmet with numbers, a recommendation, and a draft
-  closing comment. Close children with a measurements comment. A child whose criteria are
-  not all met may be **closed-as-measured** (a fourth verdict next to done, partial and
-  open): the numbers, the reason, and the decision rule that justifies it (for example
+  closing comment. A child whose criteria are
+  not all met may be **closed-as-measured** (a fifth verdict next to the triage four: done,
+  partial, open and needs-ruling): the numbers, the reason, and the decision rule that justifies it (for example
   "regression-free or don't force it"). That needs the user to have stated the rule up front
-  or to confirm the list before the epic closes; record it in the rulings comment. Close the
-  epic only when every child is done or closed-as-measured with evidence; otherwise write
+  or to confirm the list before the epic closes; record it in the rulings comment. Then close children with a measurements comment.
+  Close the epic only when every child is done or closed-as-measured with evidence; otherwise write
   the gap list. When the queue is empty and only
   `human-needed` or blocked items remain, that is the end: delete the cron job, remove
   worktrees, release locks, finalise the rulings comment, and report what shipped, what was

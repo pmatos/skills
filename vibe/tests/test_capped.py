@@ -39,14 +39,38 @@ def test_lock_wait_requires_lock():
     assert "-w requires the shared lock" in result.stderr
 
 
+@pytest.mark.parametrize(
+    "args,message",
+    [
+        (["-m", "abc"], "-m wants a positive whole number"),
+        (["-t", "0"], "-t wants a positive whole number"),
+        (["-w", "x"], "-w wants a positive whole number"),
+        (["-m", "999"], "refusing a cap above"),
+    ],
+)
+def test_invalid_limits_are_refused_before_running(args, message):
+    result = run(*args, "--", "echo", "UNSAFE_COMMAND_RAN")
+    assert result.returncode == 2
+    assert message in result.stderr
+    assert "UNSAFE_COMMAND_RAN" not in result.stdout
+
+
+def test_no_command_is_usage_error():
+    assert run("-n").returncode == 2
+
+
+def test_help_exits_zero():
+    result = run("-h")
+    assert result.returncode == 0
+    assert "Usage:" in result.stdout
+
+
 def test_accepting_properties_without_enforcement_is_refused(tmp_path):
     fake = tmp_path / "systemd-run"
     fake.write_text(
         '#!/bin/sh\nwhile [ "$#" -gt 0 ] && [ "$1" != sh ]; do shift; done\nexec "$@"\n'
     )
     fake.chmod(0o755)
-    # A stale success stamp must not bypass the current enforcement check.
-    (tmp_path / "vibe-capped.ok").touch()
     result = run(
         "-n",
         "-m",
@@ -160,3 +184,43 @@ def test_scope_stop_kills_children_and_releases_lock(tmp_path):
             if process.poll() is None:
                 process.kill()
                 process.wait(timeout=10)
+
+
+def fake_systemd_run(tmp_path, body):
+    fake = tmp_path / "systemd-run"
+    fake.write_text(f"#!/bin/sh\n{body}\n")
+    fake.chmod(0o755)
+    return {"PATH": f"{tmp_path}:{os.environ['PATH']}"}
+
+
+def test_probe_error_is_surfaced_in_refusal(tmp_path):
+    env = fake_systemd_run(tmp_path, "echo 'Unknown option --bogus' >&2; exit 1")
+    result = run("-n", "-m", "1", "--", "echo", "UNSAFE_COMMAND_RAN", env=env)
+    assert result.returncode == 3
+    assert "cannot enforce" in result.stderr
+    assert "Unknown option --bogus" in result.stderr
+    assert "UNSAFE_COMMAND_RAN" not in result.stdout
+
+
+def test_uncapped_override_runs_the_command(tmp_path):
+    env = fake_systemd_run(tmp_path, "exit 1")
+    env["VIBE_ALLOW_UNCAPPED"] = "1"
+    result = run("-n", "-m", "1", "--", "echo", "RAN", env=env)
+    assert result.returncode == 0
+    assert result.stdout.strip() == "RAN"
+    assert "WITHOUT a memory cap" in result.stderr
+
+
+def test_lock_wait_timeout_exits_75_and_says_so(tmp_path):
+    lock = tmp_path / "held.lock"
+    env = fake_systemd_run(tmp_path, "exit 1")
+    env["VIBE_ALLOW_UNCAPPED"] = "1"
+    holder = subprocess.Popen(["flock", str(lock), "sleep", "10"])
+    try:
+        time.sleep(0.5)
+        result = run("-m", "1", "-w", "1", "-l", str(lock), "--", "true", env=env)
+    finally:
+        holder.kill()
+        holder.wait(timeout=10)
+    assert result.returncode == 75
+    assert "lock wait timed out" in result.stderr

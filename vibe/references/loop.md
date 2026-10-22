@@ -5,7 +5,7 @@ Procedures behind `SKILL.md`. Nothing here overrides the rules table there.
 ## Phases and the queue
 
 ```text
-preflight → triage (read-only, parallel by theme) → fix tracks → merge one PR at a time
+preflight → triage (read-only, parallel by theme unless measuring) → fix tracks → merge one PR at a time
         → keep main green → close-out audit → close or write the gap list
 ```
 
@@ -31,10 +31,17 @@ the next merge:
    No runs is not evidence of green: wait for expected runs or record a policy-backed
    "no CI applies" decision. Refuse a red branch unless this PR is its declared fix.
    Re-check the remote head before merging; if it moved, repeat this check.
-2. Rebase on the newest default branch with `rebase-pr`: capture the remote PR head before
-   rebasing, and publish only with its explicit-SHA `--force-with-lease`. If the head
-   changed, restart the gates on the pushed final head.
-3. Merge by the method the repo allows. Never `--auto` unless auto-merge is enabled.
+2. Rebase on the newest default branch, resolving conflicts by hand, in the PR's own
+   worktree: reuse the agent's (idle at READY, tracking `origin/<branch>`), or if it is gone
+   `git worktree add -B <branch> <dir> origin/<branch>` then
+   `git -C <dir> branch --set-upstream-to=origin/<branch>`. Run the scripts and the gates
+   from that directory, never the main checkout: the scripts compare and push `HEAD`. Use only
+   `rebase-pr`'s scripts: `capture-lease.sh <remote> <branch>` before the rebase and
+   `safe-force-push.sh <remote> <branch> <captured-sha>` to publish (explicit-SHA
+   `--force-with-lease`). Do not run `rebase-pr`'s own gate step: it would run the whole
+   suite uncapped. If the head changed, run the final-head gates (The gate set, through
+   `capped.sh`) on the pushed head; there is no exemption (SKILL.md Step 5).
+3. Merge by the method the repo allows. Never `--auto`.
 4. Wait for the post-merge workflows on the merge commit to be green before starting the
    next merge. Use the same paginated SHA-specific query and expected-workflow check above.
    A merge that touched `CLAUDE.md`, `AGENTS.md`, `docs/agents/`, hooks, CI or lint
@@ -52,7 +59,8 @@ many agents you start. So:
 - Start agents to investigate and code in parallel, but queue gates once, behind the lock,
   and let them wait; never cancel a queued gate because it has waited.
 - Do not add a fourth agent to a three-deep lock queue: it adds latency, not throughput.
-- Prefer one correct PR to three that each need a rebase and a re-gate.
+- Prefer one correct PR to three that each need a rebase and a re-gate: every merge moves
+  the default branch, so each queued PR pays the gate again after the merge ahead of it.
 - Gates that must not share the machine (timings, memory peaks) run only when the load is
   low, by a bar you set in preflight (an example from the runs this was written from: other
   runnable tasks at p95 of 6 or fewer); a contended number is labelled, never scored.
@@ -122,9 +130,9 @@ When a criterion is a number:
 ## Closing children
 
 - Closing keywords (close, fix, resolve) next to an issue number close it on merge, even
-  negated. `Closes #N` only when the acceptance criteria are met; otherwise `Part of #N`
-  and no closing words near the number, epic number included. A bare `(#N)` suffix is
-  harmless but jsse-style repos avoid it on partial stages as a precaution.
+  negated. Agent PRs always say `Part of #N`, with no closing words near the number, epic
+  number included; the orchestrator closes after verification. A bare `(#N)` suffix is
+  harmless but some repos avoid it on partial stages as a precaution.
 - A merged-but-open child goes through the close-out audit, not an optimistic close.
 - **Closed-as-measured**: criteria unmet but with numbers, the reason, and a stated decision
   rule ("regression-free, or don't force it"). Allowed only when the user stated the rule up
@@ -156,7 +164,7 @@ the revert command. When in doubt, ask.
 ## Resuming
 
 A session restart loses the schedule and the in-memory queue. Rebuild from durable state:
-the rulings comment on the epic (capped.sh path, cron id, run ids), `gh pr list --state all
+the rulings comment on the epic (run config, cron id, run ids), `gh pr list --state all
 --search '"Part of #<epic>" in:body'`, `git worktree list`, the open children, and the default branch's
 CI. Recreate the cron job, resume dead named agents by name, relaunch workflows with
 `resumeFromRunId`, and continue from the first unmet step. Say what was found.
