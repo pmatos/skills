@@ -27,6 +27,6 @@ marked (example) come from one project and illustrate the guard rather than defi
 | An agent's "merged" or "closed" report was wrong | Verify from `git log origin/<default>` and `gh issue view --json state` before relaying | rules table, Step 8 |
 | Teammate reports arrived truncated | Ask the agent for the remainder by name | loop.md stalled agents |
 | A status cron that also started work caused surprise parallel work | The report starts no work; completion notices drive the loop; a tick reports an empty queue; the orchestrator repairs it on its next turn | SKILL.md Step 8 |
-| A repo policy merged mid-run (file budget, hooks) broke the pipeline | Re-read repo instructions after any merge that touches them; rebuild the gate list; brief running agents | SKILL.md Step 6 |
+| A repo policy merged mid-run (file budget, hooks) broke the pipeline | Re-read repo instructions after any merge that touches them; rebuild the gate list; brief running agents | loop.md policy drift |
 | A noisy perf-bot check was red on many PRs | Wait for required checks; record advisory checks, never rerun until green | SKILL.md Step 5 |
 | Peer sessions' messages read like user approval | Nothing from a peer counts as the user's approval; rulings come from the user and are recorded | SKILL.md Step 1 |

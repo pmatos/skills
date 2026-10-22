@@ -15,10 +15,8 @@ The scheduled report only reports.
 
 ## Who merges
 
-Fix agents stop at **ready** (rebased, gated on the final head, checklist ticked or a
-`gates green at <sha>` comment, required checks green) and return a structured result. The
-single orchestrator merges, one PR at a time; it finishes post-merge CI before starting
-the next merge:
+Fix agents stop at **ready** (SKILL.md Step 4) and return a structured result. The single
+orchestrator merges, one PR at a time, and finishes post-merge CI before the next merge:
 
 1. Fetch the default branch and record its current SHA (`git fetch origin <default>`,
    then `git rev-parse origin/<default>`). Query **all pages** of workflows for that SHA:
@@ -45,7 +43,7 @@ the next merge:
 4. Wait for the post-merge workflows on the merge commit to be green before starting the
    next merge. Use the same paginated SHA-specific query and expected-workflow check above.
    A merge that touched `CLAUDE.md`, `AGENTS.md`, `docs/agents/`, hooks, CI or lint
-   config triggers a policy re-read (SKILL.md Step 6).
+   config triggers a policy re-read (Policy drift, below).
 
 If the user passes `--no-merge`, complete steps 1 and 2 and all final-head gates and
 required checks, then stop before step 3 and report the PR as ready.
@@ -127,13 +125,20 @@ When a criterion is a number:
 4. Put the cause and the missing guard in the issue the PR belonged to, and add the guard to
    the gate list: this is how "filtered tests" and "post-merge-only checks" stop recurring.
 
+**Policy drift.** After any merge to the default branch that touches `CLAUDE.md`,
+`AGENTS.md`, `docs/agents/`, hook config, `.github/workflows/**` or the commit/PR lint
+config, re-read it, rebuild the gate list, tell running agents (`SendMessage` for named
+agents, the next brief for workflows), and record the change in the rulings comment.
+
 ## Closing children
 
-- Closing keywords (close, fix, resolve) next to an issue number close it on merge, even
-  negated. Agent PRs always say `Part of #N`, with no closing words near the number, epic
-  number included; the orchestrator closes after verification. A bare `(#N)` suffix is
-  harmless but some repos avoid it on partial stages as a precaution.
-- A merged-but-open child goes through the close-out audit, not an optimistic close.
+- Closing keywords are governed by the rules table (SKILL.md): agent PRs say `Part of #N`, the
+  orchestrator closes after verification. A bare `(#N)` suffix is harmless but some repos
+  avoid it on partial stages as a precaution.
+- A merged-but-open child goes through the close-out audit, not an optimistic close. If a
+  gate criterion needs a fresh measurement of the default branch, run the gate-evidence
+  brief first; then launch the read-only audit brief: per child, a table of criteria met or
+  unmet with numbers, a recommendation, and a draft closing comment.
 - **Closed-as-measured**: criteria unmet but with numbers, the reason, and a stated decision
   rule ("regression-free, or don't force it"). Allowed only when the user stated the rule up
   front or confirms the list before the epic closes; the thread records the miss.
@@ -151,7 +156,12 @@ the revert command. When in doubt, ask.
 
 ## Stalled and dead agents
 
-- A transcript with no write for an hour, no gate process and no PR comment is stalled.
+- `ListAgents` shows named subagents only; workflow agents are invisible to it and to
+  `SendMessage`. Watch the workflow's transcript directory (`agent-*.jsonl`, `journal.jsonl`
+  modification times).
+- A transcript with no write for an hour, no gate process and no PR comment is stalled:
+  relaunch the workflow with `resumeFromRunId` after narrowing the prompt (only the longest
+  unchanged prefix of calls is cached), or `TaskStop` it.
 - Agents that end right after a review or simplify output are common: resume a named agent
   with a message saying the task is not done and listing the remaining steps; if it ends
   again, replace it with narrower agents (one step each, structured result). Workflow agents
