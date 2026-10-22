@@ -151,24 +151,16 @@ wording). The red-main merge check and verifying reports belong to the orchestra
 
 ## Step 2 — Safety rails
 
-- `scripts/capped.sh [-n] [-m GB] [-t SECONDS] [-w SECONDS] -- cmd`: transient systemd scope
-  under one shared slice, memory cap, no swap, optional wall and lock-wait limits, shared
-  lock for exclusive jobs (timing runs, full builds, whole suites). Exit 124 (timeout)
-  or a signal exit (137/143) is a finding to report, never a reason to raise the cap.
-  The wrapper prints its scope name: stop a running job with
-  `systemctl --user stop <scope>`, then wait for the wrapper to release the lock. Killing
-  only the wrapper PID does not stop its scope. A queued job has no scope yet; cancel it
-  by its recorded waiting `flock` PID.
+- Run every heavy job through `scripts/capped.sh` (flags, exit codes and the stop procedure:
+  `capped.sh -h`). Exit 124 or a signal exit (137/143) is a finding to report, never a
+  reason to raise the cap. Stop a job by its printed scope, never by the wrapper PID.
 - Scratch lives in a per-agent directory; worktrees and branches are removed when a PR
   merges. Stage explicit paths.
-- Waiting. The **orchestrator** and **Workflow** stages start long jobs with
-  `run_in_background: true` (or a Monitor until-loop), writing a log and an exit-code
-  file; the finished command wakes them, and the orchestrator ends turns between events so
-  scheduled ticks can fire. **Named subagents (Agent tool) are not reliably woken** by a
-  background job: an agent that ended its turn on one was never resumed. `Agent`-tool
-  subagents wait in the foreground, in blocking calls (an `until` loop or a blocking `flock`) of at most about
-  ten minutes each, repeated until the job is done, and never end a turn while work is
-  pending. A detached process (`nohup`, `setsid`) or a lock queue wakes nobody.
+- Waiting. The orchestrator and Workflow stages start long jobs with `run_in_background: true`
+  (or a Monitor until-loop), writing a log and an exit-code file, and end turns between
+  events so scheduled ticks can fire. Named `Agent`-tool subagents are not reliably woken by
+  a background job: they wait in the foreground in blocking calls of about ten minutes each
+  (wording in the briefs preamble).
 - Leave durable state (pushed branches, PR and issue comments) so a restart can continue;
   agents die on transient API errors.
 
@@ -230,16 +222,10 @@ unchanged since its gate (nothing merged ahead of it) needs none.
 
 ## Step 6 — Keep main green
 
-A red default branch outranks the plan. Find the failing test from the CI log or by running
-only the tests the offending PR added or touched, fix it in a small PR with the evidence,
-and hold every other merge until it is green (the orchestrator owns merges, so this is one
-decision). If the cause is not found within about half an hour (a default; tell the user),
-revert the offending PR on a branch and re-land it properly. **Policy drift:** after any
-merge to the default branch that touches `CLAUDE.md`, `AGENTS.md`, `docs/agents/`, hook
-config, `.github/workflows/**` or the commit/PR lint config, re-read it, rebuild the gate
-list, tell running agents (`SendMessage` for named agents, the next brief for workflows),
-and record the change in the rulings comment. Re-read the epic body and child list at each
-status tick: the human may have changed the criteria or added children.
+A red default branch outranks the plan: hold every other merge until it is green
+(`references/loop.md`, Keeping main green). After any merge that touches repo policy, re-read
+it (Policy drift, same section). Re-read the epic body and child list at each status tick:
+the human may have changed the criteria or added children.
 
 ## Step 7 — Human decisions
 
@@ -267,12 +253,8 @@ If no answer arrives, continue other work and list the question in every report.
   the report is out, the orchestrator (the same session) repairs the queue as its own action
   and says so, after checking `git`, `gh` and the transcript directory (below) that nothing
   is in flight, so it never duplicates running work.
-- `ListAgents` shows named subagents only; workflow agents are invisible to it and to
-  `SendMessage`. Watch the workflow's transcript directory (`agent-*.jsonl`, `journal.jsonl`
-  modification times; record the path from the `Workflow` result). A transcript with no write
-  for an hour, no gate process and no PR comment is stalled: relaunch the workflow with
-  `resumeFromRunId` after narrowing the prompt (only the longest unchanged prefix of calls is
-  cached), or `TaskStop` it; named agents are resumed with `SendMessage`.
+- Stalled agents and the workflow transcript directory: `references/loop.md`, Stalled and
+  dead agents. Record the transcript path from each `Workflow` result.
 
 ## Step 9 — Pause, resume, closure
 
@@ -280,19 +262,12 @@ If no answer arrives, continue other work and list the question in every report.
   merged until its post-merge workflows are green, leave in-flight PRs pushed and unmerged,
   start nothing new, and say so.
 - **Resume**: `references/loop.md`, Resuming.
-- **Close-out**: if a gate criterion needs a fresh measurement of the default branch, run the
-  gate-evidence brief first. Then launch a **read-only audit agent**: for every child merged but still open,
-  a table of acceptance criteria met or unmet with numbers, a recommendation, and a draft
-  closing comment. A child whose criteria are
-  not all met may be **closed-as-measured** (a fifth verdict next to the triage four: done,
-  partial, open and needs-ruling): the numbers, the reason, and the decision rule that justifies it (for example
-  "regression-free or don't force it"). That needs the user to have stated the rule up front
-  or to confirm the list before the epic closes; record it in the rulings comment. Then close children with a measurements comment.
-  Close the epic only when every child is done or closed-as-measured with evidence; otherwise write
-  the gap list. When the queue is empty and only
-  `human-needed` or blocked items remain, that is the end: delete the cron job, remove
-  worktrees, release locks, finalise the rulings comment, and report what shipped, what was
-  measured, what was ruled by whom, and what remains.
+- **Close-out**: run the close-out audit (`references/loop.md`, Closing children), then close
+  children with evidence. Close the epic only when every child is done or closed-as-measured;
+  otherwise write the gap list. When the queue is empty and only `human-needed` or blocked
+  items remain, that is the end: delete the cron job, remove worktrees, release locks,
+  finalise the rulings comment, and report what shipped, what was measured, what was ruled
+  by whom, and what remains.
 
 ## Anti-patterns
 

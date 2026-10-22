@@ -390,7 +390,7 @@ Flags: `ultracode`, `--serial`, `--max-parallel N`, `--no-merge`, `--report-ever
 
 Trigger phrases: `vibe an epic`, `vibe #N`, `drive epic #N to done`, `solve the epic`, `work through the epic's sub-issues`.
 
-**Requires**: [`gh`](https://cli.github.com/) with write access, the sibling `rebase-pr` skill (install it too), a git repository whose CI is the merge gate, and Linux with `systemd-run --user` for the memory caps (the wrapper refuses to run uncapped unless told to). Multi-agent workflows need the word `ultracode` in your own message; without it the skill continues with a few `Agent` calls.
+**Requires**: Claude Code (it relies on the `Workflow`, `CronCreate`, `SendMessage` and `ListAgents` tools; other harnesses are not supported), [`gh`](https://cli.github.com/) with write access, the sibling `rebase-pr` skill (install it too), a git repository whose CI is the merge gate, and Linux with `systemd-run --user` for the memory caps (the wrapper refuses to run uncapped unless told to). Multi-agent workflows need the word `ultracode` in your own message; without it the skill continues with a few `Agent` calls.
 
 **Credit**: the per-issue brief, the staging stop rule, the read-only close-out audit, the closed-as-measured verdict and the report-only cron come from the jsse epic loop (`pmatos/jsse`). The orchestrator-owned merges, post-merge waits and memory caps are this skill's own design.
 
