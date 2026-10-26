@@ -23,7 +23,8 @@ Rules that never bend:
   check on the final head SHA completed successfully; report a claim older than your last
   push as not run.
 - Closing keywords (close, fix, resolve) next to an issue number close it on merge, even
-  negated: your PR body says "Part of #N" and "Part of #<E>", never a closing keyword.
+  negated: your PR body says "Part of #<E>" for the epic, never a closing keyword, and
+  "Fixes #N" for issue #N only when this PR completes it (the final stage), else "Part of #N".
 - Do not merge. Stop at READY: review and simplify fixes pushed, required checks green on
   the final head SHA.
 
@@ -46,9 +47,9 @@ first, then <design docs, ADRs, the merged PRs that are the model>.
 
 Pipeline (sequential, in your own worktree; each command's output is one step, keep going):
 1. Run /investigate <N>: it takes the issue to an open PR (reproduce or design, fix with
-   tests, commit, push, open the PR). Overrides: the PR body says "Part of #<N>" and
-   "Part of #<E>", never a closing keyword (fix it with gh pr edit if investigate wrote
-   one), and its issue comment must not say the PR closes the issue. Follow <the repo's
+   tests, commit, push, open the PR). Overrides: the PR body says "Part of #<E>" for the
+   epic, never a closing keyword, and keeps investigate's "Fixes #<N>" only when this PR
+   completes the issue (the final stage), else "Part of #<N>" (fix with gh pr edit). Follow <the repo's
    commit and PR-title rules>. If investigate stops on a blocker (no repro, ambiguous
    design), open no PR and report it in needsRuling.
 2. Run /code-review high --fix --comment on the PR. Commit the applied fixes (explicit
