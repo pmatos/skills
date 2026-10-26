@@ -391,8 +391,6 @@ Trigger phrases: `vibe an epic`, `vibe #N`, `drive epic #N to done`, `solve the 
 
 **Requires**: Claude Code (it relies on the `Workflow`, `CronCreate`, `SendMessage` and `ListAgents` tools; other harnesses are not supported), [`gh`](https://cli.github.com/) with write access, the sibling `investigate` and `rebase-pr` skills (install them too), a git repository whose CI is the merge gate. Multi-agent workflows need the word `ultracode` in your own message; without it the skill continues with a few `Agent` calls.
 
-**Credit**: the per-issue brief, the staging stop rule, the read-only close-out audit, the closed-as-measured verdict and the report-only cron come from the jsse epic loop (`pmatos/jsse`). The orchestrator-owned merges, and post-merge waits are this skill's own design.
-
 ## License
 
 MIT
