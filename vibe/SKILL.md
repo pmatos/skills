@@ -78,7 +78,7 @@ wording). The red-main merge check and verifying reports belong to the orchestra
 | Kill processes by recorded PID only, never `pkill -f <pattern>` | The pattern matched the agent's own shell |
 | A push restarts the checks: wait for green on the final head, never merge on checks from an earlier one | The checks would be claims about a tree that no longer exists |
 | A report is a claim, not a fact: verify merges from `git log origin/<default>` and `gh`, never from an agent's say-so | Agents overstate "merged" and "closed" |
-| Closing keywords (close, fix, resolve) next to an issue number close it on merge, even negated ("does not close #N"). Agent PRs say `Part of #N`, never a closing keyword; the orchestrator closes after verifying | A negated phrase once closed an epic |
+| Closing keywords (close, fix, resolve) next to an issue number close it on merge, even negated ("does not close #N"). A PR carries one only for the child it completes (the final stage); stage PRs and every epic reference say `Part of #N`, and the orchestrator closes the rest after verifying | A negated phrase once closed an epic |
 
 ## Step 0 — Preflight
 
@@ -175,9 +175,10 @@ single status comment per partial child from the returned evidence, reusing its 
   its own checks, and a stop rule ("stop when the next stage cannot be had without a
   regression or the measured gain runs out") so nothing is forced. Batch small correctness
   bugs to one agent, one PR each.
-- PR bodies always say `Part of #N`, never a closing keyword (`/investigate` writes one by
-  default; the brief overrides it), even when the criteria look met: an agent's "done" is a claim (rules table), so the orchestrator closes children after
-  verification (Step 9).
+- PR bodies say `Part of #<E>` for the epic, never a closing keyword. A child's PR keeps
+  `/investigate`'s `Fixes #N` only when it completes the issue (the final stage); earlier
+  stages say `Part of #N`. The orchestrator closes every other child after verification
+  (Step 9): an agent's "done" is a claim (rules table).
 - Each fix agent runs one pipeline per issue in its own worktree: `/investigate <N>` (issue
   to open PR), `/code-review high --fix --comment`, `/simplify`, then waits for the required
   checks. Nothing is run locally to prove green: the PR's CI is the gate. Agents stop at

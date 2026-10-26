@@ -127,8 +127,9 @@ agents, the next brief for workflows), and record the change in the rulings comm
 
 ## Closing children
 
-- Closing keywords are governed by the rules table (SKILL.md): agent PRs say `Part of #N`, the
-  orchestrator closes after verification. A bare `(#N)` suffix is harmless but some repos
+- Closing keywords are governed by the rules table (SKILL.md): only the PR that completes a
+  child may close it; stage PRs and the epic reference say `Part of #N`, and the
+  orchestrator closes the rest after verification. A bare `(#N)` suffix is harmless but some repos
   avoid it on partial stages as a precaution.
 - A merged-but-open child goes through the close-out audit, not an optimistic close. If a
   gate criterion needs a fresh measurement of the default branch, run the gate-evidence
