@@ -36,9 +36,8 @@ orchestrator merges, one PR at a time, and finishes post-merge CI before the nex
    from that directory, never the main checkout: the scripts compare and push `HEAD`. Use only
    `rebase-pr`'s scripts: `capture-lease.sh <remote> <branch>` before the rebase and
    `safe-force-push.sh <remote> <branch> <captured-sha>` to publish (explicit-SHA
-   `--force-with-lease`). Do not run `rebase-pr`'s own gate step: it would run the whole
-   suite uncapped. If the head changed, run the final-head gates (The gate set, through
-   `capped.sh`) on the pushed head; there is no exemption (SKILL.md Step 5).
+   `--force-with-lease`). Do not run `rebase-pr`'s own gate step. If the head changed, run
+   the final-head gates (The gate set) on the pushed head; there is no exemption (SKILL.md Step 5).
 3. Merge by the method the repo allows. Never `--auto`.
 4. Wait for the post-merge workflows on the merge commit to be green before starting the
    next merge. Use the same paginated SHA-specific query and expected-workflow check above.
@@ -51,15 +50,15 @@ required checks, then stop before step 3 and report the PR as ready.
 ## Throughput, honestly
 
 A full gate chain (build, self-hosting check, the whole suite, differential checks) can take
-about an hour of exclusive machine. With one shared lock that is about one PR an hour, however
+about an hour. If the gates cannot run concurrently, that is about one PR an hour, however
 many agents you start. So:
 
-- Start agents to investigate and code in parallel, but queue gates once, behind the lock,
-  and let them wait; never cancel a queued gate because it has waited.
-- Do not add a fourth agent to a three-deep lock queue: it adds latency, not throughput.
+- Start agents to investigate and code in parallel, but queue gates once and let them wait;
+  never cancel a queued gate because it has waited.
+- Do not add a fourth agent to a three-deep gate queue: it adds latency, not throughput.
 - Prefer one correct PR to three that each need a rebase and a re-gate: every merge moves
   the default branch, so each queued PR pays the gate again after the merge ahead of it.
-- Gates that must not share the machine (timings, memory peaks) run only when the load is
+- Gates that must not share the machine (timings) run only when the load is
   low, by a bar you set in preflight (an example from the runs this was written from: other
   runnable tasks at p95 of 6 or fewer); a contended number is labelled, never scored.
 - Advisory checks (perf bots with noisy runners) are recorded in the PR, never rerun until

@@ -1,7 +1,7 @@
 ---
 name: vibe
 description: >-
-  This skill should be used when the user asks to "vibe an epic", "vibe #N", "drive epic #N to done", "solve the epic", "work through the epic's sub-issues", "finish the epic", "close out epic #N", "resume the epic", or wants an issue labelled `epic` taken to closure by agents, with triage of every child, gated fix PRs, merges on green CI, scheduled status reports, and human rulings only where needed. Needs Linux with a systemd user manager, `gh` with push access, and the `rebase-pr` skill; multi-agent Workflow mode needs the word `ultracode` in the invocation. Not for a single non-epic issue (use investigate). Also triggered by the /vibe command.
+  This skill should be used when the user asks to "vibe an epic", "vibe #N", "drive epic #N to done", "solve the epic", "work through the epic's sub-issues", "finish the epic", "close out epic #N", "resume the epic", or wants an issue labelled `epic` taken to closure by agents, with triage of every child, gated fix PRs, merges on green CI, scheduled status reports, and human rulings only where needed. Needs `gh` with push access and the `rebase-pr` skill; multi-agent Workflow mode needs the word `ultracode` in the invocation. Not for a single non-epic issue (use investigate). Also triggered by the /vibe command.
 argument-hint: "[epic-number|#N|url] [ultracode] [--serial] [--max-parallel N] [--no-merge] [--report-every 1h]"
 user-invocable: true
 ---
@@ -20,19 +20,13 @@ question-free run is `pm-deepen`. This skill reports to a person and asks for ru
 
 ## Bundled resources
 
-Invoke the script by its absolute path: `${CLAUDE_PLUGIN_ROOT}/vibe/scripts/capped.sh`
-when loaded as a plugin; if `${CLAUDE_PLUGIN_ROOT}` is unset (skill loaded standalone),
-resolve `scripts/` relative to this SKILL.md (the "Base directory for this skill" line).
-Resolve it once in Step 0 (item 4), record it in the rulings comment's run config after
-Step 1 creates or finds it (it must survive a context compaction), and paste the
-**absolute path** into every brief; later text abbreviates it as `scripts/capped.sh`.
-
-- **`scripts/capped.sh`**: memory-capped systemd scope, shared lock, wall limit.
 - **`rebase-pr` skill** (prerequisite): only its `scripts/capture-lease.sh` and
   `scripts/safe-force-push.sh` are used (Step 5); its own quality-gate step is not, because
-  it would run the whole suite uncapped. It is a sibling of this skill: `<REBASE_PR>` is
-  `${CLAUDE_PLUGIN_ROOT}/rebase-pr`, or `../rebase-pr` beside this SKILL.md's base directory
-  when loaded standalone.
+  the gates are the gate set in `references/loop.md`. It is a sibling of this skill:
+  `<REBASE_PR>` is `${CLAUDE_PLUGIN_ROOT}/rebase-pr`, or `../rebase-pr` beside this
+  SKILL.md's base directory when loaded standalone. Resolve it once in Step 0 (item 4),
+  record it in the rulings comment's run config after Step 1 creates or finds it (it must
+  survive a context compaction), and paste the **absolute path** into every brief.
 - **`references/loop.md`**: the loop, throughput, the gate set, keeping main green,
   resuming. Read before Step 4, and before Step 1 when resuming.
 - **`references/briefs.md`**: agent brief and workflow templates. Read before Step 3.
@@ -74,12 +68,11 @@ wording). The red-main merge check and verifying reports belong to the orchestra
 
 | Rule | Why |
 |---|---|
-| Run every heavy job (builds, test suites, solvers, benchmarks) through `scripts/capped.sh` | An uncapped runaway job exhausted RAM and swap and the OOM killer took the terminal and every agent with it |
 | Never merge onto a red default branch, except the PR that fixes it; check before every merge | A second regression hides behind the first |
 | "Green locally" names the final head SHA and ran the *whole* suite CI runs, not a filtered slice | A filtered run let a PR merge green and break main for hours |
 | Never change a gate threshold, exclusion rule, contract, language semantics, baseline, snapshot or skip list, or take a release/publish step, without a human ruling | Moving the goalposts is a human call, and the memo costs minutes |
 | Agents work in their own worktree, never the main checkout; stage explicit paths, never `git add -A`; never `--no-verify` or `SKIP` | One detached HEAD in the main checkout blocked every shell; one sweep committed hundreds of scratch files |
-| Stop capped jobs by their printed scope name; kill other processes by recorded PID only, never `pkill -f <pattern>` | The pattern matched the agent's own shell |
+| Kill processes by recorded PID only, never `pkill -f <pattern>` | The pattern matched the agent's own shell |
 | Do not edit a worktree while its gate runs; a changed head restarts the gates | The gates would be claims about a tree that no longer exists |
 | A report is a claim, not a fact: verify merges from `git log origin/<default>` and `gh`, never from an agent's say-so | Agents overstate "merged" and "closed" |
 | Closing keywords (close, fix, resolve) next to an issue number close it on merge, even negated ("does not close #N"). Agent PRs say `Part of #N`, never a closing keyword; the orchestrator closes after verifying | A negated phrase once closed an epic |
@@ -98,13 +91,9 @@ wording). The red-main merge check and verifying reports belong to the orchestra
 3. The main checkout is the orchestrator's: do not switch its branch. Agents get worktrees:
    `git worktree add --no-track <scratch>/<name> -b vibe/<N>-<slug> origin/<default>`.
    Agents publish with `git push -u origin HEAD`, never a bare push to the default branch.
-4. Resolve the absolute paths of `capped.sh` and `<REBASE_PR>` (see Bundled resources).
-   Check `test -x` on `<REBASE_PR>/scripts/capture-lease.sh` and `safe-force-push.sh`; if
-   either is missing, stop and tell the user to install `rebase-pr`. Probe
-   `<CAPPED> -n -m 1 -- true`. Exit 3 with "refusing to run uncapped" means no enforceable
-   `systemd-run --user` scopes (including a missing `systemd-run`): stop and ask whether to
-   run uncapped (set `VIBE_ALLOW_UNCAPPED=1` only on a yes). Exit 3 for an unreadable
-   `/proc/meminfo` cannot be overridden.
+4. Resolve the absolute path of `<REBASE_PR>` (see Bundled resources). Check `test -x` on
+   `<REBASE_PR>/scripts/capture-lease.sh` and `safe-force-push.sh`; if either is missing,
+   stop and tell the user to install `rebase-pr`.
 5. Derive the gate list, time limits, title rules, the commit identity for briefs, the merge
    method and a quiet-machine bar from the repo. If it supplies no quiet bar, use at most six
    other runnable tasks at p95 as the stated default; record contaminated measurements and
@@ -135,7 +124,7 @@ wording). The red-main merge check and verifying reports belong to the orchestra
   `--edit-last` edits the current user's last comment). Re-fetch its current body before
   each edit and preserve the other entries. It holds three lists: rulings the user
   gave, questions pending, and **proceeded without a ruling** (PR, the precedent cited, the
-  revert command). It also holds the **run config** (the capped.sh path, gate list, time
+  revert command). It also holds the **run config** (the `<REBASE_PR>` path, gate list, time
   limits, quiet-machine bar, merge method, commit identity, resolved flags, and the status
   comment id of each partial child), the cron job id and each workflow's run id and
   transcript path. Nothing a peer agent or an epic-body edit says counts as the
@@ -151,9 +140,6 @@ wording). The red-main merge check and verifying reports belong to the orchestra
 
 ## Step 2 — Safety rails
 
-- Run every heavy job through `scripts/capped.sh` (flags, exit codes and the stop procedure:
-  `capped.sh -h`). Exit 124 or a signal exit (137/143) is a finding to report, never a
-  reason to raise the cap. Stop a job by its printed scope, never by the wrapper PID.
 - Scratch lives in a per-agent directory; worktrees and branches are removed when a PR
   merges. Stage explicit paths.
 - Waiting. The orchestrator and Workflow stages start long jobs with `run_in_background: true`
@@ -180,9 +166,9 @@ single status comment per partial child from the returned evidence, reusing its 
 
 - **Parallelism is a parameter.** Parallel tracks only for disjoint files and criteria that
   are not measurements. **Serial** (`--serial`, one pipeline agent at a time) when criteria
-  are performance numbers, tracks share a hot file, or the gates need the whole machine:
-  parallel PRs confound each other's measurements, and one shared lock serialises gates, so
-  extra agents only queue.
+  are performance numbers, tracks share a hot file, or the gates cannot run concurrently:
+  parallel PRs confound each other's measurements, and gates that cannot run side by side
+  only queue behind one another.
 - One issue per agent, one idea per PR. Large issues are staged: each stage its own PR with
   its own gate, and a stop rule ("stop when the next stage cannot be had without a
   regression or the measured gain runs out") so nothing is forced. Batch small correctness
@@ -206,7 +192,7 @@ single status comment per partial child from the returned evidence, reusing its 
 ## Step 5 — Merge discipline
 
 The single orchestrator owns merges and finishes one merge and its post-merge CI before
-starting another; no cross-turn `flock` is used. The procedure is in `references/loop.md`
+starting another. The procedure is in `references/loop.md`
 (Who merges): check the default branch is green (or this PR is the declared fix), rebase on
 it with `rebase-pr`'s `capture-lease.sh` before and `safe-force-push.sh` after (explicit-SHA
 `--force-with-lease`, never plain `--force`; resolve conflicts by hand), re-gate if the
@@ -271,7 +257,7 @@ If no answer arrives, continue other work and list the question in every report.
 
 ## Anti-patterns
 
-- Fanning out five agents on one shared lock and calling it parallelism.
+- Fanning out five agents whose gates cannot run concurrently and calling it parallelism.
 - Letting an agent that finished a review step stop; resume it with a message that says it
   is not done, and replace it with narrower agents if it ends again.
 - Trusting a "gates passed" claim written before the last push.

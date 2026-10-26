@@ -1,8 +1,7 @@
 # Agent briefs and workflow templates
 
-Fill the `<…>` slots. `<CAPPED>` is the absolute path of `vibe/scripts/capped.sh` and
-`<REBASE_PR>` that of the `rebase-pr` skill directory, both resolved in Step 0: substitute
-them before dispatch. Mark project-specific rules in a brief so the next
+Fill the `<…>` slots. `<REBASE_PR>` is the absolute path of the `rebase-pr` skill
+directory, resolved in Step 0: substitute it before dispatch. Mark project-specific rules in a brief so the next
 epic can swap them. The per-issue brief is adapted from a long-running epic loop.
 
 ## Common preamble for every agent
@@ -19,20 +18,15 @@ branch once with git push -u origin HEAD BEFORE the first capture. capture-lease
 3 (3 = you have unpushed commits) means proceed with the SHA it prints; exit 2, 4 or 5 means
 stop and report (4 = another writer is active, 5 = this checkout is not the PR branch).
 safe-force-push.sh exit 4 or 5 also means stop; never retry with --force.
-Do not use rebase-pr's own gate step: your gates go through <CAPPED>. Never plain --force;
+Do not use rebase-pr's own gate step: run the gate set from the run config. Never plain --force;
 if the lease fails, stop and re-inspect. Publish initially with git push -u origin HEAD.
 
 Rules that never bend:
-- Heavy commands (builds, suites, solvers, benchmarks) go through <CAPPED>:
-  use its host-adaptive default with the lock for builds and suites, -n for small runs,
-  and -n -t <project wall limit in seconds> for experiments. Preflight supplies the time
-  limits and quiet-machine bar. Exit 124 (timeout status) or a signal exit (137/143) is a
-  finding to report, never a reason to raise a cap.
 - Never change a gate threshold, exclusion rule, contract, language semantics, baseline,
   snapshot or skip list, and take no release or publish step, without a human ruling: put
   the question in your result (needsRuling) and stop that part.
-- Stage explicit paths, never git add -A. Never --no-verify or SKIP. Stop capped jobs with
-  systemctl --user stop <printed-scope>; use recorded PIDs for other processes, never pkill -f. Do not edit a worktree while its gate runs.
+- Stage explicit paths, never git add -A. Never --no-verify or SKIP. Kill processes by
+  recorded PID, never pkill -f. Do not edit a worktree while its gate runs.
 - "Green locally" names the final head SHA and means the WHOLE suite CI runs, not a
   filtered slice. Report a claim older than your last push as not run.
 - Closing keywords (close, fix, resolve) next to an issue number close it on merge, even
@@ -41,8 +35,8 @@ Rules that never bend:
   "gates green at <sha>" PR comment), required checks green.
 
 Waiting: Agent-tool subagents wait in the FOREGROUND, in blocking calls (an until loop on a log and an exit-code
-file, or a blocking flock) of at most about ten minutes each, repeated until the job is done.
-A background job, a detached process or a lock queue does not reliably wake a subagent:
+file) of at most about ten minutes each, repeated until the job is done.
+A background job or a detached process does not reliably wake a subagent:
 never end your turn while work is pending. Workflow stages and the orchestrator may instead
 use supported run_in_background wakeups with durable logs and exit-code files; this
 exception applies only when dispatched as a Workflow stage, not via the Agent tool. Leave durable state: push branches,
@@ -96,7 +90,7 @@ gates NOT run, needsRuling", parse it, and verify from `git` and `gh`.
 ```text
 Theme '<theme>': issues <#a, #b, …>. For each: read the body and every comment, the code,
 fixtures and skip rows it names, and test the claim against the current default branch
-(run the reproducer, capped). Classify done | partial | open | needs-ruling with concrete
+(run the reproducer). Classify done | partial | open | needs-ruling with concrete
 evidence, the precise remaining work, whether an agent can do it without a ruling, and a
 priority (1 = blocks the epic's gate or a soundness/coverage gap, 3 = nice to have).
 Return status and evidence for partial children; the orchestrator updates their status
