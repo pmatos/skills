@@ -29,66 +29,62 @@ orchestrator merges, one PR at a time, and finishes post-merge CI before the nex
    No runs is not evidence of green: wait for expected runs or record a policy-backed
    "no CI applies" decision. Refuse a red branch unless this PR is its declared fix.
    Re-check the remote head before merging; if it moved, repeat this check.
-2. Rebase on the newest default branch, resolving conflicts by hand, in the PR's own
+2. Check the PR: `gh pr view <pr> --json mergeable,mergeStateStatus` (re-query while it says
+   UNKNOWN). If it is CONFLICTING, or BEHIND under a repo rule that requires an up-to-date
+   branch, rebase on the newest default branch, resolving conflicts by hand, in the PR's own
    worktree: reuse the agent's (idle at READY, tracking `origin/<branch>`), or if it is gone
    `git worktree add -B <branch> <dir> origin/<branch>` then
-   `git -C <dir> branch --set-upstream-to=origin/<branch>`. Run the scripts and the gates
-   from that directory, never the main checkout: the scripts compare and push `HEAD`. Use only
+   `git -C <dir> branch --set-upstream-to=origin/<branch>`. Run the scripts from that
+   directory, never the main checkout: the scripts compare and push `HEAD`. Use only
    `rebase-pr`'s scripts: `capture-lease.sh <remote> <branch>` before the rebase and
    `safe-force-push.sh <remote> <branch> <captured-sha>` to publish (explicit-SHA
-   `--force-with-lease`). Do not run `rebase-pr`'s own gate step. If the head changed, run
-   the final-head gates (The gate set) on the pushed head; there is no exemption (SKILL.md Step 5).
-3. Merge by the method the repo allows. Never `--auto`.
+   `--force-with-lease`). Do not run `rebase-pr`'s own gate step: the PR's CI is the gate.
+   The push restarts the checks: wait for the required checks to be green on the new head,
+   then repeat the remote-head check of step 1. A PR that is neither CONFLICTING nor BEHIND
+   is merged as it stands.
+3. Merge by the method the repo allows, only with every required check green on the PR's
+   current head. Never `--auto`.
 4. Wait for the post-merge workflows on the merge commit to be green before starting the
    next merge. Use the same paginated SHA-specific query and expected-workflow check above.
    A merge that touched `CLAUDE.md`, `AGENTS.md`, `docs/agents/`, hooks, CI or lint
    config triggers a policy re-read (Policy drift, below).
 
-If the user passes `--no-merge`, complete steps 1 and 2 and all final-head gates and
-required checks, then stop before step 3 and report the PR as ready.
+If the user passes `--no-merge`, complete steps 1 and 2 (including green required checks on the final head), then stop
+before step 3 and report the PR as ready.
 
 ## Throughput, honestly
 
-A full gate chain (build, self-hosting check, the whole suite, differential checks) can take
-about an hour. If the gates cannot run concurrently, that is about one PR an hour, however
-many agents you start. So:
+CI on a PR can take an hour, and merges are one at a time, each followed by its post-merge
+workflows. So:
 
-- Start agents to investigate and code in parallel, but queue gates once and let them wait;
-  never cancel a queued gate because it has waited.
-- Do not add a fourth agent to a three-deep gate queue: it adds latency, not throughput.
-- Prefer one correct PR to three that each need a rebase and a re-gate: every merge moves
-  the default branch, so each queued PR pays the gate again after the merge ahead of it.
-- Gates that must not share the machine (timings) run only when the load is
+- Start agents to investigate and code in parallel, but never cancel a PR's checks because
+  they have waited.
+- Prefer one correct PR to three that each hit conflicts: every merge moves the default
+  branch, so each queued PR may need a rebase and a fresh run of the checks.
+- Measurements that must not share the machine (timings) run only when the load is
   low, by a bar you set in preflight (an example from the runs this was written from: other
   runnable tasks at p95 of 6 or fewer); a contended number is labelled, never scored.
 - Advisory checks (perf bots with noisy runners) are recorded in the PR, never rerun until
   green. If one shows a real regression, cite it against your own deterministic measurement.
 
-## The gate set (generic)
+## The check set (generic)
 
-Derive the project's list from its CI workflows and contributor docs, then run, on the
-**final head SHA** after the last rebase and push. First review the PR's own diff inline
-in the agent's own worktree, apply findings, and simplify. Finish these edits before the
-final push and the gate chain below; any later edit or rebase restarts the gates:
+The gate is the PR's own CI; nothing is run locally to prove green. Derive the expected
+required workflows and checks from the repo's CI workflows and contributor docs. After the
+last push (the `/investigate` PR, then the review and simplify fixes), wait for every
+required check to complete successfully on the **final head SHA**. A missing, queued or
+running required check is not green; advisory checks are recorded separately. Any push
+restarts the checks, so finish review and simplify before waiting.
 
-1. The full build and the project's self-hosting or bootstrap check, if it has one.
-2. The **whole** test suite exactly as CI runs it, including any parity or differential
-   step between implementations. A filtered run is for development only.
-3. Every check CI runs only *after* merge. If it cannot run locally, say so in the PR and
-   propose a PR-time job; if it can, run it.
-4. The project's lint, format, commit and PR-title rules, and its file-size or complexity
-   budget. Use the repo's own budget: if it has a ratchet, files over the limit may change
-   but not grow, and new code goes in new small modules; if it has none, do not invent one,
-   propose it with a memo.
-5. Touched-area checks (generated files up to date, docs regenerated, schema or contract
-   checks).
+1. Checks CI runs only *after* merge: say so in the PR and propose a PR-time job; the
+   orchestrator watches them on the merge commit before the next merge.
+2. The project's lint, format, commit and PR-title rules, and its file-size or complexity
+   budget, are enforced by CI and hooks. Use the repo's own budget: if it has a ratchet,
+   files over the limit may change but not grow, and new code goes in new small modules; if
+   it has none, do not invent one, propose it with a memo.
 
 Never regenerate a baseline, snapshot, expected-output file or skip list to make a failure
 pass; only when the change legitimately adds passing tests, and say so in the PR.
-
-Then tick the PR checklist with the head SHA (a claim written before the last push is not a
-claim about the tree that merges) or comment `gates green at <sha>`, and wait for the
-required checks.
 
 ## Staging and the stop rule
 
@@ -122,17 +118,18 @@ When a criterion is a number:
    half an hour (a default; tell the user), revert the offending PR on a branch with a small
    PR so main goes green, then re-land properly.
 4. Put the cause and the missing guard in the issue the PR belonged to, and add the guard to
-   the gate list: this is how "filtered tests" and "post-merge-only checks" stop recurring.
+   the required checks: this is how "filtered tests" and "post-merge-only checks" stop recurring.
 
 **Policy drift.** After any merge to the default branch that touches `CLAUDE.md`,
 `AGENTS.md`, `docs/agents/`, hook config, `.github/workflows/**` or the commit/PR lint
-config, re-read it, rebuild the gate list, tell running agents (`SendMessage` for named
+config, re-read it, rebuild the expected-checks list, tell running agents (`SendMessage` for named
 agents, the next brief for workflows), and record the change in the rulings comment.
 
 ## Closing children
 
-- Closing keywords are governed by the rules table (SKILL.md): agent PRs say `Part of #N`, the
-  orchestrator closes after verification. A bare `(#N)` suffix is harmless but some repos
+- Closing keywords are governed by the rules table (SKILL.md): only the PR that completes a
+  child may close it; stage PRs and the epic reference say `Part of #N`, and the
+  orchestrator closes the rest after verification. A bare `(#N)` suffix is harmless but some repos
   avoid it on partial stages as a precaution.
 - A merged-but-open child goes through the close-out audit, not an optimistic close. If a
   gate criterion needs a fresh measurement of the default branch, run the gate-evidence
@@ -158,7 +155,7 @@ the revert command. When in doubt, ask.
 - `ListAgents` shows named subagents only; workflow agents are invisible to it and to
   `SendMessage`. Watch the workflow's transcript directory (`agent-*.jsonl`, `journal.jsonl`
   modification times).
-- A transcript with no write for an hour, no gate process and no PR comment is stalled:
+- A transcript with no write for an hour, no pending check and no PR comment is stalled:
   relaunch the workflow with `resumeFromRunId` after narrowing the prompt (only the longest
   unchanged prefix of calls is cached), or `TaskStop` it.
 - Agents that end right after a review or simplify output are common: resume a named agent
