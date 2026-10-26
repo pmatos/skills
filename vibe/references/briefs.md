@@ -1,7 +1,6 @@
 # Agent briefs and workflow templates
 
-Fill the `<…>` slots. `<REBASE_PR>` is the absolute path of the `rebase-pr` skill
-directory, resolved in Step 0: substitute it before dispatch. Mark project-specific rules in a brief so the next
+Fill the `<…>` slots. Mark project-specific rules in a brief so the next
 epic can swap them. The per-issue brief is adapted from a long-running epic loop.
 
 ## Common preamble for every agent
@@ -10,31 +9,26 @@ epic can swap them. The per-issue brief is adapted from a long-running epic loop
 Repo <owner/repo> at <path>, epic #<E> (<epic goal>). Read CLAUDE.md/AGENTS.md and the
 docs they link; provision the repo's hooks in your worktree; never bypass hooks.
 Work in your OWN git worktree and scratch directory, never the main checkout. Commit as
-<identity from the run config>. Use the newest default branch (git fetch) and rebase before
-gating: resolve conflicts by hand, run <REBASE_PR>/scripts/capture-lease.sh <remote> <branch> BEFORE
-the rebase and <REBASE_PR>/scripts/safe-force-push.sh <remote> <branch> <captured-sha> to publish.
-<remote> is the remote you push to (normally origin) and <branch> is your PR branch; push the
-branch once with git push -u origin HEAD BEFORE the first capture. capture-lease.sh exit 0 or
-3 (3 = you have unpushed commits) means proceed with the SHA it prints; exit 2, 4 or 5 means
-stop and report (4 = another writer is active, 5 = this checkout is not the PR branch).
-safe-force-push.sh exit 4 or 5 also means stop; never retry with --force.
-Do not use rebase-pr's own gate step: run the gate set from the run config. Never plain --force;
-if the lease fails, stop and re-inspect. Publish initially with git push -u origin HEAD.
+<identity from the run config>. Start from the newest default branch (git fetch). Publish
+with git push -u origin HEAD; never plain --force, and do not rebase: the orchestrator
+rebases a PR only when it has merge conflicts.
 
 Rules that never bend:
 - Never change a gate threshold, exclusion rule, contract, language semantics, baseline,
   snapshot or skip list, and take no release or publish step, without a human ruling: put
   the question in your result (needsRuling) and stop that part.
 - Stage explicit paths, never git add -A. Never --no-verify or SKIP. Kill processes by
-  recorded PID, never pkill -f. Do not edit a worktree while its gate runs.
-- "Green locally" names the final head SHA and means the WHOLE suite CI runs, not a
-  filtered slice. Report a claim older than your last push as not run.
+  recorded PID, never pkill -f.
+- Run nothing locally to prove green: the PR's CI is the gate. "Green" means every required
+  check on the final head SHA completed successfully; report a claim older than your last
+  push as not run.
 - Closing keywords (close, fix, resolve) next to an issue number close it on merge, even
-  negated: your PR body says "Part of #N" and "Part of #<E>", never a closing keyword.
-- Do not merge. Stop at READY: rebased, gated on the final head SHA, checklist ticked (or a
-  "gates green at <sha>" PR comment), required checks green.
+  negated: your PR body says "Part of #<E>" for the epic, never a closing keyword, and
+  "Fixes #N" for issue #N only when this PR completes it (the final stage), else "Part of #N".
+- Do not merge. Stop at READY: review and simplify fixes pushed, required checks green on
+  the final head SHA.
 
-Waiting: Agent-tool subagents wait in the FOREGROUND, in blocking calls (an until loop on a log and an exit-code
+Waiting: Agent-tool subagents wait in the FOREGROUND, in blocking calls (`timeout 600 gh pr checks <pr> --watch`, or an until loop on a log and an exit-code
 file) of at most about ten minutes each, repeated until the job is done.
 A background job or a detached process does not reliably wake a subagent:
 never end your turn while work is pending. Workflow stages and the orchestrator may instead
@@ -51,16 +45,18 @@ review or simplify step is one step, keep going.
 Goal: resolve issue #<N> (<title>), part of epic #<E>. Read the issue and its comments
 first, then <design docs, ADRs, the merged PRs that are the model>.
 
-Pipeline (sequential):
-1. Investigate. Reproduce on the current default branch before changing anything.
-2. Implement in small PRs, one idea each; add tests for the observable behaviour and
-   guard fixtures that fail on a wrong model. Follow <the repo's commit and PR-title rules>.
-   The PR body says "Part of #<N>" even when the
-   acceptance criteria look met (the orchestrator verifies and closes), and also "Part of #<E>".
-3. Review your own PR diff inline, high effort; apply findings by hand; comment a summary.
-4. Simplify pass, inline.
-5. Gates on the FINAL head SHA: <the project's whole-suite gate list>. Tick the PR
-   checklist with the SHA, wait for the required checks, then return READY.
+Pipeline (sequential, in your own worktree; each command's output is one step, keep going):
+1. Run /investigate <N>: it takes the issue to an open PR (reproduce or design, fix with
+   tests, commit, push, open the PR). Overrides: the PR body says "Part of #<E>" for the
+   epic, never a closing keyword, and keeps investigate's "Fixes #<N>" only when this PR
+   completes the issue (the final stage), else "Part of #<N>" (fix with gh pr edit). Follow <the repo's
+   commit and PR-title rules>. If investigate stops on a blocker (no repro, ambiguous
+   design), open no PR and report it in needsRuling.
+2. Run /code-review high --fix --comment on the PR. Commit the applied fixes (explicit
+   paths) and push.
+3. Run /simplify. Commit and push what it applied.
+4. Wait for the required checks on the FINAL head SHA; if one fails, fix, push and wait
+   again. Run nothing locally to prove green. Then return READY.
 
 Staging (large issues): each stage its own PR, ready before the next starts. Stop after any
 stage where the next cannot be had without a regression; comment the measurements.
@@ -75,15 +71,15 @@ decision rule). Known hazards in this codebase: <layout-sensitive hot paths, siz
 ratchet, generated files, dual-implementation rules>. A ruling-bound part is not yours:
 comment the exact question on the issue and report it in needsRuling.
 
-Final report, short, facts first: what shipped; the numbers; gates run and any NOT run;
+Final report, short, facts first: what shipped; the numbers; checks run and any not green;
 whether #<N> is done; anything filed; cleanup done.
 ```
 
 Workflow result schema (`READY`): `repo` (string), `issue` (number), `pr` (number, the PR
-this stage opened), `sha` (string), `gatesRun` (array of strings), `gatesNotRun` (array),
+this stage opened), `sha` (string), `checks` (array of strings: check name and conclusion),
 `needsRuling` (string, empty if none), `notes` (string). Plain `Agent` subagents return
-prose: end the brief with "finish your report with a block: repo, issue, PR, SHA, gates run,
-gates NOT run, needsRuling", parse it, and verify from `git` and `gh`.
+prose: end the brief with "finish your report with a block: repo, issue, PR, SHA, checks,
+needsRuling", parse it, and verify from `git` and `gh`.
 
 ## Triage brief (read-only)
 
@@ -183,7 +179,7 @@ for (const batch of FIX_BATCHES) {
 return fixes
 
 // ORCHESTRATOR BARRIER: retain triage AND fixes, verify every READY result from git/gh.
-// With --no-merge, ensure latest rebase, final-head gates and required checks, then stop.
+// With --no-merge, ensure required checks are green on the final head, then stop.
 ```
 
 `THEME_BATCHES`, `TRIAGE`, `FIX_BATCHES`, `MAX_PARALLEL`, `READY`, and the brief functions are

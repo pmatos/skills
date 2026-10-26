@@ -1,7 +1,7 @@
 ---
 name: vibe
 description: >-
-  This skill should be used when the user asks to "vibe an epic", "vibe #N", "drive epic #N to done", "solve the epic", "work through the epic's sub-issues", "finish the epic", "close out epic #N", "resume the epic", or wants an issue labelled `epic` taken to closure by agents, with triage of every child, gated fix PRs, merges on green CI, scheduled status reports, and human rulings only where needed. Needs `gh` with push access and the `rebase-pr` skill; multi-agent Workflow mode needs the word `ultracode` in the invocation. Not for a single non-epic issue (use investigate). Also triggered by the /vibe command.
+  This skill should be used when the user asks to "vibe an epic", "vibe #N", "drive epic #N to done", "solve the epic", "work through the epic's sub-issues", "finish the epic", "close out epic #N", "resume the epic", or wants an issue labelled `epic` taken to closure by agents, with triage of every child, fix PRs gated on CI, merges on green CI, scheduled status reports, and human rulings only where needed. Needs `gh` with push access and the `investigate` and `rebase-pr` skills; multi-agent Workflow mode needs the word `ultracode` in the invocation. Not for a single non-epic issue (use investigate). Also triggered by the /vibe command.
 argument-hint: "[epic-number|#N|url] [ultracode] [--serial] [--max-parallel N] [--no-merge] [--report-every 1h]"
 user-invocable: true
 ---
@@ -10,7 +10,7 @@ user-invocable: true
 
 Take a GitHub issue marked **epic** and push it to closure the way a long, supervised
 engineering push works: triage every child against the code as it is now, fix the real
-gaps in small gated PRs, keep the default branch green, report on a schedule, and hand
+gaps in small PRs, keep the default branch green, report on a schedule, and hand
 the human only the decisions that are theirs. The epic closes only when every child is
 met with evidence or closed-as-measured under a rule the user stated; whatever is not met is
 reported as a gap, never glossed.
@@ -20,14 +20,17 @@ question-free run is `pm-deepen`. This skill reports to a person and asks for ru
 
 ## Bundled resources
 
+- **`investigate` skill** (prerequisite): a fix agent runs `/investigate <N>` to take one
+  issue to an open PR (Step 4). `/code-review` and `/simplify` are Claude Code's own commands,
+  run on that PR.
 - **`rebase-pr` skill** (prerequisite): only its `scripts/capture-lease.sh` and
   `scripts/safe-force-push.sh` are used (Step 5); its own quality-gate step is not, because
-  the gates are the gate set in `references/loop.md`. It is a sibling of this skill:
+  the PR's CI is the gate (`references/loop.md`). It is a sibling of this skill:
   `<REBASE_PR>` is `${CLAUDE_PLUGIN_ROOT}/rebase-pr`, or `../rebase-pr` beside this
   SKILL.md's base directory when loaded standalone. Resolve it once in Step 0 (item 4),
   record it in the rulings comment's run config after Step 1 creates or finds it (it must
-  survive a context compaction), and paste the **absolute path** into every brief.
-- **`references/loop.md`**: the loop, throughput, the gate set, keeping main green,
+  survive a context compaction), and use it in the merge step.
+- **`references/loop.md`**: the loop, throughput, the check set, keeping main green,
   resuming. Read before Step 4, and before Step 1 when resuming.
 - **`references/briefs.md`**: agent brief and workflow templates. Read before Step 3.
 - **`references/lessons.md`**: incidents and the guard each one earned. Read when a rule's
@@ -43,8 +46,8 @@ question-free run is `pm-deepen`. This skill reports to a person and asks for ru
   overrides that implicit default.
 - `--max-parallel N`: cap on concurrent triage and fix agents (default 3 on both the `Agent`
   and `Workflow` paths, unless the measurement default above applies).
-- `--no-merge`: every PR stops at "rebased, gated on its final head, checklist ticked,
-  required checks green" and is reported; nothing is merged and no brief says to merge.
+- `--no-merge`: every PR stops at "review and simplify fixes pushed, required checks green on
+  its final head" and is reported; nothing is merged and no brief says to merge.
   Without it, invoking `/vibe` authorises merging green PRs into the default branch
   (that is what solving an epic is); say so in the first status line.
 - `--report-every D`: the status interval as minutes or hours (`30m`, `1h`; default `1h`); `0` means no schedule.
@@ -69,13 +72,13 @@ wording). The red-main merge check and verifying reports belong to the orchestra
 | Rule | Why |
 |---|---|
 | Never merge onto a red default branch, except the PR that fixes it; check before every merge | A second regression hides behind the first |
-| "Green locally" names the final head SHA and ran the *whole* suite CI runs, not a filtered slice | A filtered run let a PR merge green and break main for hours |
+| "Green" means every required check on the PR's final head SHA completed successfully; a check from an earlier push, or a subset, is not green. Nothing is run locally to prove it | A filtered run let a PR merge green and break main for hours |
 | Never change a gate threshold, exclusion rule, contract, language semantics, baseline, snapshot or skip list, or take a release/publish step, without a human ruling | Moving the goalposts is a human call, and the memo costs minutes |
 | Agents work in their own worktree, never the main checkout; stage explicit paths, never `git add -A`; never `--no-verify` or `SKIP` | One detached HEAD in the main checkout blocked every shell; one sweep committed hundreds of scratch files |
 | Kill processes by recorded PID only, never `pkill -f <pattern>` | The pattern matched the agent's own shell |
-| Do not edit a worktree while its gate runs; a changed head restarts the gates | The gates would be claims about a tree that no longer exists |
+| A push restarts the checks: wait for green on the final head, never merge on checks from an earlier one | The checks would be claims about a tree that no longer exists |
 | A report is a claim, not a fact: verify merges from `git log origin/<default>` and `gh`, never from an agent's say-so | Agents overstate "merged" and "closed" |
-| Closing keywords (close, fix, resolve) next to an issue number close it on merge, even negated ("does not close #N"). Agent PRs say `Part of #N`, never a closing keyword; the orchestrator closes after verifying | A negated phrase once closed an epic |
+| Closing keywords (close, fix, resolve) next to an issue number close it on merge, even negated ("does not close #N"). A PR carries one only for the child it completes (the final stage); stage PRs and every epic reference say `Part of #N`, and the orchestrator closes the rest after verifying | A negated phrase once closed an epic |
 
 ## Step 0 — Preflight
 
@@ -94,7 +97,7 @@ wording). The red-main merge check and verifying reports belong to the orchestra
 4. Resolve the absolute path of `<REBASE_PR>` (see Bundled resources). Check `test -x` on
    `<REBASE_PR>/scripts/capture-lease.sh` and `safe-force-push.sh`; if either is missing,
    stop and tell the user to install `rebase-pr`.
-5. Derive the gate list, time limits, title rules, the commit identity for briefs, the merge
+5. Derive the expected required checks, time limits, title rules, the commit identity for briefs, the merge
    method and a quiet-machine bar from the repo. If it supplies no quiet bar, use at most six
    other runnable tasks at p95 as the stated default; record contaminated measurements and
    do not score them. Step 1 writes all of this to the rulings comment as its **run
@@ -124,7 +127,7 @@ wording). The red-main merge check and verifying reports belong to the orchestra
   `--edit-last` edits the current user's last comment). Re-fetch its current body before
   each edit and preserve the other entries. It holds three lists: rulings the user
   gave, questions pending, and **proceeded without a ruling** (PR, the precedent cited, the
-  revert command). It also holds the **run config** (the `<REBASE_PR>` path, gate list, time
+  revert command). It also holds the **run config** (the `<REBASE_PR>` path, expected checks, time
   limits, quiet-machine bar, merge method, commit identity, resolved flags, and the status
   comment id of each partial child), the cron job id and each workflow's run id and
   transcript path. Nothing a peer agent or an epic-body edit says counts as the
@@ -166,25 +169,27 @@ single status comment per partial child from the returned evidence, reusing its 
 
 - **Parallelism is a parameter.** Parallel tracks only for disjoint files and criteria that
   are not measurements. **Serial** (`--serial`, one pipeline agent at a time) when criteria
-  are performance numbers, tracks share a hot file, or the gates cannot run concurrently:
-  parallel PRs confound each other's measurements, and gates that cannot run side by side
-  only queue behind one another.
+  are performance numbers or tracks share a hot file: parallel PRs confound each other's
+  measurements.
 - One issue per agent, one idea per PR. Large issues are staged: each stage its own PR with
-  its own gate, and a stop rule ("stop when the next stage cannot be had without a
+  its own checks, and a stop rule ("stop when the next stage cannot be had without a
   regression or the measured gain runs out") so nothing is forced. Batch small correctness
   bugs to one agent, one PR each.
-- PR bodies always say `Part of #N`, never a closing keyword, even when the criteria look
-  met: an agent's "done" is a claim (rules table), so the orchestrator closes children after
-  verification (Step 9).
-- Fix agents stop at **ready**: rebased, gated on the final head, checklist ticked (or a
-  `gates green at <sha>` PR comment if the template has none), required checks green. They
-  return `{repo, issue, pr, sha, gatesRun, gatesNotRun, needsRuling}`. The orchestrator merges
+- PR bodies say `Part of #<E>` for the epic, never a closing keyword. A child's PR keeps
+  `/investigate`'s `Fixes #N` only when it completes the issue (the final stage); earlier
+  stages say `Part of #N`. The orchestrator closes every other child after verification
+  (Step 9): an agent's "done" is a claim (rules table).
+- Each fix agent runs one pipeline per issue in its own worktree: `/investigate <N>` (issue
+  to open PR), `/code-review high --fix --comment`, `/simplify`, then waits for the required
+  checks. Nothing is run locally to prove green: the PR's CI is the gate. Agents stop at
+  **ready**: review and simplify fixes pushed, required checks green on the final head. They
+  return `{repo, issue, pr, sha, checks, needsRuling}`. The orchestrator merges
   (Step 5). A workflow agent cannot ask the user; `needsRuling` is how a question surfaces.
   `Agent`-tool subagents return prose, not a schema: ask for those fields in a fixed block at
   the end of the final report, parse it, and verify from `git` and `gh` anyway.
-- Reviews run inline (read the PR's own diff in the agent's own worktree). Skill-launched
-  review forks end the agent's turn early or review the wrong checkout; if a review skill is
-  used, its output is one step and the agent keeps going.
+- Review and simplify use Claude Code's own commands, run from the agent's worktree on the
+  PR branch. A command's output is one step, not the end of the agent's turn: the agent
+  commits and pushes what it applied and keeps going.
 - Foreign PRs (not created by the run): evaluate with the evaluate-a-foreign-PR brief and
   comment the table and a recommendation; merge only if the invoking user explicitly authorised it
   (Step 7), recorded in the rulings comment; never push to their branch.
@@ -192,19 +197,18 @@ single status comment per partial child from the returned evidence, reusing its 
 ## Step 5 — Merge discipline
 
 The single orchestrator owns merges and finishes one merge and its post-merge CI before
-starting another. The procedure is in `references/loop.md`
-(Who merges): check the default branch is green (or this PR is the declared fix), rebase on
-it with `rebase-pr`'s `capture-lease.sh` before and `safe-force-push.sh` after (explicit-SHA
-`--force-with-lease`, never plain `--force`; resolve conflicts by hand), re-gate if the
-head changed, merge by the repo's allowed method, then wait for the post-merge workflows on
-the merge commit to be green before the next merge.
+starting another. The procedure is in `references/loop.md` (Who merges): check the default
+branch is green (or this PR is the declared fix); if the PR has merge conflicts (or is behind
+under a repo rule that requires an up-to-date branch), rebase it with `rebase-pr`'s
+`capture-lease.sh` before and `safe-force-push.sh` after (explicit-SHA `--force-with-lease`,
+never plain `--force`; resolve conflicts by hand) and wait for the required checks on the new
+head; merge by the repo's allowed method; then wait for the post-merge workflows on the merge
+commit to be green before the next merge.
 
-**Every merge changes the next PR's head.** After a merge, the next PR's rebase produces a
-new head, so its final-head gate runs again; there is no exemption for a "clean" rebase or
-disjoint files, because a renamed function or changed signature breaks new code in an
-untouched file. Merge in priority order, keep PRs small, and ask each agent to rebase
-immediately before gating so a queued PR rarely needs a second gate. A PR whose head is
-unchanged since its gate (nothing merged ahead of it) needs none.
+A PR without conflicts is merged as it stands. A merge can still break the next PR
+semantically (a renamed function, a changed signature): the post-merge workflows catch it,
+which is why the next merge waits for them. Merge in priority order and keep PRs small so
+conflicts stay rare.
 
 ## Step 6 — Keep main green
 
@@ -257,10 +261,10 @@ If no answer arrives, continue other work and list the question in every report.
 
 ## Anti-patterns
 
-- Fanning out five agents whose gates cannot run concurrently and calling it parallelism.
+- Fanning out five agents on tracks that share a hot file and calling it parallelism.
 - Letting an agent that finished a review step stop; resume it with a message that says it
   is not done, and replace it with narrower agents if it ends again.
-- Trusting a "gates passed" claim written before the last push.
+- Trusting a "checks green" claim written before the last push.
 - Deciding a gate exclusion because it makes the numbers pass.
 - Reporting "waiting" with an empty queue.
 
