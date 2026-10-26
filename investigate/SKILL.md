@@ -178,13 +178,12 @@ a task list with **TaskCreate** before executing — one task per reviewable uni
 Once the target paths are settled, run Phase 3.2 (`scripts/collect-instructions.sh`)
 over them and fold the merged, closest-wins check set into the plan.
 
-**4A.5 Fix (best effort).** Apply the changes test-first via `/tdd`: write a
-failing test seeded from the 4A.2 reproducer, run it and watch it fail for the
-reported reason, make it pass with the smallest change, then refactor while
-green. Do not touch production code before that failing test exists. The only
-exception is a bug no automated test can express (e.g. a visual or
-hardware-specific defect); record why in the PR body and fall back to the manual
-repro from 4A.2 as the check. Mark each task `in_progress`
+**4A.5 Fix (best effort).** Default to test-first via `/tdd`: write a failing
+test seeded from the 4A.2 reproducer, run it and watch it fail for the reported
+reason, make it pass with the smallest change, then refactor while green. Write
+the test before the fix, not after. If a test is not the right vehicle, say why
+in the PR body and verify another way (see "When test-first does not fit"
+below); a fix never blocks on it. Mark each task `in_progress`
 when starting it and `completed` the moment it is done — do not batch updates. On
 hitting a wall (mismatched assumptions, scope explosion, blocked by another bug),
 surface it: interactive — ask how to proceed; non-interactive — comment on the
@@ -226,15 +225,36 @@ TaskCreate task list before execution (or the `/pm-plan` output).
 
 **4B.4 Implement (best effort).** Follow the repo norms from 4B.1. Build testable
 behaviour test-first via `/tdd`: one failing test, then the smallest code that
-passes it, repeated per behaviour, with no production code ahead of a failing
-test. Skip `/tdd` only for work with nothing to assert (docs, config, pure
-scaffolding) and say so in the PR body. Mark tasks `in_progress`/`completed` as
-work progresses.
-Same blocker rules as 4A.5 — surface (interactive) or comment and exit
-(non-interactive); no half-finished PRs.
+passes it, repeated per behaviour. Where a test does not fit, see "When
+test-first does not fit" below. Mark tasks `in_progress`/`completed` as work
+progresses. Same blocker rules as 4A.5 — surface (interactive) or comment and
+exit (non-interactive); no half-finished PRs.
 
 **4B.5 Validate.** As in 4A.6 — run the merged check set (Phase 3.1 baseline plus
 3.2 scoped) in order; loop until green.
+
+### When test-first does not fit
+
+Test-first is the default, not a gate. Skip it, and record the reason in the PR
+body, when any of these hold:
+
+- No usable test harness, or the code is out of the suite's reach (shell glue,
+  build scripts, installers).
+- The failure is non-deterministic (races, timing, flakiness), so a failing test
+  proves little.
+- It needs real hardware, a specific OS, production data, or an external service
+  that is unavailable.
+- The change is build, CI, packaging or config, where running the pipeline is
+  the test.
+- The fix is a dependency bump or vendored patch, so a test would exercise the
+  library rather than this repo.
+- It is a performance regression; use a benchmark with a threshold instead.
+- It is a pure refactor or deletion; the existing tests are the safety net.
+- It is a visual or UI defect that only a screenshot or manual check confirms.
+
+Fall back to the best available check: the manual repro from 4A.2, or a
+before/after run of the relevant command, with the output summarised in the PR
+body. The fallback never blocks the fix.
 
 ## Phase 5 — Commit
 
@@ -330,7 +350,7 @@ Fixes #<N>
 - [ ] <discovered lint command> — clean
 - [ ] <discovered type-check command> — clean
 - [ ] Manual repro confirms the bug is fixed   (bug workflow only)
-- [ ] Regression test written first and seen failing (bug workflow only)
+- [ ] Regression test written first and seen failing, or reason recorded (bug workflow only)
 EOF
 )"
 ```
@@ -359,7 +379,7 @@ alternative:
 - **`/grill-with-docs`** (or `/grill-me`) — interactive design stress-test for
   ambiguous feature decisions. Fallback: a short AskUserQuestion-driven design
   pass before implementation.
-- **`/tdd`** — red-green-refactor loop; the required way to implement 4A.5 and
+- **`/tdd`** — red-green-refactor loop; the default way to implement 4A.5 and
   4B.4. Fallback: write the failing test, confirm it fails, then write the
   implementation, manually.
 
