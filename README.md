@@ -378,9 +378,9 @@ Solves an issue marked `epic` end to end under **ultracode** (multi-agent `Workf
 
 What it does:
 - Resolves the epic (the `epic` label, an `Epic` issue type or an `epic(...)` title) and its open children from the paginated sub-issues API, task lists and `Part of #N` lines, and reads the epic's gate criteria as the definition of done.
-- Runs a **read-only triage wave** per theme (`done` / `partial` / `open` / `needs-ruling`, with evidence; the orchestrator verifies before it closes anything), then fixes the implementable gaps with one issue per agent and one idea per PR, staged with a stop rule so nothing is forced.
+- Runs a **read-only triage wave** per theme (`done` / `partial` / `open` / `needs-ruling`, with evidence; the orchestrator verifies before it closes anything), then fixes the implementable gaps with one issue per agent and one idea per PR, staged with a stop rule so nothing is forced. Each fix agent runs `/investigate` (issue to PR), then Claude Code's `/code-review high --fix --comment` and `/simplify`, then waits for green.
 - Treats parallelism as a **parameter**: parallel tracks only for disjoint files and non-measurement criteria, serial (`--serial`) when criteria are performance numbers or tracks share a hot file.
-- Enforces merge discipline: the orchestrator merges one PR at a time, whole-suite gates on the final head SHA, post-merge checks run locally first, the post-merge workflows green before the next merge, and **nothing merges onto a red default branch except its fix**.
+- Enforces merge discipline: the orchestrator merges one PR at a time, only on green required checks for the final head SHA (the PR's CI is the gate; nothing runs locally), rebases only when a PR has conflicts, waits for the post-merge workflows before the next merge, and **nothing merges onto a red default branch except its fix**.
 - Never moves a gate threshold, exclusion rule, baseline, contract, language semantics or a release step without a human ruling; each question is a short decision memo, recorded in one rulings comment on the epic (with a list of what proceeded without a ruling, and why).
 - Reports from `gh` and CI, never from memory, on a session cron that **starts no work**; completion notices drive the loop so nothing sits idle.
 - Closes with a **read-only close-out audit** of every merged-but-open child. A child can be closed-as-measured under a decision rule you stated; an epic that is not fully met gets a gap list, not a closure.
@@ -389,7 +389,7 @@ Flags: `ultracode`, `--serial`, `--max-parallel N`, `--no-merge`, `--report-ever
 
 Trigger phrases: `vibe an epic`, `vibe #N`, `drive epic #N to done`, `solve the epic`, `work through the epic's sub-issues`.
 
-**Requires**: Claude Code (it relies on the `Workflow`, `CronCreate`, `SendMessage` and `ListAgents` tools; other harnesses are not supported), [`gh`](https://cli.github.com/) with write access, the sibling `rebase-pr` skill (install it too), a git repository whose CI is the merge gate. Multi-agent workflows need the word `ultracode` in your own message; without it the skill continues with a few `Agent` calls.
+**Requires**: Claude Code (it relies on the `Workflow`, `CronCreate`, `SendMessage` and `ListAgents` tools; other harnesses are not supported), [`gh`](https://cli.github.com/) with write access, the sibling `investigate` and `rebase-pr` skills (install them too), a git repository whose CI is the merge gate. Multi-agent workflows need the word `ultracode` in your own message; without it the skill continues with a few `Agent` calls.
 
 **Credit**: the per-issue brief, the staging stop rule, the read-only close-out audit, the closed-as-measured verdict and the report-only cron come from the jsse epic loop (`pmatos/jsse`). The orchestrator-owned merges, and post-merge waits are this skill's own design.
 
