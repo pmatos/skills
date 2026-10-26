@@ -162,7 +162,9 @@ traces.
 
 **4A.2 Reproduce.** Build a *minimal* reproducer using the project's normal
 commands. Confirm the bug manifests locally before changing anything — keep the
-reproducer small and self-contained so it doubles as a regression test. If the
+reproducer small and self-contained. When the repo has a test harness, write it
+as an automated test: that test is the red step of the test-first policy below,
+not a throwaway to be replaced later. If the
 bug cannot be reproduced, document the gaps. Interactive: ask for clarification.
 Non-interactive: comment on the issue describing what was tried and what failed,
 then exit documenting the blocker.
@@ -176,14 +178,11 @@ describing the bug, the repro, and the symptom.
 targets and the change to make (or use the `/pm-plan` output). Convert the plan to
 a task list with **TaskCreate** before executing — one task per reviewable unit.
 Once the target paths are settled, run Phase 3.2 (`scripts/collect-instructions.sh`)
-over them and fold the merged, closest-wins check set into the plan.
+over them and fold the merged, closest-wins check set into the plan. List the
+test file path(s) alongside the production targets so 3.2 covers both.
 
-**4A.5 Fix (best effort).** Default to test-first via `/tdd`: write a failing
-test seeded from the 4A.2 reproducer, run it and watch it fail for the reported
-reason, make it pass with the smallest change, then refactor while green. Write
-the test before the fix, not after. If a test is not the right vehicle, say why
-in the PR body and verify another way (see "When test-first does not fit"
-below); a fix never blocks on it. Mark each task `in_progress`
+**4A.5 Fix (best effort).** Apply the changes under the test-first policy
+below, starting from the 4A.2 test. Mark each task `in_progress`
 when starting it and `completed` the moment it is done — do not batch updates. On
 hitting a wall (mismatched assumptions, scope explosion, blocked by another bug),
 surface it: interactive — ask how to proceed; non-interactive — comment on the
@@ -220,32 +219,51 @@ model, API shape, UX, where the feature lives):
 If the request is concrete enough that no design choices remain open (e.g. "add a
 `--quiet` flag that suppresses progress output"), proceed without a design pass.
 
-**4B.3 Plan.** As in 4A.4 — concise `file:line` step list, converted to a
-TaskCreate task list before execution (or the `/pm-plan` output).
+**4B.3 Plan.** As in 4A.4 — concise `file:line` step list, including test file
+paths, converted to a TaskCreate task list before execution (or the `/pm-plan`
+output).
 
 **4B.4 Implement (best effort).** Follow the repo norms from 4B.1. Build testable
-behaviour test-first via `/tdd`: one failing test, then the smallest code that
-passes it, repeated per behaviour. Where a test does not fit, see "When
-test-first does not fit" below. Mark tasks `in_progress`/`completed` as work
-progresses. Same blocker rules as 4A.5 — surface (interactive) or comment and
+behaviour under the test-first policy below, one failing test per behaviour.
+Mark tasks `in_progress`/`completed` as work progresses. Same blocker rules as 4A.5 — surface (interactive) or comment and
 exit (non-interactive); no half-finished PRs.
 
 **4B.5 Validate.** As in 4A.6 — run the merged check set (Phase 3.1 baseline plus
 3.2 scoped) in order; loop until green.
 
-### When test-first does not fit
+### Test-first policy
 
-Test-first is the default, not a gate. Skip it, and record the reason in the PR
-body, when any of these hold:
+Applies to 4A.5 and 4B.4. The practice is the default; `/tdd` is the preferred
+vehicle for it, and without `/tdd` the manual loop is the same: write the
+failing test, confirm it fails, then write the implementation.
+
+- **Red, then green.** Write the failing test before the fix, run it, and
+  confirm it fails for the reported reason. Make it pass with the smallest
+  change, then refactor while green.
+- **Testability changes come first.** If the test cannot be written without a
+  production edit (exporting a private function, extracting a seam, injecting a
+  dependency, adding an entry point), make that minimal, behaviour-preserving
+  change first and keep it separate from the fix.
+- **A bad red step goes back to 4A.2.** A test that passes immediately, or fails
+  for another reason (setup, import, unrelated assertion), has not reproduced
+  the bug. Fix the test, or take the 4A.2 cannot-reproduce path. Never weaken a
+  test until it fails.
+- **Non-interactive runs do not re-confirm seams.** `/tdd` asks the user to
+  confirm the seams under test. With no user, the seam is the one the 4A.2
+  reproducer or the 4A.4/4B.3 plan already identified; treat it as pre-agreed.
+
+**When test-first does not fit.** Skip it, and record the reason in the PR body
+(the test-plan line in Phase 6), when any of these hold:
 
 - No usable test harness, or the code is out of the suite's reach (shell glue,
-  build scripts, installers).
+  build scripts, installers). Do not build a test framework to satisfy the
+  policy.
+- The change is docs, prose, config, build, CI or packaging, where there is
+  nothing to assert or running the pipeline is the test.
 - The failure is non-deterministic (races, timing, flakiness), so a failing test
   proves little.
 - It needs real hardware, a specific OS, production data, or an external service
   that is unavailable.
-- The change is build, CI, packaging or config, where running the pipeline is
-  the test.
 - The fix is a dependency bump or vendored patch, so a test would exercise the
   library rather than this repo.
 - It is a performance regression; use a benchmark with a threshold instead.
@@ -350,7 +368,7 @@ Fixes #<N>
 - [ ] <discovered lint command> — clean
 - [ ] <discovered type-check command> — clean
 - [ ] Manual repro confirms the bug is fixed   (bug workflow only)
-- [ ] Regression test written first and seen failing, or reason recorded (bug workflow only)
+- [ ] Tests written first and seen failing — or: skipped because <reason>
 EOF
 )"
 ```
@@ -395,6 +413,7 @@ message is duplicated here, to keep the single source of truth in one place.
 | Issue already closed | Phase 2 — stop and confirm |
 | Bug cannot be reproduced | Phase 4A.2 — ask, or comment on the issue and exit |
 | Feature ambiguous, non-interactive | Phase 4B.2 |
+| Red test passes at once or fails for another reason | Test-first policy — back to 4A.2 |
 | On the default branch or detached HEAD | Phase 5.0, exit 5 |
 | Pre-commit hook fails | Phase 5.1 — fix and re-commit; never `--no-verify` |
 | Validation cannot be made green | Phase 4A.6 / 4B.5 — surface or comment and exit; do not open the PR |
