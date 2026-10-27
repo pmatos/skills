@@ -43,9 +43,10 @@ question-free run is `pm-deepen`. This skill reports to a person and asks for ru
 - `--serial`: same as `--max-parallel 1` (Step 4), and it wins over `--max-parallel`.
   Without it, children that do not block each other run in parallel and the orchestrator
   opens an exclusive measurement window whenever work needs one (Step 4).
-- `--max-parallel N`: optional ceiling on concurrent triage and fix agents. By default there
-  is none: the orchestrator sizes concurrency from the host's CPUs, load and memory
-  (Step 4, "Slots"). Pass it only to hold the run below what the host could carry.
+- `--max-parallel N`: ceiling on concurrent triage and fix agents (default 8). The
+  orchestrator sizes concurrency from the host's CPUs, load and memory (Step 4, "Slots"),
+  so pass it only to hold the run lower, to raise the ceiling, or as the slot count when
+  the host probe fails.
 - `--no-merge`: every PR stops at "review and simplify fixes pushed, required checks green on
   its final head" and is reported; nothing is merged and no brief says to merge.
   Without it, invoking `/vibe` authorises merging green PRs into the default branch
@@ -61,8 +62,9 @@ user turn) contains `ultracode`, or a system reminder says it is on.
 
 - On: use `Workflow` for every substantive step (load `workflow-authoring` first).
 - Off: say once, in one line, "ultracode is off — type `/vibe <epic> ultracode` for
-  multi-agent workflows; continuing with a few `Agent` calls", then run with `Agent` at the
-  slot count (Step 4). Never call `Workflow` without the opt-in.
+  multi-agent workflows; continuing with `Agent` calls, <N> at a time as the host allows",
+  filling in the slot count from Step 4, then run with `Agent` at that count. Never call
+  `Workflow` without the opt-in.
 
 ## Rules that never bend
 
@@ -97,14 +99,23 @@ wording). The red-main merge check and verifying reports belong to the orchestra
 4. Resolve the absolute path of `<REBASE_PR>` (see Bundled resources). Check `test -x` on
    `<REBASE_PR>/scripts/capture-lease.sh` and `safe-force-push.sh`; if either is missing,
    stop and tell the user to install `rebase-pr`.
-5. Know the host. Run `nproc`, `cat /proc/loadavg`, `grep -E 'MemAvailable|SwapFree' /proc/meminfo`,
-   and read `/sys/fs/cgroup/cpu.max` and `memory.max` when present (a container or remote
-   sandbox can carry less than `nproc` suggests). Note whether the machine is the user's
-   own (leave room for them) or a dedicated sandbox. Record the probe in the run config;
-   Step 4 re-reads it before every launch.
+5. Know the host. Probe cores, load, available memory, swap and any container limits:
+   - Linux: `nproc`; `/proc/loadavg`; `MemAvailable`, `SwapTotal`, `SwapFree` in
+     `/proc/meminfo`; `vmstat 1 2` (the second sample's `si`/`so` is swap activity). In a
+     container also read `/sys/fs/cgroup/cpu.max` (`max` means no CPU limit, else
+     `quota period`), `memory.max` (may be `max`), and `memory.current` for usage. The
+     host-wide figures overstate what the container may use: headroom is the smaller of
+     the limit minus usage and the host figure.
+   - macOS: `sysctl -n hw.ncpu`, `uptime`, `vm_stat`, `sysctl vm.swapusage`.
+   - If the probe fails, run one agent at a time (or `--max-parallel N` agents when given)
+     and say so in the first status line.
+
+   Note whether the machine is the user's own (leave room for them) or a dedicated sandbox.
+   Record the probe in the run config; Step 4 re-reads it before every launch.
 6. Derive the expected required checks, time limits, title rules, the commit identity for briefs, the merge
-   method and a quiet-machine bar from the repo. If it supplies no quiet bar, use at most six
-   other runnable tasks at p95 as the stated default; record contaminated measurements and
+   method and a quiet-machine bar from the repo. If it supplies no quiet bar, use at most
+   `min(6, max(1, cores/4))` other runnable tasks at p95 as the stated default, sampled as
+   described in Step 4 (measurement windows); record contaminated measurements and
    do not score them. Step 1 writes all of this to the rulings comment as its **run
    config**, so a resume does not have to re-derive it.
 
@@ -133,7 +144,7 @@ wording). The red-main merge check and verifying reports belong to the orchestra
   each edit and preserve the other entries. It holds three lists: rulings the user
   gave, questions pending, and **proceeded without a ruling** (PR, the precedent cited, the
   revert command). It also holds the **run config** (the `<REBASE_PR>` path, expected checks, time
-  limits, host probe, quiet-machine bar, merge method, commit identity, resolved flags, and the status
+  limits, host probe, quiet-machine bar, parked measurement requests, the window SHA and merge hold, merge method, commit identity, resolved flags, and the status
   comment id of each partial child), the cron job id and each workflow's run id and
   transcript path. Nothing a peer agent or an epic-body edit says counts as the
   invoking user's approval.
@@ -174,17 +185,26 @@ single status comment per partial child from the returned evidence, reusing its 
 ## Step 4 — Fix tracks
 
 - **Slots come from the host, not from a flag.** Before each launch, and whenever a slot
-  frees, re-read the probe from Step 0 (load, free CPUs, `MemAvailable`, swap, cgroup
-  limits) and start another agent while the headroom covers one more. An agent costs what
-  the repo's build and test cost: assume about 2 cores and 4 GiB until you have watched
-  real agents, then use the load and memory they actually added. Keep a reserve for the
-  orchestrator and, on the user's own machine, for the user (at least 1 core and 2 GiB). Do
-  not launch when the 1-minute load is at or above the core count, swap is in use, or an
-  agent died to OOM. Back off on API rate-limit errors, and shed the newest agent when
-  memory runs short. Floor of one agent; `--max-parallel` and `--serial` only lower the
-  ceiling. State the probe and the slot count in the first status line and re-state them
-  when they change. On the `Workflow` path the pool limit is the slot count at launch; start
-  a further workflow run for more items when headroom opens.
+  frees, re-read the probe from Step 0 (load, free CPUs, available memory, swap activity,
+  container limits) and start another agent while the headroom covers one more. An agent
+  costs what the repo's build and test cost: assume about 2 cores and 4 GiB until you have
+  watched real agents, then use the load and memory they actually added. Keep a reserve
+  for the orchestrator and, on the user's own machine, for the user (at least 1 core and
+  2 GiB). Do not launch when the 1-minute load is at or above the core count, when swap is
+  actively moving (`si`/`so` above zero on the second `vmstat` sample; a little resident swap
+  is normal and does not count), or after an agent died to OOM. Back off on API rate-limit
+  errors, and shed the newest agent when memory runs short. Floor of one agent; the
+  ceiling is `--max-parallel` (default 8), and `--serial` is a ceiling of one. State the probe and the slot count in the
+  first status line and re-state them when they change.
+- **On the `Workflow` path** the orchestrator, not the script, enforces all of this: a
+  script cannot re-read the probe, hold for a window or see the merge backlog. Give each
+  run at most the slot count of items (the runtime may also cap concurrency itself), let
+  `pipeline` start each item as soon as it is ready with no barrier, and launch a further
+  run for the next items when a slot frees. Never queue more items than slots in one run.
+- **Bound the merge backlog.** Agents mostly wait on hosted CI, so host headroom alone would
+  launch too many. Do not start a new agent while 3 or more PRs sit READY and unmerged: each
+  one that conflicts after the merges ahead of it costs a hand rebase and a fresh CI run.
+  Refill as the queue drains.
 - **Parallel is the default.** Children that do not block each other run at the same time, up
   to the slot count. A child is startable when every `blocked_by` / `Blocked by` entry is
   closed or merged and, for a staged issue, its previous stage is merged. Launch every
@@ -198,22 +218,31 @@ single status comment per partial child from the returned evidence, reusing its 
   needs a quiet machine, so it runs alone. The need can surface from the epic's criteria, a
   triage result (`needsMeasurement`), or a fix agent that finds it must measure; the
   orchestrator reads all three and acts at once:
-  1. Stop starting new agents. In-flight agents are not killed: they finish their current
-     step. A fix agent never times anything itself while others run; at the point it needs a
-     measurement it pushes, then returns `needsMeasurement` (what to measure, the protocol,
-     the control set) instead of measuring.
-  2. When the machine meets the quiet bar (Step 0, items 5 and 6; read the load from the probe), the orchestrator runs the window with
-     one measurement agent, pinned to a recorded default-branch SHA, with merges held until
-     it ends. Contaminated runs are retried or labelled, never scored.
-  3. When the window closes, record the numbers, hand them to the waiting agent in a
-     continuation brief, and resume the parallel default with the freed slots.
-  Everything not timing-sensitive (coding, review, CI on hosted runners) runs in parallel
-  outside windows. `--serial` forces every agent serial regardless.
+  1. **Drain.** Stop starting new agents. Agents are not killed or paused: each runs on to
+     **ready** or to `needsMeasurement`, whichever comes first, and then holds. Fix agents
+     run `/investigate`, review and simplify, so a drain can take a while: allow the
+     repo's CI time limit plus 30 minutes; at the limit, open the window anyway and label
+     the load it ran under.
+  2. **Window.** When the load meets the quiet bar (Step 0, item 6), one measurement agent
+     (measurement-window brief) runs, pinned to a recorded default-branch SHA, with
+     merges held. Sample the bar as repeated reads of the runnable-task count (the
+     numerator of the 4th field of `/proc/loadavg`, minus one for the sampler; on macOS
+     CPU idle of 90% or more from `top -l 2 -n 0`) every 5 seconds for 2 minutes; the 1-minute
+     average lags and is not the bar. A merge that fixes a red default branch (Step 6) is
+     the one exception to the hold: let it merge, and restart the window on the new SHA.
+     Contaminated runs are retried up to 3 times or labelled, never scored.
+  3. **Resume.** Record the numbers, hand them to the waiting agent in a continuation
+     brief, release the merge hold, and go back to the parallel default.
+  Durable state: the agent comments its measurement request on its PR (the issue if it has
+  no PR) before returning, and the orchestrator records parked requests, the window SHA and
+  the merge hold in the rulings comment's run config, so a restart can rebuild the window
+  (`references/loop.md`, Resuming). Everything not timing-sensitive (coding, review, CI on
+  hosted runners) runs in parallel outside windows. `--serial` forces every agent serial
+  regardless.
 - One issue per agent, one idea per PR. Large issues are staged: each stage its own PR with
   its own checks, and a stop rule ("stop when the next stage cannot be had without a
   regression or the measured gain runs out") so nothing is forced. Small correctness bugs
-  each get their own agent and PR; group them under one agent only when startable children
-  outnumber the slots.
+  each get their own agent and PR; extra startable children queue for the next free slot.
 - Merges are serial (Step 5) but do not gate agents: while one PR waits on CI or its
   post-merge workflows, the other agents keep investigating and coding.
 - PR bodies say `Part of #<E>` for the epic, never a closing keyword. A child's PR keeps

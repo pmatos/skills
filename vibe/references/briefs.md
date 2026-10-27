@@ -64,10 +64,11 @@ stage where the next cannot be had without a regression; comment the measurement
 One stage per agent call under a Workflow (see the notes below); an Agent-tool agent
 may run several stages in sequence.
 
-Measuring: never run a benchmark or any timing-sensitive check yourself. When you need one,
-push your branch and finish with needsMeasurement (what to measure, the protocol, the
-control set); the orchestrator runs it in an exclusive window and continues you with the
-numbers. Deterministic counts that need no quiet machine are fine to run.
+Measuring: never run a benchmark or any timing-sensitive check yourself, whether or not
+other agents are running. When you need one, push your branch, comment the request on the
+PR (what to measure, the protocol, the control set), and finish with needsMeasurement
+carrying the same text; the orchestrator runs it in an exclusive window and continues you
+with the numbers. Deterministic counts that need no quiet machine are fine to run.
 
 Hard constraints: no regressions [project: the control set and tolerances]; if the
 improvement cannot be had without one, do NOT force it: comment on the issue with
@@ -98,11 +99,17 @@ priority (1 = blocks the epic's gate or a soundness/coverage gap, 3 = nice to ha
 Return status and evidence for partial children; the orchestrator updates their status
 comments. Do not post comments, close issues, or change code: for a done child return the
 evidence and the orchestrator verifies and closes.
+
+Measuring: never run a benchmark or any timing-sensitive reproducer yourself. For a child
+whose reproducer is a measurement, classify it from the issue and any recorded numbers,
+set needsMeasurement to the protocol the orchestrator should run in a window, and say what
+you could not verify.
 ```
 
 Workflow schema (`TRIAGE`): an `items` array of objects with `repo`, `issue`, `title`,
 `status` (enum `done | partial | open | needs-ruling`), `evidence`, `remaining`,
-`implementable` (boolean), `priority` (number), all required.
+`implementable` (boolean), `priority` (number), `needsMeasurement` (string, empty if none),
+all required.
 
 ## Read-only close-out audit brief
 
@@ -118,14 +125,27 @@ unmet criteria but solid numbers is CLOSE-as-measured: state the unmet criteria,
 reason and the decision rule that justifies it.
 ```
 
+## Measurement-window brief
+
+```text
+You hold an exclusive measurement window; the orchestrator has drained the other agents and
+holds merges. Default branch SHA: <sha> (pinned; stop and report if the checkout is not at
+it). For each request: <PR branch, protocol, control set>. Measure the default SHA, then the
+PR branch merged onto it, with the same protocol, same machine, interleaved with a null
+control. Check the load against the quiet bar (<bar>) before each run; retry contaminated
+runs up to 3 times and label what stays contaminated, never score it. No code changes, no
+merges, no threshold changes. Comment the tables, bounds, SHA, tool versions and
+contamination labels on each request's PR (or issue), and return the numbers.
+```
+
 ## Gate-evidence brief
 
 ```text
 Measure the CURRENT default branch (record the SHA; restart if it moves unless the new
 commits touch only docs or CI). No code changes, no merges. Build, run the project's
 self-hosting check, any verdict or differential comparison, oracle or property suites, and
-the performance gate in windows that meet the quiet-machine bar (retry contaminated ones up
-to 3 times and label what stays contaminated), merged through the project's own gate script
+the performance gate in the measurement window the orchestrator opened for you, which meets
+the quiet-machine bar (retry contaminated runs up to 3 times and label what stays contaminated), merged through the project's own gate script
 so the gate is non-provisional. Open an issue per failing criterion with numbers; change no
 threshold. Post one comment with tables per criterion, bounds, the SHA, tool versions and
 contamination labels.
@@ -136,7 +156,8 @@ contamination labels.
 ```text
 Review the diff for correctness; check the size/lint budget; check it rebases on the default
 branch (do NOT resolve conflicts in the PR branch, report). Measure base versus
-PR-merged-onto-default with the same protocol. If every bar passes, comment the table and
+PR-merged-onto-default with the same protocol, in the window the orchestrator opened (do not
+choose your own). If every bar passes, comment the table and
 recommend merge; merge only when the invoking user explicitly authorised it, as recorded in the rulings comment. Never push to the
 PR's branch.
 ```
@@ -149,49 +170,43 @@ Landing is not a workflow: the orchestrator merges inline (SKILL.md Step 5).
 ```text
 // Workflow 1 — triage only; return every theme, including failures
 export const meta = { name: 'epic-<N>-triage', description: '…', phases: [{title: 'Triage'}] }
-// pool() keeps up to `limit` calls in flight and starts the next the moment one finishes, so a
-// slow item never holds up the rest. TRIAGE_LIMIT is the slot count (Step 4); themes whose reproducers
-// are measurements are left out and run alone afterwards, in a measurement window (Step 4).
-async function pool(items, limit, fn) {
-  const out = []
-  let next = 0
-  await Promise.all(Array.from({length: Math.min(limit, items.length)}, async () => {
-    while (next < items.length) { const i = next++; out[i] = await fn(items[i]) }
-  }))
-  return out
-}
-return await pool(THEMES, TRIAGE_LIMIT, async theme => {
-  try {
-    const triage = await agent(TRIAGE_BRIEF(theme), {schema: TRIAGE, effort: 'medium'})
-    if (triage && Array.isArray(triage.items)) return {theme, triage, incomplete: false}
-  } catch (e) { log('Triage theme threw: ' + theme) }
+// THEMES holds at most the slot count (Step 4) of themes whose reproducers are not
+// measurements. pipeline() runs each theme independently with no barrier and turns a throwing
+// theme into null; the orchestrator treats null as incomplete. More themes than slots go in a
+// later run.
+return await pipeline(THEMES, async theme => {
+  const triage = await agent(TRIAGE_BRIEF(theme), {schema: TRIAGE, effort: 'medium'})
+  if (triage && Array.isArray(triage.items)) return {theme, triage, incomplete: false}
   log('Incomplete triage theme: ' + theme)
   return {theme, triage: null, incomplete: true}
 })
 
-// ORCHESTRATOR BARRIER: retain triage evidence; retry incomplete themes, verify done
-// children, surface needs-ruling items. Select only implementable open/partial items,
-// deduplicate by repo and issue, sort by priority. FIX_ITEMS holds every startable child
-// (Step 4: no open blocker, previous stage merged); children blocked by another item go in a
-// later workflow run once their blocker merges. FIX_LIMIT is the slot count (1 under --serial).
-// Files overlapping is not a reason to hold an item back. An item returning needsMeasurement
-// is parked for a measurement window (Step 4), not retried.
+// ORCHESTRATOR BARRIER: retain triage evidence; retry incomplete (and null) themes, verify
+// done children, surface needs-ruling items. Themes left out because their reproducers are
+// measurements are NOT triaged by the run above: after the drain, run them one at a time in
+// a measurement window (Step 4) and merge their results into the triage evidence. Select
+// only implementable open/partial items, deduplicate by repo and issue, sort by priority.
+// FIX_ITEMS holds at most the slot count of startable children (Step 4: no open blocker,
+// previous stage merged, backlog under the bound); the rest, and children blocked by another
+// item, go in later runs as slots free or blockers merge. Files overlapping is not a reason
+// to hold an item back. An item returning needsMeasurement is parked for a measurement
+// window (Step 4), not retried.
 
 // Workflow 2 — fixes to READY; no merges. FIX_BRIEF(item) covers ONE stage; a staged issue
 // is launched once per stage, the next stage only after the previous one is merged.
 export const meta = { name: 'epic-<N>-fix', description: '…', phases: [{title: 'Fix'}] }
-// pool() as in Workflow 1.
-return await pool(FIX_ITEMS, FIX_LIMIT, async item => {
+return await pipeline(FIX_ITEMS, async item => {
   const ready = await agent(FIX_BRIEF(item), {schema: READY})
   if (!ready) log('Incomplete fix: ' + item.issue)
   return {item, ready}
 })
 
-// ORCHESTRATOR BARRIER: retain triage AND fixes, verify every READY result from git/gh.
+// ORCHESTRATOR BARRIER: retain triage AND fixes, verify every READY result from git/gh;
+// a null entry is a fix that threw, so check its branch and PR before relaunching.
 // With --no-merge, ensure required checks are green on the final head, then stop.
 ```
 
-`THEMES`, `TRIAGE`, `TRIAGE_LIMIT`, `FIX_ITEMS`, `FIX_LIMIT`, `READY`, and the brief functions are
+`THEMES`, `TRIAGE`, `FIX_ITEMS`, `READY`, and the brief functions are
 yours to define from the templates above.  Notes that cost time once:
 
 - Prompts are template literals: use single quotes inside them. A stray backtick ends the

@@ -60,11 +60,13 @@ workflows. So:
 - Start agents to investigate and code in parallel, but never cancel a PR's checks because
   they have waited. The merge queue is serial; agent slots are not: refill a slot as soon as
   an agent reaches ready or a PR merges, without waiting for the merge queue to drain.
-- Prefer one correct PR to three that each hit conflicts: every merge moves the default
-  branch, so each queued PR may need a rebase and a fresh run of the checks.
+- Keep PRs small and merge in priority order: every merge moves the default branch, so each
+  queued PR may need a rebase and a fresh run of the checks. That cost is why READY-but-unmerged
+  PRs are bounded (SKILL.md Step 4), not a reason to hold independent children back.
 - Measurements that must not share the machine (timings) run only when the load is
-  low, by a bar you set in preflight (an example from the runs this was written from: other
-  runnable tasks at p95 of 6 or fewer); a contended number is labelled, never scored.
+  low, by a bar you set in preflight and sample as SKILL.md Step 4 describes (an example from
+  the runs this was written from: other runnable tasks at p95 of 6 or fewer); a contended
+  number is labelled, never scored.
 - Advisory checks (perf bots with noisy runners) are recorded in the PR, never rerun until
   green. If one shows a real regression, cite it against your own deterministic measurement.
 
@@ -173,5 +175,7 @@ the revert command. When in doubt, ask.
 A session restart loses the schedule and the in-memory queue. Rebuild from durable state:
 the rulings comment on the epic (run config, cron id, run ids), `gh pr list --state all
 --search '"Part of #<epic>" in:body'`, `git worktree list`, the open children, and the default branch's
-CI. Recreate the cron job, resume dead named agents by name, relaunch workflows with
+CI. Rebuild any measurement window from the run config (parked requests, window SHA, merge
+hold) and the request comments on the PRs; if the window's agent is gone, drain and reopen it.
+Recreate the cron job, resume dead named agents by name, relaunch workflows with
 `resumeFromRunId`, and continue from the first unmet step. Say what was found.
