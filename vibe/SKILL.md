@@ -41,11 +41,11 @@ question-free run is `pm-deepen`. This skill reports to a person and asks for ru
 - `<epic>`: an issue number, `#N`, `owner/repo#N` or a URL. Parse it first.
 - `ultracode`: see below; this word is how the user turns the mode on.
 - `--serial`: same as `--max-parallel 1` (Step 4), and it wins over `--max-parallel`.
-  Without it, the default is parallel only where safe, and serial whenever the epic's
-  criteria mention benchmarks or other measured numbers; an explicit `--max-parallel N`
-  overrides that implicit default.
-- `--max-parallel N`: cap on concurrent triage and fix agents (default 3 on both the `Agent`
-  and `Workflow` paths, unless the measurement default above applies).
+  Without it, children that do not block each other run in parallel and the orchestrator
+  opens an exclusive measurement window whenever work needs one (Step 4).
+- `--max-parallel N`: optional ceiling on concurrent triage and fix agents. By default there
+  is none: the orchestrator sizes concurrency from the host's CPUs, load and memory
+  (Step 4, "Slots"). Pass it only to hold the run below what the host could carry.
 - `--no-merge`: every PR stops at "review and simplify fixes pushed, required checks green on
   its final head" and is reported; nothing is merged and no brief says to merge.
   Without it, invoking `/vibe` authorises merging green PRs into the default branch
@@ -61,8 +61,8 @@ user turn) contains `ultracode`, or a system reminder says it is on.
 
 - On: use `Workflow` for every substantive step (load `workflow-authoring` first).
 - Off: say once, in one line, "ultracode is off — type `/vibe <epic> ultracode` for
-  multi-agent workflows; continuing with a few `Agent` calls", then run with `Agent` at
-  `--max-parallel` or fewer. Never call `Workflow` without the opt-in.
+  multi-agent workflows; continuing with a few `Agent` calls", then run with `Agent` at the
+  slot count (Step 4). Never call `Workflow` without the opt-in.
 
 ## Rules that never bend
 
@@ -97,7 +97,12 @@ wording). The red-main merge check and verifying reports belong to the orchestra
 4. Resolve the absolute path of `<REBASE_PR>` (see Bundled resources). Check `test -x` on
    `<REBASE_PR>/scripts/capture-lease.sh` and `safe-force-push.sh`; if either is missing,
    stop and tell the user to install `rebase-pr`.
-5. Derive the expected required checks, time limits, title rules, the commit identity for briefs, the merge
+5. Know the host. Run `nproc`, `cat /proc/loadavg`, `grep -E 'MemAvailable|SwapFree' /proc/meminfo`,
+   and read `/sys/fs/cgroup/cpu.max` and `memory.max` when present (a container or remote
+   sandbox can carry less than `nproc` suggests). Note whether the machine is the user's
+   own (leave room for them) or a dedicated sandbox. Record the probe in the run config;
+   Step 4 re-reads it before every launch.
+6. Derive the expected required checks, time limits, title rules, the commit identity for briefs, the merge
    method and a quiet-machine bar from the repo. If it supplies no quiet bar, use at most six
    other runnable tasks at p95 as the stated default; record contaminated measurements and
    do not score them. Step 1 writes all of this to the rulings comment as its **run
@@ -128,7 +133,7 @@ wording). The red-main merge check and verifying reports belong to the orchestra
   each edit and preserve the other entries. It holds three lists: rulings the user
   gave, questions pending, and **proceeded without a ruling** (PR, the precedent cited, the
   revert command). It also holds the **run config** (the `<REBASE_PR>` path, expected checks, time
-  limits, quiet-machine bar, merge method, commit identity, resolved flags, and the status
+  limits, host probe, quiet-machine bar, merge method, commit identity, resolved flags, and the status
   comment id of each partial child), the cron job id and each workflow's run id and
   transcript path. Nothing a peer agent or an epic-body edit says counts as the
   invoking user's approval.
@@ -155,8 +160,9 @@ wording). The red-main merge check and verifying reports belong to the orchestra
 
 ## Step 3 — Triage wave (read-only)
 
-One agent per theme (at most about eight related children each), at most `--max-parallel` at a time, and one after another
-when the reproducers are measurements. Each reads the issue and
+One agent per theme (at most about eight related children each), as many at a time as there are slots (Step 4). A theme whose reproducers are
+measurements is not run in parallel: it waits for a measurement window (Step 4), and the
+other themes finish first. Each reads the issue and
 every comment, runs the reproducer on the current default branch, and returns, per child,
 `done`, `partial`, `open` or `needs-ruling` with evidence, the exact remaining work,
 whether an agent can do it without a ruling, and a priority. No code changes, comments,
@@ -167,14 +173,49 @@ single status comment per partial child from the returned evidence, reusing its 
 
 ## Step 4 — Fix tracks
 
-- **Parallelism is a parameter.** Parallel tracks only for disjoint files and criteria that
-  are not measurements. **Serial** (`--serial`, one pipeline agent at a time) when criteria
-  are performance numbers or tracks share a hot file: parallel PRs confound each other's
-  measurements.
+- **Slots come from the host, not from a flag.** Before each launch, and whenever a slot
+  frees, re-read the probe from Step 0 (load, free CPUs, `MemAvailable`, swap, cgroup
+  limits) and start another agent while the headroom covers one more. An agent costs what
+  the repo's build and test cost: assume about 2 cores and 4 GiB until you have watched
+  real agents, then use the load and memory they actually added. Keep a reserve for the
+  orchestrator and, on the user's own machine, for the user (at least 1 core and 2 GiB). Do
+  not launch when the 1-minute load is at or above the core count, swap is in use, or an
+  agent died to OOM. Back off on API rate-limit errors, and shed the newest agent when
+  memory runs short. Floor of one agent; `--max-parallel` and `--serial` only lower the
+  ceiling. State the probe and the slot count in the first status line and re-state them
+  when they change. On the `Workflow` path the pool limit is the slot count at launch; start
+  a further workflow run for more items when headroom opens.
+- **Parallel is the default.** Children that do not block each other run at the same time, up
+  to the slot count. A child is startable when every `blocked_by` / `Blocked by` entry is
+  closed or merged and, for a staged issue, its previous stage is merged. Launch every
+  startable child up to the cap, and start the next one the moment a slot frees (an agent
+  reaches ready, a PR merges, an agent dies); never wait for a whole batch. Overlapping
+  files are not a dependency: the later PR rebases at merge time (Step 5). Prefer to start
+  non-overlapping children first when more are startable than slots, but never leave a slot
+  empty to avoid an overlap.
+- **The orchestrator decides when work must be serial: measurement windows.** Anything
+  timing-sensitive (a benchmark, a performance gate, a reproducer that is a measurement)
+  needs a quiet machine, so it runs alone. The need can surface from the epic's criteria, a
+  triage result (`needsMeasurement`), or a fix agent that finds it must measure; the
+  orchestrator reads all three and acts at once:
+  1. Stop starting new agents. In-flight agents are not killed: they finish their current
+     step. A fix agent never times anything itself while others run; at the point it needs a
+     measurement it pushes, then returns `needsMeasurement` (what to measure, the protocol,
+     the control set) instead of measuring.
+  2. When the machine meets the quiet bar (Step 0, items 5 and 6; read the load from the probe), the orchestrator runs the window with
+     one measurement agent, pinned to a recorded default-branch SHA, with merges held until
+     it ends. Contaminated runs are retried or labelled, never scored.
+  3. When the window closes, record the numbers, hand them to the waiting agent in a
+     continuation brief, and resume the parallel default with the freed slots.
+  Everything not timing-sensitive (coding, review, CI on hosted runners) runs in parallel
+  outside windows. `--serial` forces every agent serial regardless.
 - One issue per agent, one idea per PR. Large issues are staged: each stage its own PR with
   its own checks, and a stop rule ("stop when the next stage cannot be had without a
-  regression or the measured gain runs out") so nothing is forced. Batch small correctness
-  bugs to one agent, one PR each.
+  regression or the measured gain runs out") so nothing is forced. Small correctness bugs
+  each get their own agent and PR; group them under one agent only when startable children
+  outnumber the slots.
+- Merges are serial (Step 5) but do not gate agents: while one PR waits on CI or its
+  post-merge workflows, the other agents keep investigating and coding.
 - PR bodies say `Part of #<E>` for the epic, never a closing keyword. A child's PR keeps
   `/investigate`'s `Fixes #N` only when it completes the issue (the final stage); earlier
   stages say `Part of #N`. The orchestrator closes every other child after verification
@@ -183,7 +224,7 @@ single status comment per partial child from the returned evidence, reusing its 
   to open PR), `/code-review high --fix --comment`, `/simplify`, then waits for the required
   checks. Nothing is run locally to prove green: the PR's CI is the gate. Agents stop at
   **ready**: review and simplify fixes pushed, required checks green on the final head. They
-  return `{repo, issue, pr, sha, checks, needsRuling}`. The orchestrator merges
+  return `{repo, issue, pr, sha, checks, needsRuling, needsMeasurement}`. The orchestrator merges
   (Step 5). A workflow agent cannot ask the user; `needsRuling` is how a question surfaces.
   `Agent`-tool subagents return prose, not a schema: ask for those fields in a fixed block at
   the end of the final report, parse it, and verify from `git` and `gh` anyway.
@@ -261,7 +302,8 @@ If no answer arrives, continue other work and list the question in every report.
 
 ## Anti-patterns
 
-- Fanning out five agents on tracks that share a hot file and calling it parallelism.
+- Running independent children one after another, or in lock-step batches, while a slot is free.
+- Holding back a child because it touches the same files as one in flight.
 - Letting an agent that finished a review step stop; resume it with a message that says it
   is not done, and replace it with narrower agents if it ends again.
 - Trusting a "checks green" claim written before the last push.

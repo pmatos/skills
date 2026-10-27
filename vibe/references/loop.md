@@ -5,7 +5,7 @@ Procedures behind `SKILL.md`. Nothing here overrides the rules table there.
 ## Phases and the queue
 
 ```text
-preflight → triage (read-only, parallel by theme unless measuring) → fix tracks → merge one PR at a time
+preflight → triage (read-only, parallel by theme; measuring themes wait for a window) → fix tracks → merge one PR at a time
         → keep main green → close-out audit → close or write the gap list
 ```
 
@@ -58,7 +58,8 @@ CI on a PR can take an hour, and merges are one at a time, each followed by its 
 workflows. So:
 
 - Start agents to investigate and code in parallel, but never cancel a PR's checks because
-  they have waited.
+  they have waited. The merge queue is serial; agent slots are not: refill a slot as soon as
+  an agent reaches ready or a PR merges, without waiting for the merge queue to drain.
 - Prefer one correct PR to three that each hit conflicts: every merge moves the default
   branch, so each queued PR may need a rebase and a fresh run of the checks.
 - Measurements that must not share the machine (timings) run only when the load is

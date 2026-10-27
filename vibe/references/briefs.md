@@ -64,6 +64,11 @@ stage where the next cannot be had without a regression; comment the measurement
 One stage per agent call under a Workflow (see the notes below); an Agent-tool agent
 may run several stages in sequence.
 
+Measuring: never run a benchmark or any timing-sensitive check yourself. When you need one,
+push your branch and finish with needsMeasurement (what to measure, the protocol, the
+control set); the orchestrator runs it in an exclusive window and continues you with the
+numbers. Deterministic counts that need no quiet machine are fine to run.
+
 Hard constraints: no regressions [project: the control set and tolerances]; if the
 improvement cannot be had without one, do NOT force it: comment on the issue with
 measurements instead (the orchestrator may close the issue as measured under a stated
@@ -77,9 +82,10 @@ whether #<N> is done; anything filed; cleanup done.
 
 Workflow result schema (`READY`): `repo` (string), `issue` (number), `pr` (number, the PR
 this stage opened), `sha` (string), `checks` (array of strings: check name and conclusion),
-`needsRuling` (string, empty if none), `notes` (string). Plain `Agent` subagents return
+`needsRuling` (string, empty if none), `needsMeasurement` (string, empty if none), `notes`
+(string). Plain `Agent` subagents return
 prose: end the brief with "finish your report with a block: repo, issue, PR, SHA, checks,
-needsRuling", parse it, and verify from `git` and `gh`.
+needsRuling, needsMeasurement", parse it, and verify from `git` and `gh`.
 
 ## Triage brief (read-only)
 
@@ -143,46 +149,49 @@ Landing is not a workflow: the orchestrator merges inline (SKILL.md Step 5).
 ```text
 // Workflow 1 — triage only; return every theme, including failures
 export const meta = { name: 'epic-<N>-triage', description: '…', phases: [{title: 'Triage'}] }
-// THEME_BATCHES holds <= MAX_PARALLEL themes per batch (one when the reproducers are
-// measurements, so themes do not confound each other).
-const results = []
-for (const batch of THEME_BATCHES) {
-  results.push(...await Promise.all(batch.map(async theme => {
-    try {
-      const triage = await agent(TRIAGE_BRIEF(theme), {schema: TRIAGE, effort: 'medium'})
-      if (triage && Array.isArray(triage.items)) return {theme, triage, incomplete: false}
-    } catch (e) { log('Triage theme threw: ' + theme) }
-    log('Incomplete triage theme: ' + theme)
-    return {theme, triage: null, incomplete: true}
-  })))
+// pool() keeps up to `limit` calls in flight and starts the next the moment one finishes, so a
+// slow item never holds up the rest. TRIAGE_LIMIT is the slot count (Step 4); themes whose reproducers
+// are measurements are left out and run alone afterwards, in a measurement window (Step 4).
+async function pool(items, limit, fn) {
+  const out = []
+  let next = 0
+  await Promise.all(Array.from({length: Math.min(limit, items.length)}, async () => {
+    while (next < items.length) { const i = next++; out[i] = await fn(items[i]) }
+  }))
+  return out
 }
-return results
+return await pool(THEMES, TRIAGE_LIMIT, async theme => {
+  try {
+    const triage = await agent(TRIAGE_BRIEF(theme), {schema: TRIAGE, effort: 'medium'})
+    if (triage && Array.isArray(triage.items)) return {theme, triage, incomplete: false}
+  } catch (e) { log('Triage theme threw: ' + theme) }
+  log('Incomplete triage theme: ' + theme)
+  return {theme, triage: null, incomplete: true}
+})
 
 // ORCHESTRATOR BARRIER: retain triage evidence; retry incomplete themes, verify done
 // children, surface needs-ruling items. Select only implementable open/partial items,
-// deduplicate by repo and issue, sort by priority. Decide serial vs disjoint parallel batches
-// in Step 4. FIX_BATCHES has <= MAX_PARALLEL items per batch (one under --serial);
-// all items in a parallel batch must have disjoint files and non-measurement criteria.
+// deduplicate by repo and issue, sort by priority. FIX_ITEMS holds every startable child
+// (Step 4: no open blocker, previous stage merged); children blocked by another item go in a
+// later workflow run once their blocker merges. FIX_LIMIT is the slot count (1 under --serial).
+// Files overlapping is not a reason to hold an item back. An item returning needsMeasurement
+// is parked for a measurement window (Step 4), not retried.
 
 // Workflow 2 — fixes to READY; no merges. FIX_BRIEF(item) covers ONE stage; a staged issue
 // is launched once per stage, the next stage only after the previous one is merged.
 export const meta = { name: 'epic-<N>-fix', description: '…', phases: [{title: 'Fix'}] }
-const fixes = []
-for (const batch of FIX_BATCHES) {
-  const results = await Promise.all(batch.map(async item => {
-    const ready = await agent(FIX_BRIEF(item), {schema: READY})
-    if (!ready) log('Incomplete fix: ' + item.issue)
-    return {item, ready}
-  }))
-  fixes.push(...results)
-}
-return fixes
+// pool() as in Workflow 1.
+return await pool(FIX_ITEMS, FIX_LIMIT, async item => {
+  const ready = await agent(FIX_BRIEF(item), {schema: READY})
+  if (!ready) log('Incomplete fix: ' + item.issue)
+  return {item, ready}
+})
 
 // ORCHESTRATOR BARRIER: retain triage AND fixes, verify every READY result from git/gh.
 // With --no-merge, ensure required checks are green on the final head, then stop.
 ```
 
-`THEME_BATCHES`, `TRIAGE`, `FIX_BATCHES`, `MAX_PARALLEL`, `READY`, and the brief functions are
+`THEMES`, `TRIAGE`, `TRIAGE_LIMIT`, `FIX_ITEMS`, `FIX_LIMIT`, `READY`, and the brief functions are
 yours to define from the templates above.  Notes that cost time once:
 
 - Prompts are template literals: use single quotes inside them. A stray backtick ends the
