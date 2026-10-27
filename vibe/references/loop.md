@@ -58,17 +58,51 @@ CI on a PR can take an hour, and merges are one at a time, each followed by its 
 workflows. So:
 
 - Start agents to investigate and code in parallel, but never cancel a PR's checks because
-  they have waited. The merge queue is serial; agent slots are not: refill a slot as soon as
-  an agent reaches ready or a PR merges, without waiting for the merge queue to drain.
+  they have waited.
 - Keep PRs small and merge in priority order: every merge moves the default branch, so each
-  queued PR may need a rebase and a fresh run of the checks. That cost is why READY-but-unmerged
-  PRs are bounded (SKILL.md Step 4), not a reason to hold independent children back.
-- Measurements that must not share the machine (timings) run only when the load is
-  low, by a bar you set in preflight and sample as SKILL.md Step 4 describes (an example from
-  the runs this was written from: other runnable tasks at p95 of 6 or fewer); a contended
-  number is labelled, never scored.
+  queued PR may need a rebase and a fresh run of the checks.
+- Measurements that must not share the machine (timings) run only in a measurement window
+  (below); a contended number is labelled, never scored.
 - Advisory checks (perf bots with noisy runners) are recorded in the PR, never rerun until
   green. If one shows a real regression, cite it against your own deterministic measurement.
+
+## Host probe
+
+Static facts (cores, container limits, `SwapTotal`) are read once in preflight; read only
+the dynamic ones before a launch (load, `MemAvailable`, `memory.current`, swap activity),
+once per wave of launches rather than per launch.
+
+- Linux: `nproc`; `/proc/loadavg`; `MemAvailable`, `SwapTotal`, `SwapFree` in
+  `/proc/meminfo`. Swap activity is the delta of `pswpin + pswpout` in `/proc/vmstat`
+  since the last read (or the second sample of `vmstat 1 2`: `si`/`so`).
+- Container: `/sys/fs/cgroup/cpu.max` (`max` means no CPU limit, else `quota period`),
+  `memory.max` (may be `max`), `memory.current` for usage. Host-wide figures overstate what
+  the container may use: headroom is the smaller of the limit minus usage and the host figure.
+- macOS: `sysctl -n hw.ncpu`, `uptime`, `vm_stat`, `sysctl vm.swapusage`.
+
+An agent costs what the repo's build and test cost: assume about 2 cores and 4 GiB until
+you have watched real agents, then use the load and memory they actually added. Keep a
+reserve for the orchestrator and, on the user's own machine, for the user (at least 1 core
+and 2 GiB). Do not launch when the 1-minute load is at or above the core count, when swap
+is actively moving (a little resident swap is normal and does not count), or after an
+agent died to OOM. Back off on API rate-limit errors; shed the newest agent when memory
+runs short.
+
+## Measurement windows
+
+- **Quiet bar:** the repo's, else at most `min(6, max(1, cores/4))` other runnable tasks at
+  p95. Sample in one command, not one tool call per read: runnable tasks are the numerator
+  of the 4th field of `/proc/loadavg` minus one for the sampler, read every 5 seconds for
+  2 minutes (e.g. a `for` loop around `awk '{print $4}' /proc/loadavg; sleep 5`); on macOS
+  use CPU idle of 90% or more from `top -l 2 -n 0`. The 1-minute load average lags and is
+  not the bar.
+- **Drain:** wait on agent completion notices rather than polling, for at most the repo's CI
+  time limit plus 30 minutes. Open the window as soon as the bar is met; at the limit open
+  it anyway and label the load it ran under.
+- **Merge hold:** merges wait until the window ends. The one exception is a merge that fixes
+  a red default branch (SKILL.md Step 6): let it merge and restart the window on the new SHA.
+- **Contaminated runs** are retried up to 3 times (measurement-window brief), then labelled,
+  never scored.
 
 ## The check set (generic)
 
@@ -175,7 +209,7 @@ the revert command. When in doubt, ask.
 A session restart loses the schedule and the in-memory queue. Rebuild from durable state:
 the rulings comment on the epic (run config, cron id, run ids), `gh pr list --state all
 --search '"Part of #<epic>" in:body'`, `git worktree list`, the open children, and the default branch's
-CI. Rebuild any measurement window from the run config (parked requests, window SHA, merge
-hold) and the request comments on the PRs; if the window's agent is gone, drain and reopen it.
+CI. Rebuild any open measurement window from the run config and the request comments on
+the PRs; if the window's agent is gone, drain and reopen it.
 Recreate the cron job, resume dead named agents by name, relaunch workflows with
 `resumeFromRunId`, and continue from the first unmet step. Say what was found.
