@@ -107,7 +107,7 @@ never kill a running agent to make room.
 | 3 or more PRs READY and waiting to merge, whatever holds them | New agents, except the agent fixing a red default branch | One of them merges |
 | 1-minute load at or above the core count (in a container, `cpu.pressure` `some avg10` of 20 or more, since `/proc/loadavg` is host-wide) | New agents while one is in flight | The reading drops |
 | Swap actively moving (a little resident swap is normal) | New agents while one is in flight | Swap activity stops |
-| An agent died to OOM | New agents past the in-flight count at the death, minus one; this lowered ceiling is recorded in the run config | Never in this run |
+| An agent died to OOM | New agents past the in-flight count at the death, minus one (never below 1, the floor); this lowered ceiling is recorded in the run config | Never in this run |
 | API rate-limit error | New agents for 5 minutes | The timer ends |
 
 Not counted toward the READY bound: PRs parked on a non-empty `needsMeasurement`, PRs
