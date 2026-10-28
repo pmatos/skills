@@ -5,7 +5,7 @@ Procedures behind `SKILL.md`. Nothing here overrides the rules table there.
 ## Phases and the queue
 
 ```text
-preflight → triage (read-only, parallel by theme; measuring themes wait for a window) → fix tracks → merge one PR at a time
+preflight → triage (read-only, parallel by theme; measuring children return `needsMeasurement` and wait for one) → fix tracks → merge one PR at a time
         → keep main green → close-out audit → close or write the gap list
 ```
 
@@ -31,7 +31,7 @@ orchestrator merges, one PR at a time, and finishes post-merge CI before the nex
    Re-check the remote head before merging; if it moved, repeat this check.
 2. Check the PR: `gh pr view <pr> --json mergeable,mergeStateStatus` (re-query while it says
    UNKNOWN). If it is CONFLICTING, or BEHIND under a repo rule that requires an up-to-date
-   branch, rebase on the newest default branch, resolving conflicts by hand, in the PR's own
+   branch, rebase on the newest default branch, resolving simple conflicts by hand (see Hand-back below), in the PR's own
    worktree: reuse the agent's (idle at READY, tracking `origin/<branch>`), or if it is gone
    `git worktree add -B <branch> <dir> origin/<branch>` then
    `git -C <dir> branch --set-upstream-to=origin/<branch>`. Run the scripts from that
