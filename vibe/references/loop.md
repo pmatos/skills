@@ -110,7 +110,9 @@ never kill a running agent to make room.
 
 Not counted toward the READY bound: PRs parked on a non-empty `needsMeasurement`, PRs
 waiting on a human ruling (`needsRuling`), which the orchestrator cannot clear; the bound
-is off under `--no-merge`. With none in flight the floor of one applies.
+is off under `--no-merge`. With none in flight the floor of one overrides the load and
+swap rows only; the rate-limit timer and a lowered OOM ceiling still hold. Wake the loop
+after a timer with a background `sleep <remaining>` (`run_in_background`), not by polling.
 
 ## Measurement windows
 

@@ -175,8 +175,10 @@ single status comment per partial child from the returned evidence, reusing its 
 - **Slots come from the host, not from a flag.** Before each launch, re-read the probe and
   start another agent while the headroom covers one more (headroom, sizing numbers and
   back-off conditions: `references/loop.md`, Host probe). Floor of one
-  agent: with none in flight, launch one whatever the back-off conditions say (they apply
-  once something is running, whose completion wakes the loop); the ceiling is `--max-parallel` (default 8), and `--serial` is a ceiling of one.
+  agent: with none in flight, launch one despite the load and swap conditions (a
+  completion notice wakes the loop once something runs), but not while a timer in the gating
+  table is running; then start a background `sleep <remaining>` whose exit wakes the loop
+  (the status tick also reports it). The ceiling is `--max-parallel` (default 8), and `--serial` is a ceiling of one.
   State the probe and the slot count in the first status line and re-state them when they
   change.
 - **In-flight work is bounded by slots and by the merge backlog.** Agents mostly wait on
