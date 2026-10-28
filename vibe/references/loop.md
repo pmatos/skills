@@ -102,8 +102,9 @@ never kill a running agent to make room.
 | An agent died to OOM | New agents past the in-flight count at the death, minus one | Never in this run |
 | API rate-limit error | New agents for 5 minutes | The timer ends |
 
-Not counted toward the READY bound: PRs parked on a non-empty `needsMeasurement`; the
-bound is off under `--no-merge`. With none in flight the floor of one applies.
+Not counted toward the READY bound: PRs parked on a non-empty `needsMeasurement`, PRs
+waiting on a human ruling (`needsRuling`), which the orchestrator cannot clear; the bound
+is off under `--no-merge`. With none in flight the floor of one applies.
 
 ## Measurement windows
 
