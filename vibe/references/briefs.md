@@ -148,8 +148,9 @@ report if the checkout is not at it). Requests, run one after another, each one 
   branch merged onto it, with the same protocol, interleaved with a null control.
 - Reproducer request: <issue, protocol>. Run the reproducer on the default SHA only; no
   PR branch involved.
-- Gate-evidence or foreign-PR request: follow that brief (below), with this window as its
-  quiet machine.
+- Gate-evidence or foreign-PR request: run only the measurement steps of that brief, with
+  this window as its quiet machine. Its review, budget and rebase checks and any merge
+  happen outside the window, with the orchestrator.
 Check the load against the quiet bar (<bar>) before each run; retry contaminated runs up to
 3 times and label what stays contaminated, never score it. No code changes, no merges, no
 threshold changes. Comment the tables, bounds, SHA, tool versions and contamination labels
