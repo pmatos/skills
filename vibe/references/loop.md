@@ -118,8 +118,9 @@ never kill a running agent to make room.
 Not counted toward the READY bound: any READY PR the orchestrator cannot clear itself
 (a non-empty `needsMeasurement` or `needsRuling`, or a required human review); the bound
 is off under `--no-merge`. With none in flight the floor of one overrides the load and
-swap rows only; the rate-limit timer and a lowered OOM ceiling still hold. Wake the loop
-after a timer with a background `sleep <remaining>` (`run_in_background`), not by polling.
+swap rows only; the rate-limit timer and a lowered OOM ceiling still hold. Whenever a row
+blocks with nothing in flight, wake the loop with a background `sleep` (`run_in_background`;
+the timer remaining, else about 5 minutes) and re-check, rather than polling or idling.
 
 ## Measurement windows
 
