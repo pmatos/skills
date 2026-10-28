@@ -201,8 +201,9 @@ return {theme: args.theme, triage: null, incomplete: true}
 // ORCHESTRATOR, per finished run: retain triage evidence; retry an incomplete theme, verify
 // done children, surface needs-ruling items. A child returned with needsMeasurement is
 // measured in a window (Step 4, reproducer request) and the orchestrator sets its final
-// status from the numbers. Startable open/partial items launch at once (Step 4), without
-// waiting for the other themes: deduplicate by repo and issue, highest priority first.
+// status from the numbers; such a child waits for that result before a fix agent launches.
+// Other startable open/partial items launch at once (Step 4), without waiting for the
+// other themes: deduplicate by repo and issue, highest priority first.
 
 // Workflow 2 — one fix to READY; no merges; one run per item, so its completion notice
 // frees exactly one slot. FIX_BRIEF(item) covers ONE stage; a staged issue is launched once

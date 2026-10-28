@@ -161,7 +161,8 @@ wording). The red-main merge check and verifying reports belong to the orchestra
 One agent per theme (at most about eight related children each), as many at a time as there are slots (Step 4). A triage
 agent never times anything: for a child whose reproducer is a measurement it returns a
 provisional status and `needsMeasurement`; the orchestrator runs that request in a window
-(Step 4) and sets the child's final status from the numbers. Each reads the issue and
+(Step 4) and sets the child's final status from the numbers; no fix agent launches for the
+child before then. Each reads the issue and
 every comment, runs the reproducer on the current default branch, and returns, per child,
 `done`, `partial`, `open` or `needs-ruling` with evidence, the exact remaining work,
 whether an agent can do it without a ruling, and a priority. No code changes, comments,
