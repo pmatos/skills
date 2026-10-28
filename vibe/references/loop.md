@@ -91,12 +91,19 @@ count is what keeps back-to-back launches honest. An agent costs what the repo's
 test cost: assume about 2 cores and 4 GiB until you have watched real agents, then use the
 load and memory they actually added. Keep a reserve for the orchestrator and, on the
 user's own machine, for the user (at least 1 core and 2 GiB). While an agent is in
-flight, do not launch when the 1-minute load is at or above the core count (in a
-container, when the cgroup's `cpu.pressure` `some avg10` is 20 or more, since
-`/proc/loadavg` is host-wide), when swap is actively moving (a little resident swap is
-normal and does not count), within 10 minutes of an agent dying to OOM, or within 5
-minutes of an API rate-limit error. With none in flight the floor of one applies. If
-memory runs short, stop launching; never kill a running agent to make room.
+flight, the conditions below gate new launches. If memory runs short, stop launching;
+never kill a running agent to make room.
+
+| Condition | Blocks | Clears when |
+|---|---|---|
+| 3 or more PRs READY and waiting to merge, whatever holds them | New agents, except the agent fixing a red default branch | One of them merges |
+| 1-minute load at or above the core count (in a container, `cpu.pressure` `some avg10` of 20 or more, since `/proc/loadavg` is host-wide) | New agents while one is in flight | The reading drops |
+| Swap actively moving (a little resident swap is normal) | New agents while one is in flight | Swap activity stops |
+| An agent died to OOM | New agents past the in-flight count at the death, minus one | Never in this run |
+| API rate-limit error | New agents for 5 minutes | The timer ends |
+
+Not counted toward the READY bound: PRs parked on a non-empty `needsMeasurement`; the
+bound is off under `--no-merge`. With none in flight the floor of one applies.
 
 ## Measurement windows
 
