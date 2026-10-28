@@ -76,7 +76,9 @@ each launch.
   `/proc/meminfo`. Swap activity is the delta of `pswpin + pswpout` in `/proc/vmstat`
   since the last read (or the second sample of `vmstat 1 2`: `si`/`so`).
 - Container: `/sys/fs/cgroup/cpu.max` (`max` means no CPU limit, else `quota period`),
-  `memory.max` (may be `max`), `memory.current` for usage. Host-wide figures overstate what
+  `memory.max` (may be `max`), `memory.current` for usage, less the `inactive_file` and `slab_reclaimable` lines of
+  `memory.stat` (reclaimable cache the kernel gives back under pressure; one formula on every
+  kernel, so do not rebuild usage from `anon`, `shmem` or `kernel`). Host-wide figures overstate what
   the container may use: take the cgroup limit as the core count and the smaller of the
   limit minus usage and the host figure as the memory.
 - macOS: `sysctl -n hw.ncpu`, `uptime`, `vm_stat`, `sysctl vm.swapusage`.
