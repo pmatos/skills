@@ -186,8 +186,8 @@ single status comment per partial child from the returned evidence, reusing its 
   hosted CI, so host headroom alone would launch too many: do not start a new agent while 3
   or more PRs are READY and waiting to merge, whatever is holding them (each one that
   conflicts after the merges ahead of it costs a rebase and a fresh CI run); the gating
-  table in `references/loop.md` (Host probe) lists this and every other launch condition,
-  with its exemptions. Merges are serial (Step 5) but do not gate agents; refill as the
+  table in `references/loop.md` (Host probe) lists this and the host and window launch
+  conditions, with their exemptions. Merges are serial (Step 5) but do not gate agents; refill as the
   queue drains. On the `Workflow` path the orchestrator
   enforces this, since a script cannot re-read the probe, hold for a window or see the
   backlog, and a run's result arrives only when its script ends: launch one run per fix

@@ -101,7 +101,8 @@ test cost (an OOM death means that cost was underestimated: lower the ceiling as
 says, and raise the assumed cost to match what the dead agent used): assume about 2 cores and 4 GiB until you have watched real agents, then use the
 load and memory they actually added. Keep a reserve for the orchestrator and, on the
 user's own machine, for the user (at least 1 core and 2 GiB). While an agent is in
-flight, the conditions below gate new launches. If memory runs short, stop launching;
+flight, the conditions below gate new launches (the slot ceiling and the same-files cap of
+3 are in SKILL.md Step 4). If memory runs short, stop launching;
 never kill a running agent to make room.
 
 | Condition | Blocks | Clears when |
@@ -111,6 +112,7 @@ never kill a running agent to make room.
 | Swap actively moving (a little resident swap is normal) | New agents while one is in flight | Swap activity stops |
 | An agent died to OOM | New agents past the in-flight count at the death, minus one (never below 1, the floor); this lowered ceiling is recorded in the run config | Never in this run |
 | API rate-limit error | New agents for 5 minutes | The timer ends |
+| A drain or an open measurement window | Every launch except the window agent; the floor does not override it | The window closes |
 
 Not counted toward the READY bound: any READY PR the orchestrator cannot clear itself
 (a non-empty `needsMeasurement` or `needsRuling`, or a required human review); the bound
