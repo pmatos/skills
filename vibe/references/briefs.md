@@ -11,7 +11,7 @@ docs they link; provision the repo's hooks in your worktree; never bypass hooks.
 Work in your OWN git worktree and scratch directory, never the main checkout. Commit as
 <identity from the run config>. Start from the newest default branch (git fetch). Publish
 with git push -u origin HEAD; never plain --force, and do not rebase unless the orchestrator hands
-a conflicting PR back to you; otherwise it rebases a PR only when it has merge conflicts.
+a conflicting PR back to you (hand-back brief below).
 
 Rules that never bend:
 - Never change a gate threshold, exclusion rule, contract, language semantics, baseline,
@@ -125,6 +125,18 @@ with numbers | recommendation (CLOSE-with-measurements | IMPLEMENT-remaining: wh
 risk | KEEP-OPEN: why) | draft closing comment (at most 6 lines) for CLOSE rows. A child with
 unmet criteria but solid numbers is CLOSE-as-measured: state the unmet criteria, the numbers, the
 reason and the decision rule that justifies it.
+```
+
+## Hand-back continuation brief
+
+```text
+Your PR #<pr> (branch <branch>) conflicts with <default> in a way the orchestrator will not
+resolve. Rebase it yourself, in your own worktree, with rebase-pr's scripts only:
+<REBASE_PR>/scripts/capture-lease.sh <remote> <branch> before the rebase, and
+<REBASE_PR>/scripts/safe-force-push.sh <remote> <branch> <captured-sha> to publish (an
+explicit-SHA --force-with-lease; never plain --force). Resolve the conflicts keeping both
+sides' intent, then run /code-review high --fix --comment and /simplify as before, and wait
+for the required checks on the new final head. Return READY with that SHA.
 ```
 
 ## Measurement-window brief
