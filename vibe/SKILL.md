@@ -244,7 +244,9 @@ single status comment per partial child from the returned evidence, reusing its 
   **ready**: review and simplify fixes pushed, required checks green on the final head. A
   result with a non-empty `needsMeasurement` is ready in that sense but not mergeable until
   the numbers are in; one returned before any PR exists has `pr` 0 and an empty `sha`, and
-  there is nothing to verify. They return `{repo, issue, pr, sha, checks, needsRuling, needsMeasurement}`. The orchestrator merges
+  there is nothing to verify only if it carries `needsRuling` or `needsMeasurement`; any
+  other `pr` 0 is incomplete: check `gh pr list --state all --search '#<N>'` before
+  relaunching. They return `{repo, issue, pr, sha, checks, needsRuling, needsMeasurement}`. The orchestrator merges
   (Step 5). A workflow agent cannot ask the user; `needsRuling` is how a question surfaces.
   `Agent`-tool subagents return prose, not a schema: ask for those fields in a fixed block at
   the end of the final report, parse it, and verify from `git` and `gh` anyway.
