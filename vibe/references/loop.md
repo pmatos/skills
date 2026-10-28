@@ -84,7 +84,8 @@ each launch.
   `/proc/meminfo`. Swap activity is the delta of `pswpin + pswpout` in `/proc/vmstat`
   since the last read (or the second sample of `vmstat 1 2`: `si`/`so`).
 - Container: `/sys/fs/cgroup/cpu.max` (`max` means no CPU limit, else `quota period`),
-  `memory.max` (may be `max`), and usage as `anon` plus `kernel` from `memory.stat`, not
+  `memory.max` (may be `max`), and usage as `anon` plus `kernel` from `memory.stat` (where `kernel` is absent, as on
+  older cgroup v2 kernels, add `slab`, `kernel_stack` and `pagetables` instead), not
   `memory.current`, which counts reclaimable page cache. Host-wide figures overstate what
   the container may use: take the cgroup limit as the core count and the smaller of the
   limit minus usage and the host figure as the memory.
