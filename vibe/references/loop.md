@@ -5,7 +5,7 @@ Procedures behind `SKILL.md`. Nothing here overrides the rules table there.
 ## Phases and the queue
 
 ```text
-preflight → triage (read-only, parallel by theme; measuring themes wait for a window) → fix tracks → merge one PR at a time
+preflight → triage (read-only, parallel by theme; measuring children return `needsMeasurement` and wait for one) → fix tracks → merge one PR at a time
         → keep main green → close-out audit → close or write the gap list
 ```
 
@@ -31,7 +31,7 @@ orchestrator merges, one PR at a time, and finishes post-merge CI before the nex
    Re-check the remote head before merging; if it moved, repeat this check.
 2. Check the PR: `gh pr view <pr> --json mergeable,mergeStateStatus` (re-query while it says
    UNKNOWN). If it is CONFLICTING, or BEHIND under a repo rule that requires an up-to-date
-   branch, rebase on the newest default branch, resolving conflicts by hand, in the PR's own
+   branch, rebase on the newest default branch, resolving simple conflicts by hand (see Hand-back below), in the PR's own
    worktree: reuse the agent's (idle at READY, tracking `origin/<branch>`), or if it is gone
    `git worktree add -B <branch> <dir> origin/<branch>` then
    `git -C <dir> branch --set-upstream-to=origin/<branch>`. Run the scripts from that
@@ -42,6 +42,16 @@ orchestrator merges, one PR at a time, and finishes post-merge CI before the nex
    The push restarts the checks: wait for the required checks to be green on the new head,
    then repeat the remote-head check of step 1. A PR that is neither CONFLICTING nor BEHIND
    is merged as it stands.
+
+   **Hand-back.** The orchestrator resolves only hunks where both sides can be kept
+   unchanged (import lists, adjacent additions, docs, changelogs). Anything not clearly that
+   (the same statement edited on both sides, delete/modify or rename conflicts, lockfiles or
+   generated files, overlapping edits to different statements) is handed back: run `git rebase --abort` first, then `git worktree remove` the worktree you
+   made for the rebase so the branch is free for the agent, then give the owning agent the hand-back continuation brief
+   (`references/briefs.md`; `SendMessage` if it is alive, else a fresh agent). The handed-back
+   PR leaves the head of the merge queue: merge the next READY PR meanwhile, and rebase
+   the handed-back one again if the default branch moved before it returns. A second
+   hand-back of the same PR becomes a decision memo (Human decisions), not a merge hold.
 3. Merge by the method the repo allows, only with every required check green on the PR's
    current head. Never `--auto`.
 4. Wait for the post-merge workflows on the merge commit to be green before starting the
@@ -69,14 +79,17 @@ workflows. So:
 ## Host probe
 
 Static facts (cores, container limits, `SwapTotal`) are read once in preflight; the dynamic
-ones (load, `MemAvailable`, `memory.current`, swap activity) are cheap and are read before
+ones (load, `MemAvailable`, memory in use, swap activity) are cheap and are read before
 each launch.
 
 - Linux: `nproc`; `/proc/loadavg`; `MemAvailable`, `SwapTotal`, `SwapFree` in
   `/proc/meminfo`. Swap activity is the delta of `pswpin + pswpout` in `/proc/vmstat`
   since the last read (or the second sample of `vmstat 1 2`: `si`/`so`).
 - Container: `/sys/fs/cgroup/cpu.max` (`max` means no CPU limit, else `quota period`),
-  `memory.max` (may be `max`), `memory.current` for usage. Host-wide figures overstate what
+  `memory.max` (may be `max`), and usage as `anon` plus `shmem` plus `kernel` from `memory.stat` (where `kernel` is absent,
+  as on older cgroup v2 kernels, add `slab_unreclaimable`, `kernel_stack` and `pagetables`
+  instead), not
+  `memory.current`, which counts reclaimable page cache. Host-wide figures overstate what
   the container may use: take the cgroup limit as the core count and the smaller of the
   limit minus usage and the host figure as the memory.
 - macOS: `sysctl -n hw.ncpu`, `uptime`, `vm_stat`, `sysctl vm.swapusage`.
@@ -85,25 +98,45 @@ each launch.
 orchestrator, times the assumed cost), and the same for memory. The load average is only a
 cross-check: it lags, so a launch made just after another sees no added load; the agent
 count is what keeps back-to-back launches honest. An agent costs what the repo's build and
-test cost: assume about 2 cores and 4 GiB until you have watched real agents, then use the
+test cost (an OOM death means that cost was underestimated: lower the ceiling as the table
+says, and raise the assumed cost to match what the dead agent used): assume about 2 cores and 4 GiB until you have watched real agents, then use the
 load and memory they actually added. Keep a reserve for the orchestrator and, on the
-user's own machine, for the user (at least 1 core and 2 GiB). Do not launch when the
-1-minute load is at or above the core count, when swap is actively moving (a little
-resident swap is normal and does not count), or after an agent died to OOM. Back off on
-API rate-limit errors. If memory runs short, stop launching; never kill a running agent
-to make room.
+user's own machine, for the user (at least 1 core and 2 GiB). While an agent is in
+flight, the conditions below gate new launches (the slot ceiling and the same-files cap of
+3 are in SKILL.md Step 4). If memory runs short, stop launching;
+never kill a running agent to make room.
+
+| Condition | Blocks | Clears when |
+|---|---|---|
+| 3 or more PRs READY and waiting to merge | New child work only; never an agent launched to unblock a counted PR (the red-main fix, a hand-back, the window agent, a post-window continuation) | One of them merges |
+| 1-minute load at or above the core count (in a container, `cpu.pressure` `some avg10` of 20 or more, since `/proc/loadavg` is host-wide; without `cpu.pressure`, headroom from the agent count alone) | New agents while one is in flight | The reading drops |
+| Swap actively moving (a little resident swap is normal) | New agents while one is in flight | Swap activity stops |
+| An agent died to OOM | New agents past the in-flight count at the death, minus one (never below 1, the floor); this lowered ceiling is recorded in the run config | Never in this run |
+| API rate-limit error | New agents for 5 minutes | The timer ends |
+| A drain or an open measurement window | Every launch except the window agent; the floor does not override it | The window closes |
+
+Not counted toward the READY bound: any READY PR the orchestrator cannot clear itself
+(a non-empty `needsMeasurement` or `needsRuling`, or a required human review); the bound
+is off under `--no-merge`. With none in flight the floor of one overrides the load and
+swap rows only; the rate-limit timer and a lowered OOM ceiling still hold. Whenever a row
+blocks with nothing in flight, wake the loop with a background `sleep` (`run_in_background`;
+the timer remaining, else about 5 minutes) and re-check, rather than polling or idling.
 
 ## Measurement windows
 
-- **Quiet bar:** the repo's, else at most `min(6, max(1, cores/4))` other runnable tasks at
-  p95, with `cores` the cgroup limit in a container. Sample in one command, not one tool
+- **Quiet bar:** the repo's, else at most `min(6, max(2, cores/4))` other runnable tasks at
+  p95, with `cores` the host's logical CPUs (`grep -c ^processor /proc/cpuinfo`; `nproc`
+  and the cgroup limit are smaller in a container and are for headroom, not for this bar).
+  The floor of 2 allows for the orchestrator's own process and the window agent's shell,
+  which the sampler subtraction does not remove; timings are disturbed by everything on the
+  machine, not only by this container. Sample in one command, not one tool
   call per read: runnable tasks are the numerator of the 4th field of `/proc/loadavg` minus
   one for the sampler, read every 5 seconds for 2 minutes (e.g. a `for` loop around
   `awk '{print $4}' /proc/loadavg; sleep 5`); on macOS use CPU idle of 90% or more from
-  `top -l 2 -n 0`. In a container `/proc/loadavg` is host-wide: prefer the cgroup's
-  `cpu.pressure` (`some avg10` under 5) when present. The 1-minute load average lags and is
-  not the bar. If other tenants keep the bar from ever being met, the window opens at the
-  drain limit and says so.
+  `top -l 2 -n 0`. Inside a container read the host-wide runnable count where `/proc/loadavg` shows it; the
+  cgroup's `cpu.pressure` sees only this container's stalls and does not prove the host is
+  quiet. The 1-minute load average lags and is not the bar. If other tenants keep the bar
+  from ever being met, the window opens at the drain limit and says so.
 - **Drain:** wait on agent completion notices rather than polling, for at most the repo's CI
   time limit plus 30 minutes. Open the window as soon as the bar is met; at the limit open
   it anyway and label the load it ran under.
@@ -111,8 +144,18 @@ to make room.
   a red default branch (SKILL.md Step 6): let it merge and restart the window on the new SHA.
 - **Contaminated runs** are retried up to 3 times (measurement-window brief), then labelled,
   never scored.
+- **Window limit:** the repo's measurement time limit, else 2 hours. The window
+  brief carries a deadline 15 minutes before this limit, so the agent labels its own
+  unfinished work `partial` and posts it before the hard stop. A
+  window agent that dies is relaunched once. At the limit stop the agent first (`TaskStop`),
+  then, as also on a second death, release the merge hold,
+  record what finished, and return unfinished requests to pending. Each request gets at
+  most two windows: after the second (the run config's window count), set its state to `memo` and write a
+  decision memo (Human decisions) instead of opening a third. Partial results are commented starting `vibe: measurement partial`,
+  never `result`, so they do not mark the request done.
 - **Resuming:** a request in the run config with no `vibe: measurement result` comment
-  citing it is pending; rebuild the window from those.
+  citing it is pending, unless its state is `memo`; rebuild the window from the pending
+  ones.
 
 ## The check set (generic)
 

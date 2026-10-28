@@ -10,8 +10,8 @@ Repo <owner/repo> at <path>, epic #<E> (<epic goal>). Read CLAUDE.md/AGENTS.md a
 docs they link; provision the repo's hooks in your worktree; never bypass hooks.
 Work in your OWN git worktree and scratch directory, never the main checkout. Commit as
 <identity from the run config>. Start from the newest default branch (git fetch). Publish
-with git push -u origin HEAD; never plain --force, and do not rebase: the orchestrator
-rebases a PR only when it has merge conflicts.
+with git push -u origin HEAD; never plain --force, and do not rebase unless the orchestrator hands
+a conflicting PR back to you (hand-back brief below).
 
 Rules that never bend:
 - Never change a gate threshold, exclusion rule, contract, language semantics, baseline,
@@ -84,7 +84,7 @@ whether #<N> is done; anything filed; cleanup done.
 ```
 
 Workflow result schema (`READY`): `repo` (string), `issue` (number), `pr` (number, the PR
-this stage opened), `sha` (string), `checks` (array of strings: check name and conclusion),
+this run is about; 0 if none yet), `sha` (string, empty if none), `checks` (array of strings: check name and conclusion),
 `needsRuling` (string, empty if none), `needsMeasurement` (string, empty if none), `notes`
 (string). Plain `Agent` subagents return
 prose: end the brief with "finish your report with a block: repo, issue, PR, SHA, checks,
@@ -127,20 +127,42 @@ unmet criteria but solid numbers is CLOSE-as-measured: state the unmet criteria,
 reason and the decision rule that justifies it.
 ```
 
+## Hand-back continuation brief
+
+```text
+<Common preamble.> Your PR #<pr> (branch <branch>) conflicts with <default> in a way the orchestrator will not
+resolve. Rebase it yourself, in your own worktree (the orchestrator has removed its own, so the branch is free), with
+rebase-pr's scripts only:
+<REBASE_PR>/scripts/capture-lease.sh <remote> <branch> before the rebase, and
+<REBASE_PR>/scripts/safe-force-push.sh <remote> <branch> <captured-sha> to publish (an
+explicit-SHA --force-with-lease; never plain --force). Resolve the conflicts keeping both
+sides' intent, then run /code-review high --fix --comment and /simplify as before, and wait
+for the required checks on the new final head. Return READY with that SHA. If resolving
+needs a contract or semantics change, stop and report it in needsRuling. If either script
+exits nonzero, stop and report its exit code and output; do not retry or force.
+```
+
 ## Measurement-window brief
 
 ```text
 You hold an exclusive measurement window. Default branch SHA: <sha> (pinned; stop and
-report if the checkout is not at it). Requests, each one of:
+report if the checkout is not at it). Requests, run one after another, each one of:
 - PR request: <PR branch, protocol, control set>. Measure the default SHA, then the PR
   branch merged onto it, with the same protocol, interleaved with a null control.
 - Reproducer request: <issue, protocol>. Run the reproducer on the default SHA only; no
   PR branch involved.
-Check the load against the quiet bar (<bar>) before each run; retry contaminated runs up to
+- Gate-evidence request: run that brief in full; it is all measurement. Post its single
+  result comment on the epic.
+- Foreign-PR request: run only the measurement of that brief, with this window as its quiet
+  machine. The orchestrator does the review, budget and rebase checks and any merge outside
+  the window. You post the only result comment.
+Stop by <deadline>: label anything unfinished partial. Check the load against the quiet
+bar (<bar>) before each run; retry contaminated runs up to
 3 times and label what stays contaminated, never score it. No code changes, no merges, no
 threshold changes. Comment the tables, bounds, SHA, tool versions and contamination labels
 on each request's PR (or issue), starting "vibe: measurement result" and citing the
-request, and return the numbers.
+request, or "vibe: measurement partial" for anything unfinished at the deadline, and return
+the numbers.
 ```
 
 ## Gate-evidence brief
@@ -153,17 +175,21 @@ the performance gate in the measurement window you were given (check the quiet b
 each run, retry contaminated runs up to 3 times and label what stays contaminated),
 merged through the project's own gate script so the gate is non-provisional. Open an issue per failing criterion with numbers; change no
 threshold. Post one comment with tables per criterion, bounds, the SHA, tool versions and
-contamination labels.
+contamination labels, headed and citing the request as the measurement-window brief says
+(result, or partial if unfinished at the deadline). The quiet bar is <bar>.
 ```
 
 ## Evaluate-a-foreign-PR brief
 
 ```text
-Review the diff for correctness; check the size/lint budget; check it rebases on the default
-branch (do NOT resolve conflicts in the PR branch, report). Measure base versus
-PR-merged-onto-default with the same protocol, in the window you were given (quiet bar checked before each run, contaminated runs
-retried up to 3 times and labelled, never scored). If every bar passes, comment the table and
-recommend merge; merge only when the invoking user explicitly authorised it, as recorded in the rulings comment. Never push to the
+Orchestrator, outside any window: review the diff for correctness; check the size/lint
+budget; check it rebases on the default branch (do NOT resolve conflicts in the PR branch,
+report). Window agent: measure base versus PR-merged-onto-default with the same protocol, in
+the window you were given (quiet bar checked before each run, contaminated runs retried up
+to 3 times and labelled, never scored; the quiet bar is <bar>). Comment the
+table, headed and citing the request as the measurement-window brief says, whatever the
+outcome; if
+every bar passes, recommend merge; merge only when the invoking user explicitly authorised it, as recorded in the rulings comment. Never push to the
 PR's branch.
 ```
 
@@ -173,38 +199,38 @@ One workflow per phase; read the result between phases (per `workflow-authoring`
 Landing is not a workflow: the orchestrator merges inline (SKILL.md Step 5).
 
 ```text
-// Workflow 1 — triage only; return every theme, including failures
-export const meta = { name: 'epic-<N>-triage', description: '…', phases: [{title: 'Triage'}] }
-// THEMES: at most the slot count (Step 4). pipeline() runs each theme with no barrier and
-// turns a throwing theme into null; the orchestrator treats null as incomplete.
-return await pipeline(THEMES, async theme => {
-  const triage = await agent(TRIAGE_BRIEF(theme), {schema: TRIAGE, effort: 'medium'})
-  if (triage && Array.isArray(triage.items)) return {theme, triage, incomplete: false}
-  log('Incomplete triage theme: ' + theme)
-  return {theme, triage: null, incomplete: true}
-})
+// Workflow 1 — triage ONE theme; one run per theme, so a slow theme never holds the rest.
+// The theme name and its issues arrive in args.theme and args.issues.
+export const meta = { name: 'epic-triage', description: 'Triage one theme of the epic', phases: [{title: 'Triage'}] }
+const triage = await agent(TRIAGE_BRIEF(args.theme, args.issues), {schema: TRIAGE, effort: 'medium', label: 'triage ' + args.theme})
+if (triage && Array.isArray(triage.items)) return {theme: args.theme, triage, incomplete: false}
+log('Incomplete triage theme: ' + args.theme)
+return {theme: args.theme, triage: null, incomplete: true}
 
-// ORCHESTRATOR BARRIER: retain triage evidence; retry incomplete (and null) themes, verify
-// done children, surface needs-ruling items. Children returned with needsMeasurement are
-// measured in a window (Step 4, reproducer request) and their results merged into the
-// triage evidence. Select only implementable open/partial items, deduplicate by repo and
-// issue, sort by priority. Launch one fix run per startable item (Step 4), up to the slot
-// count; a fix returning needsMeasurement is parked for a window, not retried.
+// ORCHESTRATOR, per finished run: retain triage evidence; retry an incomplete theme, verify
+// done children, surface needs-ruling items. A child returned with needsMeasurement is
+// measured in a window (Step 4, reproducer request) and the orchestrator sets its final
+// status from the numbers; such a child waits for that result before a fix agent launches.
+// Other startable open/partial items launch at once (Step 4), without waiting for the
+// other themes: deduplicate by repo and issue, and give each free slot to the
+// highest-priority startable item across all themes triaged so far.
 
 // Workflow 2 — one fix to READY; no merges; one run per item, so its completion notice
 // frees exactly one slot. FIX_BRIEF(item) covers ONE stage; a staged issue is launched once
-// per stage, the next stage only after the previous one is merged.
-export const meta = { name: 'epic-<N>-fix', description: '…', phases: [{title: 'Fix'}] }
-const ready = await agent(FIX_BRIEF(ITEM), {schema: READY})
-if (!ready) log('Incomplete fix: ' + ITEM.issue)
-return {item: ITEM, ready}
+// per stage, the next stage only after the previous one is merged. The item arrives in args.
+export const meta = { name: 'epic-fix', description: 'Fix one epic child to READY', phases: [{title: 'Fix'}] }
+const ready = await agent(FIX_BRIEF(args.item), {schema: READY, label: 'fix #' + args.item.issue})
+if (!ready) log('Incomplete fix: ' + args.item.issue)
+return {item: args.item, ready}
 
-// ORCHESTRATOR BARRIER: retain triage AND fixes, verify every READY result from git/gh;
-// a missing result is a fix that threw, so check its branch and PR before relaunching.
-// With --no-merge, ensure required checks are green on the final head, then stop.
+// ORCHESTRATOR, per finished run: verify the READY result from git/gh. A null `ready` is an
+// agent that died (agent() returns null, it does not throw), so check its branch and PR
+// before relaunching with a continuation brief. A fix returning needsMeasurement is parked
+// for a window, not retried. With --no-merge, ensure required checks are green on the final
+// head, then stop.
 ```
 
-`THEMES`, `TRIAGE`, `ITEM`, `READY`, and the brief functions are
+`TRIAGE`, `READY`, and the brief functions are
 yours to define from the templates above.  Notes that cost time once:
 
 - Prompts are template literals: use single quotes inside them. A stray backtick ends the
