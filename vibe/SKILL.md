@@ -198,8 +198,7 @@ single status comment per partial child from the returned evidence, reusing its 
   later PR rebases at merge time (Step 5). Prefer non-overlapping children first when more
   are startable than slots, and run at most 3 agents at once on children that touch the
   same files (judge from triage's remaining work); the rest queue behind them. A conflict
-  that is more than adjacent lines goes back to the owning agent (Step 5), not to a blind
-  hand merge.
+  the orchestrator will not resolve goes back to the owning agent (Step 5).
 - **The orchestrator decides when work must be serial: measurement windows.** Anything
   timing-sensitive (a benchmark, a performance gate, a reproducer that is a measurement)
   needs a quiet machine, so it runs alone. A **measurement request** (what to measure, the
@@ -259,8 +258,9 @@ starting another. The procedure is in `references/loop.md` (Who merges): check t
 branch is green (or this PR is the declared fix); if the PR has merge conflicts (or is behind
 under a repo rule that requires an up-to-date branch), rebase it with `rebase-pr`'s
 `capture-lease.sh` before and `safe-force-push.sh` after (explicit-SHA `--force-with-lease`,
-never plain `--force`; resolve conflicts by hand) and wait for the required checks on the new
-head; merge by the repo's allowed method; then wait for the post-merge workflows on the merge
+never plain `--force`; resolve simple conflicts by hand and hand any other back to the
+owning agent, per `references/loop.md`, Who merges) and wait for the required checks on
+the new head; merge by the repo's allowed method; then wait for the post-merge workflows on the merge
 commit to be green before the next merge.
 
 A PR without conflicts is merged as it stands. A merge can still break the next PR
