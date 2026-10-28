@@ -178,9 +178,9 @@ bar is <bar>.
 Review the diff for correctness; check the size/lint budget; check it rebases on the default
 branch (do NOT resolve conflicts in the PR branch, report). Measure base versus
 PR-merged-onto-default with the same protocol, in the window you were given (quiet bar checked before each run, contaminated runs
-retried up to 3 times and labelled, never scored; the quiet bar is <bar>). If every bar
-passes, comment the table, starting "vibe: measurement result" and citing the request, and
-recommend merge; merge only when the invoking user explicitly authorised it, as recorded in the rulings comment. Never push to the
+retried up to 3 times and labelled, never scored; the quiet bar is <bar>). Comment the
+table, starting "vibe: measurement result" and citing the request, whatever the outcome; if
+every bar passes, recommend merge; merge only when the invoking user explicitly authorised it, as recorded in the rulings comment. Never push to the
 PR's branch.
 ```
 
