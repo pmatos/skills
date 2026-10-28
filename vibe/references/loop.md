@@ -117,8 +117,11 @@ after a timer with a background `sleep <remaining>` (`run_in_background`), not b
 ## Measurement windows
 
 - **Quiet bar:** the repo's, else at most `min(6, max(2, cores/4))` other runnable tasks at
-  p95, with `cores` the host's: timings are disturbed by everything on the machine, not
-  only by this container. Sample in one command, not one tool
+  p95, with `cores` the host's logical CPUs (`grep -c ^processor /proc/cpuinfo`; `nproc`
+  and the cgroup limit are smaller in a container and are for headroom, not for this bar).
+  The floor of 2 allows for the orchestrator's own process and the window agent's shell,
+  which the sampler subtraction does not remove; timings are disturbed by everything on the
+  machine, not only by this container. Sample in one command, not one tool
   call per read: runnable tasks are the numerator of the 4th field of `/proc/loadavg` minus
   one for the sampler, read every 5 seconds for 2 minutes (e.g. a `for` loop around
   `awk '{print $4}' /proc/loadavg; sleep 5`); on macOS use CPU idle of 90% or more from
