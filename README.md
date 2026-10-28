@@ -379,7 +379,7 @@ Solves an issue marked `epic` end to end under **ultracode** (multi-agent `Workf
 What it does:
 - Resolves the epic (the `epic` label, an `Epic` issue type or an `epic(...)` title) and its open children from the paginated sub-issues API, task lists and `Part of #N` lines, and reads the epic's gate criteria as the definition of done.
 - Runs a **read-only triage wave** per theme (`done` / `partial` / `open` / `needs-ruling`, with evidence; the orchestrator verifies before it closes anything), then fixes the implementable gaps with one issue per agent and one idea per PR, staged with a stop rule so nothing is forced. Each fix agent runs `/investigate` (issue to PR), then Claude Code's `/code-review high --fix --comment` and `/simplify`, then waits for green.
-- Treats parallelism as a **parameter**: parallel tracks only for disjoint files and non-measurement criteria, serial (`--serial`) when criteria are performance numbers or tracks share a hot file.
+- Runs independent children **in parallel by default**, sized from the host's CPUs, load and memory (`--max-parallel` is a ceiling, default 8; `--serial` forces one), with a bound on READY-but-unmerged PRs. Timing-sensitive work runs in an exclusive **measurement window**: the orchestrator drains the other agents, measures on a quiet machine with merges held, then resumes.
 - Enforces merge discipline: the orchestrator merges one PR at a time, only on green required checks for the final head SHA (the PR's CI is the gate; nothing runs locally), rebases only when a PR has conflicts, waits for the post-merge workflows before the next merge, and **nothing merges onto a red default branch except its fix**.
 - Never moves a gate threshold, exclusion rule, baseline, contract, language semantics or a release step without a human ruling; each question is a short decision memo, recorded in one rulings comment on the epic (with a list of what proceeded without a ruling, and why).
 - Reports from `gh` and CI, never from memory, on a session cron that **starts no work**; completion notices drive the loop so nothing sits idle.
@@ -389,7 +389,7 @@ Flags: `ultracode`, `--serial`, `--max-parallel N`, `--no-merge`, `--report-ever
 
 Trigger phrases: `vibe an epic`, `vibe #N`, `drive epic #N to done`, `solve the epic`, `work through the epic's sub-issues`.
 
-**Requires**: Claude Code (it relies on the `Workflow`, `CronCreate`, `SendMessage` and `ListAgents` tools; other harnesses are not supported), [`gh`](https://cli.github.com/) with write access, the sibling `investigate` and `rebase-pr` skills (install them too), a git repository whose CI is the merge gate. Multi-agent workflows need the word `ultracode` in your own message; without it the skill continues with a few `Agent` calls.
+**Requires**: Claude Code (it relies on the `Workflow`, `CronCreate`, `SendMessage` and `ListAgents` tools; other harnesses are not supported), [`gh`](https://cli.github.com/) with write access, the sibling `investigate` and `rebase-pr` skills (install them too), a git repository whose CI is the merge gate. Multi-agent workflows need the word `ultracode` in your own message; without it the skill continues with `Agent` calls sized to the host.
 
 ## License
 
