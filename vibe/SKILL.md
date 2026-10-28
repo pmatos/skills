@@ -218,6 +218,8 @@ single status comment per partial child from the returned evidence, reusing its 
      default, and continues each waiting agent: `SendMessage` to a named `Agent` subagent
      that is still alive, otherwise (always on the `Workflow` path) a fresh agent with a
      continuation brief naming the branch, the PR, the numbers and the pipeline steps left.
+     With no PR yet (`pr` 0), the continuation starts at step 1, `/investigate`, with the
+     numbers in hand.
      The continued agent acts on the numbers: it writes the measurements document, applies
      the no-regression and stop rules (a regression is not forced: comment the numbers and
      stop, or close its own PR), re-runs review and simplify if code changed, pushes the measurements document, waits for
