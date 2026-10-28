@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   commitlint:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
       # Tag-pinned, not hash-pinned: this repo's policy is tag pins kept current by
       # Dependabot rather than SHA pins.
