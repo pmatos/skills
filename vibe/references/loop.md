@@ -104,14 +104,14 @@ never kill a running agent to make room.
 
 | Condition | Blocks | Clears when |
 |---|---|---|
-| 3 or more PRs READY and waiting to merge, whatever holds them | New agents, except the agent fixing a red default branch | One of them merges |
+| 3 or more PRs READY and waiting to merge | New child work only; never an agent launched to unblock a counted PR (the red-main fix, a hand-back, the window agent, a post-window continuation) | One of them merges |
 | 1-minute load at or above the core count (in a container, `cpu.pressure` `some avg10` of 20 or more, since `/proc/loadavg` is host-wide) | New agents while one is in flight | The reading drops |
 | Swap actively moving (a little resident swap is normal) | New agents while one is in flight | Swap activity stops |
 | An agent died to OOM | New agents past the in-flight count at the death, minus one (never below 1, the floor); this lowered ceiling is recorded in the run config | Never in this run |
 | API rate-limit error | New agents for 5 minutes | The timer ends |
 
-Not counted toward the READY bound: PRs parked on a non-empty `needsMeasurement`, PRs
-waiting on a human ruling (`needsRuling`), which the orchestrator cannot clear; the bound
+Not counted toward the READY bound: any READY PR the orchestrator cannot clear itself
+(a non-empty `needsMeasurement` or `needsRuling`, or a required human review); the bound
 is off under `--no-merge`. With none in flight the floor of one overrides the load and
 swap rows only; the rate-limit timer and a lowered OOM ceiling still hold. Wake the loop
 after a timer with a background `sleep <remaining>` (`run_in_background`), not by polling.
