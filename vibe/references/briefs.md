@@ -152,13 +152,14 @@ report if the checkout is not at it). Requests, run one after another, each one 
   result comment on the epic.
 - Foreign-PR request: run only the measurement of that brief, with this window as its quiet
   machine. The orchestrator does the review, budget and rebase checks and any merge outside
-  the window. You post the only "vibe: measurement result" comment.
+  the window. You post the only result comment.
 Stop by <deadline>: label anything unfinished partial. Check the load against the quiet
 bar (<bar>) before each run; retry contaminated runs up to
 3 times and label what stays contaminated, never score it. No code changes, no merges, no
 threshold changes. Comment the tables, bounds, SHA, tool versions and contamination labels
 on each request's PR (or issue), starting "vibe: measurement result" and citing the
-request ("vibe: measurement partial" for anything unfinished), and return the numbers.
+request, or "vibe: measurement partial" for anything unfinished at the deadline, and return
+the numbers.
 ```
 
 ## Gate-evidence brief
@@ -171,8 +172,8 @@ the performance gate in the measurement window you were given (check the quiet b
 each run, retry contaminated runs up to 3 times and label what stays contaminated),
 merged through the project's own gate script so the gate is non-provisional. Open an issue per failing criterion with numbers; change no
 threshold. Post one comment with tables per criterion, bounds, the SHA, tool versions and
-contamination labels, starting "vibe: measurement result" and citing the request. The quiet
-bar is <bar>.
+contamination labels, headed and citing the request as the measurement-window brief says
+(result, or partial if unfinished at the deadline). The quiet bar is <bar>.
 ```
 
 ## Evaluate-a-foreign-PR brief
@@ -183,7 +184,8 @@ budget; check it rebases on the default branch (do NOT resolve conflicts in the 
 report). Window agent: measure base versus PR-merged-onto-default with the same protocol, in
 the window you were given (quiet bar checked before each run, contaminated runs retried up
 to 3 times and labelled, never scored; the quiet bar is <bar>). Comment the
-table, starting "vibe: measurement result" and citing the request, whatever the outcome; if
+table, headed and citing the request as the measurement-window brief says, whatever the
+outcome; if
 every bar passes, recommend merge; merge only when the invoking user explicitly authorised it, as recorded in the rulings comment. Never push to the
 PR's branch.
 ```
