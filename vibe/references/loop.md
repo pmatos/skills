@@ -135,8 +135,10 @@ after a timer with a background `sleep <remaining>` (`run_in_background`), not b
   never scored.
 - **Window limit:** the repo's measurement time limit, else 2 hours. A window agent that
   dies is relaunched once. At the limit, or on a second death, release the merge hold,
-  record what finished (labelled partial), and return unfinished requests to pending for
-  the next window.
+  record what finished, and return unfinished requests to pending. Each request gets at
+  most two windows: after the second, write a decision memo (Human decisions) instead of
+  opening a third. Partial results are commented starting `vibe: measurement partial`,
+  never `result`, so they do not mark the request done.
 - **Resuming:** a request in the run config with no `vibe: measurement result` comment
   citing it is pending; rebuild the window from those.
 

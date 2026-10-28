@@ -154,7 +154,7 @@ Check the load against the quiet bar (<bar>) before each run; retry contaminated
 3 times and label what stays contaminated, never score it. No code changes, no merges, no
 threshold changes. Comment the tables, bounds, SHA, tool versions and contamination labels
 on each request's PR (or issue), starting "vibe: measurement result" and citing the
-request, and return the numbers.
+request ("vibe: measurement partial" for anything unfinished), and return the numbers.
 ```
 
 ## Gate-evidence brief
