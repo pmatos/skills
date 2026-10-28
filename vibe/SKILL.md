@@ -206,7 +206,9 @@ single status comment per partial child from the returned evidence, reusing its 
   needs a quiet machine, so it runs alone. A **measurement request** (what to measure, the
   protocol, the control set) comes from the epic's criteria (the orchestrator writes it), a
   triage result or fix agent (`needsMeasurement`), the close-out gate-evidence run, or a
-  foreign-PR evaluation. No request, no window. On a request the orchestrator:
+  foreign-PR evaluation. No request, no window. On a request the orchestrator opens one
+  window for every request pending when it opens; requests that arrive during the drain
+  join it, and pausing other work meanwhile is the point. It:
   1. **Drains.** Stops starting agents. Agents are not killed or paused: each runs on to
      **ready** or to `needsMeasurement` and returns. A returned agent has ended, so the
      wait costs nothing; its worktree and PR stay as they are.
