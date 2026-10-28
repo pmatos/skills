@@ -40,10 +40,16 @@ orchestrator merges, one PR at a time, and finishes post-merge CI before the nex
    `safe-force-push.sh <remote> <branch> <captured-sha>` to publish (explicit-SHA
    `--force-with-lease`). Do not run `rebase-pr`'s own gate step: the PR's CI is the gate.
    The push restarts the checks: wait for the required checks to be green on the new head,
-   then repeat the remote-head check of step 1. A conflict where both sides changed the same logic (more than adjacent lines) is
-   handed back instead: the owning agent (a continuation brief if it has ended) rebases
-   through the same scripts and re-runs review and checks. A PR that is neither CONFLICTING
-   nor BEHIND is merged as it stands.
+   then repeat the remote-head check of step 1. A PR that is neither CONFLICTING nor BEHIND
+   is merged as it stands.
+
+   **Hand-back.** The orchestrator resolves only hunks where both sides can be kept
+   unchanged (import lists, adjacent additions, docs, changelogs). Any hunk where both sides
+   edit the same statement is handed back: run `git rebase --abort` first so the worktree
+   is restored, then give the owning agent the hand-back continuation brief
+   (`references/briefs.md`; `SendMessage` if it is alive, else a fresh agent). The handed-back
+   PR leaves the head of the merge queue: merge the next READY PR meanwhile, and rebase
+   the handed-back one again if the default branch moved before it returns.
 3. Merge by the method the repo allows, only with every required check green on the PR's
    current head. Never `--auto`.
 4. Wait for the post-merge workflows on the merge commit to be green before starting the
