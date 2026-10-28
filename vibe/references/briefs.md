@@ -153,7 +153,8 @@ report if the checkout is not at it). Requests, run one after another, each one 
 - Foreign-PR request: run only the measurement of that brief, with this window as its quiet
   machine. The orchestrator does the review, budget and rebase checks and any merge outside
   the window. You post the only "vibe: measurement result" comment.
-Check the load against the quiet bar (<bar>) before each run; retry contaminated runs up to
+Stop by <deadline>: label anything unfinished partial. Check the load against the quiet
+bar (<bar>) before each run; retry contaminated runs up to
 3 times and label what stays contaminated, never score it. No code changes, no merges, no
 threshold changes. Comment the tables, bounds, SHA, tool versions and contamination labels
 on each request's PR (or issue), starting "vibe: measurement result" and citing the

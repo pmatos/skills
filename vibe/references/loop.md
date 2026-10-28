@@ -138,8 +138,10 @@ after a timer with a background `sleep <remaining>` (`run_in_background`), not b
   a red default branch (SKILL.md Step 6): let it merge and restart the window on the new SHA.
 - **Contaminated runs** are retried up to 3 times (measurement-window brief), then labelled,
   never scored.
-- **Window limit:** the repo's measurement time limit, else 2 hours. A window agent that
-  dies is relaunched once. At the limit, or on a second death, release the merge hold,
+- **Window limit:** the repo's measurement time limit, else 2 hours. The window
+  brief carries the deadline, so the agent labels its own unfinished work `partial`. A
+  window agent that dies is relaunched once. At the limit stop the agent first (`TaskStop`),
+  then, as also on a second death, release the merge hold,
   record what finished, and return unfinished requests to pending. Each request gets at
   most two windows: after the second, write a decision memo (Human decisions) instead of
   opening a third. Partial results are commented starting `vibe: measurement partial`,
