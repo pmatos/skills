@@ -220,7 +220,8 @@ single status comment per partial child from the returned evidence, reusing its 
      continuation brief naming the branch, the PR, the numbers and the pipeline steps left.
      The continued agent acts on the numbers: it writes the measurements document, applies
      the no-regression and stop rules (a regression is not forced: comment the numbers and
-     stop, or close its own PR), and re-runs review, simplify and checks if code changed.
+     stop, or close its own PR), re-runs review and simplify if code changed, pushes the measurements document, waits for
+     the required checks on the new final head (any push restarts them), and returns that SHA.
 
   Requests live in the run config, each with a state (pending, done) so a restart can
   rebuild the window. A fix agent also comments its request on its own PR, starting
