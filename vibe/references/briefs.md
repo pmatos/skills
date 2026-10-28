@@ -148,9 +148,11 @@ report if the checkout is not at it). Requests, run one after another, each one 
   branch merged onto it, with the same protocol, interleaved with a null control.
 - Reproducer request: <issue, protocol>. Run the reproducer on the default SHA only; no
   PR branch involved.
-- Gate-evidence or foreign-PR request: run only the measurement steps of that brief, with
-  this window as its quiet machine. Its review, budget and rebase checks and any merge
-  happen outside the window, with the orchestrator.
+- Gate-evidence request: run that brief in full; it is all measurement. Post its single
+  result comment on the epic.
+- Foreign-PR request: run only the measurement of that brief, with this window as its quiet
+  machine. The orchestrator does the review, budget and rebase checks and any merge outside
+  the window. You post the only "vibe: measurement result" comment.
 Check the load against the quiet bar (<bar>) before each run; retry contaminated runs up to
 3 times and label what stays contaminated, never score it. No code changes, no merges, no
 threshold changes. Comment the tables, bounds, SHA, tool versions and contamination labels
@@ -175,10 +177,11 @@ bar is <bar>.
 ## Evaluate-a-foreign-PR brief
 
 ```text
-Review the diff for correctness; check the size/lint budget; check it rebases on the default
-branch (do NOT resolve conflicts in the PR branch, report). Measure base versus
-PR-merged-onto-default with the same protocol, in the window you were given (quiet bar checked before each run, contaminated runs
-retried up to 3 times and labelled, never scored; the quiet bar is <bar>). Comment the
+Orchestrator, outside any window: review the diff for correctness; check the size/lint
+budget; check it rebases on the default branch (do NOT resolve conflicts in the PR branch,
+report). Window agent: measure base versus PR-merged-onto-default with the same protocol, in
+the window you were given (quiet bar checked before each run, contaminated runs retried up
+to 3 times and labelled, never scored; the quiet bar is <bar>). Comment the
 table, starting "vibe: measurement result" and citing the request, whatever the outcome; if
 every bar passes, recommend merge; merge only when the invoking user explicitly authorised it, as recorded in the rulings comment. Never push to the
 PR's branch.
