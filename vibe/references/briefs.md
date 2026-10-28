@@ -130,13 +130,16 @@ reason and the decision rule that justifies it.
 ## Hand-back continuation brief
 
 ```text
-Your PR #<pr> (branch <branch>) conflicts with <default> in a way the orchestrator will not
-resolve. Rebase it yourself, in your own worktree, with rebase-pr's scripts only:
+<Common preamble.> Your PR #<pr> (branch <branch>) conflicts with <default> in a way the orchestrator will not
+resolve. Rebase it yourself, in your own worktree (the orchestrator has removed its own, so the branch is free), with
+rebase-pr's scripts only:
 <REBASE_PR>/scripts/capture-lease.sh <remote> <branch> before the rebase, and
 <REBASE_PR>/scripts/safe-force-push.sh <remote> <branch> <captured-sha> to publish (an
 explicit-SHA --force-with-lease; never plain --force). Resolve the conflicts keeping both
 sides' intent, then run /code-review high --fix --comment and /simplify as before, and wait
-for the required checks on the new final head. Return READY with that SHA.
+for the required checks on the new final head. Return READY with that SHA. If resolving
+needs a contract or semantics change, stop and report it in needsRuling. If either script
+exits nonzero, stop and report its exit code and output; do not retry or force.
 ```
 
 ## Measurement-window brief
