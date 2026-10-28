@@ -143,11 +143,12 @@ after a timer with a background `sleep <remaining>` (`run_in_background`), not b
   window agent that dies is relaunched once. At the limit stop the agent first (`TaskStop`),
   then, as also on a second death, release the merge hold,
   record what finished, and return unfinished requests to pending. Each request gets at
-  most two windows: after the second, write a decision memo (Human decisions) instead of
-  opening a third. Partial results are commented starting `vibe: measurement partial`,
+  most two windows: after the second (the run config's window count), set its state to `memo` and write a
+  decision memo (Human decisions) instead of opening a third. Partial results are commented starting `vibe: measurement partial`,
   never `result`, so they do not mark the request done.
 - **Resuming:** a request in the run config with no `vibe: measurement result` comment
-  citing it is pending; rebuild the window from those.
+  citing it is pending, unless its state is `memo`; rebuild the window from the pending
+  ones.
 
 ## The check set (generic)
 

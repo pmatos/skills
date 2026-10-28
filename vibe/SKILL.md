@@ -224,8 +224,8 @@ single status comment per partial child from the returned evidence, reusing its 
      stop, or close its own PR), re-runs review and simplify if code changed, pushes the measurements document, waits for
      the required checks on the new final head (any push restarts them), and returns that SHA.
 
-  Requests live in the run config, each with a state (pending, done) so a restart can
-  rebuild the window. A fix agent also comments its request on its own PR, starting
+  Requests live in the run config, each with a state (pending, done or memo) and a window count, so a
+  restart can rebuild the window. A fix agent also comments its request on its own PR, starting
   `vibe: measurement request`; the window agent's result comment starts `vibe: measurement
   result` and cites the request, so a request with no result is pending. Triage agents are
   read-only: they return the request and the orchestrator records it. Everything not
