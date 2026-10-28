@@ -195,9 +195,9 @@ Landing is not a workflow: the orchestrator merges inline (SKILL.md Step 5).
 
 ```text
 // Workflow 1 — triage ONE theme; one run per theme, so a slow theme never holds the rest.
-// The theme arrives in args.
+// The theme name and its issues arrive in args.theme and args.issues.
 export const meta = { name: 'epic-triage', description: 'Triage one theme of the epic', phases: [{title: 'Triage'}] }
-const triage = await agent(TRIAGE_BRIEF(args.theme), {schema: TRIAGE, effort: 'medium', label: 'triage ' + args.theme})
+const triage = await agent(TRIAGE_BRIEF(args.theme, args.issues), {schema: TRIAGE, effort: 'medium', label: 'triage ' + args.theme})
 if (triage && Array.isArray(triage.items)) return {theme: args.theme, triage, incomplete: false}
 log('Incomplete triage theme: ' + args.theme)
 return {theme: args.theme, triage: null, incomplete: true}
