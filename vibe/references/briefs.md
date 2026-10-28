@@ -64,9 +64,13 @@ stage where the next cannot be had without a regression; comment the measurement
 One stage per agent call under a Workflow (see the notes below); an Agent-tool agent
 may run several stages in sequence.
 
-Measuring: never run a timing-sensitive check yourself. Push, comment the request on the PR
-(what to measure, the protocol, the control set) and finish with needsMeasurement carrying
-the same text. Deterministic counts that need no quiet machine are fine to run.
+Measuring: never run a timing-sensitive check yourself. Finish steps 1-4 first, then comment
+the request on the PR, starting "vibe: measurement request" (what to measure, the protocol,
+the control set), and return READY with needsMeasurement carrying the same text; `checks`
+is the state at that sha, and the PR is not mergeable until the numbers are in. If you
+cannot get as far as a PR without numbers, return at that point with needsMeasurement and
+`notes` listing the pipeline steps left. Deterministic counts that need no quiet machine
+are fine to run.
 
 Hard constraints: no regressions [project: the control set and tolerances]; if the
 improvement cannot be had without one, do NOT force it: comment on the issue with
@@ -100,7 +104,8 @@ evidence and the orchestrator verifies and closes.
 
 Measuring: never run a timing-sensitive reproducer yourself. For a child whose reproducer
 is a measurement, classify it from the issue and any recorded numbers, set needsMeasurement
-to the protocol, and say what you could not verify.
+to the request (what to measure on the default branch, the protocol), and say what you
+could not verify. You cannot comment: the orchestrator records the request.
 ```
 
 Workflow schema (`TRIAGE`): an `items` array of objects with `repo`, `issue`, `title`,
@@ -126,12 +131,16 @@ reason and the decision rule that justifies it.
 
 ```text
 You hold an exclusive measurement window. Default branch SHA: <sha> (pinned; stop and
-report if the checkout is not at it). For each request: <PR branch, protocol, control set>. Measure the default SHA, then the
-PR branch merged onto it, with the same protocol, same machine, interleaved with a null
-control. Check the load against the quiet bar (<bar>) before each run; retry contaminated
-runs up to 3 times and label what stays contaminated, never score it. No code changes, no
-merges, no threshold changes. Comment the tables, bounds, SHA, tool versions and
-contamination labels on each request's PR (or issue), and return the numbers.
+report if the checkout is not at it). Requests, each one of:
+- PR request: <PR branch, protocol, control set>. Measure the default SHA, then the PR
+  branch merged onto it, with the same protocol, interleaved with a null control.
+- Reproducer request: <issue, protocol>. Run the reproducer on the default SHA only; no
+  PR branch involved.
+Check the load against the quiet bar (<bar>) before each run; retry contaminated runs up to
+3 times and label what stays contaminated, never score it. No code changes, no merges, no
+threshold changes. Comment the tables, bounds, SHA, tool versions and contamination labels
+on each request's PR (or issue), starting "vibe: measurement result" and citing the
+request, and return the numbers.
 ```
 
 ## Gate-evidence brief
@@ -140,8 +149,9 @@ contamination labels on each request's PR (or issue), and return the numbers.
 Measure the CURRENT default branch (record the SHA; restart if it moves unless the new
 commits touch only docs or CI). No code changes, no merges. Build, run the project's
 self-hosting check, any verdict or differential comparison, oracle or property suites, and
-the performance gate in the measurement window you were given, merged through the project's own gate script
-so the gate is non-provisional. Open an issue per failing criterion with numbers; change no
+the performance gate in the measurement window you were given (check the quiet bar before
+each run, retry contaminated runs up to 3 times and label what stays contaminated),
+merged through the project's own gate script so the gate is non-provisional. Open an issue per failing criterion with numbers; change no
 threshold. Post one comment with tables per criterion, bounds, the SHA, tool versions and
 contamination labels.
 ```
@@ -151,7 +161,8 @@ contamination labels.
 ```text
 Review the diff for correctness; check the size/lint budget; check it rebases on the default
 branch (do NOT resolve conflicts in the PR branch, report). Measure base versus
-PR-merged-onto-default with the same protocol, in the window you were given. If every bar passes, comment the table and
+PR-merged-onto-default with the same protocol, in the window you were given (quiet bar checked before each run, contaminated runs
+retried up to 3 times and labelled, never scored). If every bar passes, comment the table and
 recommend merge; merge only when the invoking user explicitly authorised it, as recorded in the rulings comment. Never push to the
 PR's branch.
 ```
@@ -164,9 +175,8 @@ Landing is not a workflow: the orchestrator merges inline (SKILL.md Step 5).
 ```text
 // Workflow 1 — triage only; return every theme, including failures
 export const meta = { name: 'epic-<N>-triage', description: '…', phases: [{title: 'Triage'}] }
-// THEMES: at most the slot count (Step 4), none whose reproducers are measurements.
-// pipeline() runs each theme with no barrier and turns a throwing theme into null; the
-// orchestrator treats null as incomplete.
+// THEMES: at most the slot count (Step 4). pipeline() runs each theme with no barrier and
+// turns a throwing theme into null; the orchestrator treats null as incomplete.
 return await pipeline(THEMES, async theme => {
   const triage = await agent(TRIAGE_BRIEF(theme), {schema: TRIAGE, effort: 'medium'})
   if (triage && Array.isArray(triage.items)) return {theme, triage, incomplete: false}
@@ -175,28 +185,26 @@ return await pipeline(THEMES, async theme => {
 })
 
 // ORCHESTRATOR BARRIER: retain triage evidence; retry incomplete (and null) themes, verify
-// done children, surface needs-ruling items. Themes left out because their reproducers are
-// measurements are NOT triaged by the run above: after the drain, run them one at a time in
-// a measurement window (Step 4) and merge their results into the triage evidence. Select
-// only implementable open/partial items, deduplicate by repo and issue, sort by priority.
-// FIX_ITEMS: at most the slot count of startable children (Step 4); the rest go in later
-// runs. An item returning needsMeasurement is parked for a measurement window, not retried.
+// done children, surface needs-ruling items. Children returned with needsMeasurement are
+// measured in a window (Step 4, reproducer request) and their results merged into the
+// triage evidence. Select only implementable open/partial items, deduplicate by repo and
+// issue, sort by priority. Launch one fix run per startable item (Step 4), up to the slot
+// count; a fix returning needsMeasurement is parked for a window, not retried.
 
-// Workflow 2 — fixes to READY; no merges. FIX_BRIEF(item) covers ONE stage; a staged issue
-// is launched once per stage, the next stage only after the previous one is merged.
+// Workflow 2 — one fix to READY; no merges; one run per item, so its completion notice
+// frees exactly one slot. FIX_BRIEF(item) covers ONE stage; a staged issue is launched once
+// per stage, the next stage only after the previous one is merged.
 export const meta = { name: 'epic-<N>-fix', description: '…', phases: [{title: 'Fix'}] }
-return await pipeline(FIX_ITEMS, async item => {
-  const ready = await agent(FIX_BRIEF(item), {schema: READY})
-  if (!ready) log('Incomplete fix: ' + item.issue)
-  return {item, ready}
-})
+const ready = await agent(FIX_BRIEF(ITEM), {schema: READY})
+if (!ready) log('Incomplete fix: ' + ITEM.issue)
+return {item: ITEM, ready}
 
 // ORCHESTRATOR BARRIER: retain triage AND fixes, verify every READY result from git/gh;
-// a null entry is a fix that threw, so check its branch and PR before relaunching.
+// a missing result is a fix that threw, so check its branch and PR before relaunching.
 // With --no-merge, ensure required checks are green on the final head, then stop.
 ```
 
-`THEMES`, `TRIAGE`, `FIX_ITEMS`, `READY`, and the brief functions are
+`THEMES`, `TRIAGE`, `ITEM`, `READY`, and the brief functions are
 yours to define from the templates above.  Notes that cost time once:
 
 - Prompts are template literals: use single quotes inside them. A stray backtick ends the

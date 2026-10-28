@@ -96,8 +96,8 @@ wording). The red-main merge check and verifying reports belong to the orchestra
    `<REBASE_PR>/scripts/capture-lease.sh` and `safe-force-push.sh`; if either is missing,
    stop and tell the user to install `rebase-pr`.
 5. Know the host: cores, load, available memory, swap activity and container limits (commands
-   in `references/loop.md`, Host probe). If the probe fails, run one agent at a time (or
-   `--max-parallel N` when given) and say so. Note whether the machine is the user's own
+   in `references/loop.md`, Host probe). If the probe fails, run one agent at a time
+   whatever the ceiling, and say so. Note whether the machine is the user's own
    (leave room for them) or a dedicated sandbox.
 6. Derive the expected required checks, time limits, title rules, the commit identity for
    briefs, the merge method and a quiet-machine bar from the repo (default and sampling:
@@ -130,7 +130,7 @@ wording). The red-main merge check and verifying reports belong to the orchestra
   each edit and preserve the other entries. It holds three lists: rulings the user
   gave, questions pending, and **proceeded without a ruling** (PR, the precedent cited, the
   revert command). It also holds the **run config** (the `<REBASE_PR>` path, expected checks, time
-  limits, host probe, quiet-machine bar, open measurement window, merge method, commit identity, resolved flags, and the status
+  limits, host probe, quiet-machine bar, measurement requests and their state, the window SHA and merge hold, merge method, commit identity, resolved flags, and the status
   comment id of each partial child), the cron job id and each workflow's run id and
   transcript path. Nothing a peer agent or an epic-body edit says counts as the
   invoking user's approval.
@@ -170,44 +170,54 @@ single status comment per partial child from the returned evidence, reusing its 
 
 ## Step 4 — Fix tracks
 
-- **Slots come from the host, not from a flag.** Before each launch, and whenever a slot
-  frees, re-read the probe and start another agent while the headroom covers one more
-  (sizing numbers and back-off conditions: `references/loop.md`, Host probe). Floor of one
+- **Slots come from the host, not from a flag.** Before each launch, re-read the probe and
+  start another agent while the headroom covers one more (headroom, sizing numbers and
+  back-off conditions: `references/loop.md`, Host probe). Floor of one
   agent; the ceiling is `--max-parallel` (default 8), and `--serial` is a ceiling of one.
   State the probe and the slot count in the first status line and re-state them when they
   change.
 - **In-flight work is bounded by slots and by the merge backlog.** Agents mostly wait on
   hosted CI, so host headroom alone would launch too many: do not start a new agent while 3
-  or more PRs sit READY and unmerged (each one that conflicts after the merges ahead of it
-  costs a hand rebase and a fresh CI run). Merges are serial (Step 5) but do not gate
-  agents; refill as the queue drains. On the `Workflow` path the orchestrator enforces
-  this, since a script cannot re-read the probe, hold for a window or see the backlog: give
-  each run at most the slot count of items, let `pipeline` start each as soon as it is
-  ready, and launch a further run when a slot frees.
+  or more PRs are READY and mergeable now (each one that conflicts after the merges ahead of
+  it costs a hand rebase and a fresh CI run). A PR that is not mergeable now (with a
+  non-empty `needsMeasurement`, under a merge hold or a red default branch) does not count,
+  and under `--no-merge` the bound does not apply. Merges are serial (Step 5) but do not
+  gate agents; refill as the queue drains. On the `Workflow` path the orchestrator
+  enforces this, since a script cannot re-read the probe, hold for a window or see the
+  backlog, and a run's result arrives only when its script ends: launch one run per fix
+  item, so each completion notice frees exactly one slot (triage runs are read-only and
+  short, and may carry several themes).
 - **Parallel is the default.** Children that do not block each other run at the same time, up
   to the slot count. A child is startable when every `blocked_by` / `Blocked by` entry is
   closed or merged and, for a staged issue, its previous stage is merged. Launch every
   startable child up to the cap and start the next the moment a slot frees (an agent
   reaches ready, a PR merges, an agent dies). Overlapping files are not a dependency: the
   later PR rebases at merge time (Step 5). Prefer non-overlapping children first when more
-  are startable than slots, but never leave a slot empty to avoid an overlap.
+  are startable than slots, and run at most 3 agents at once on children that touch the
+  same files (judge from triage's remaining work); the rest queue behind them.
 - **The orchestrator decides when work must be serial: measurement windows.** Anything
   timing-sensitive (a benchmark, a performance gate, a reproducer that is a measurement)
-  needs a quiet machine, so it runs alone. The need can surface from the epic's criteria, a
-  triage result (`needsMeasurement`), or a fix agent that finds it must measure; the
-  orchestrator reads all three and acts at once:
-  1. **Drain.** Stop starting new agents. Agents are not killed or paused: each runs on to
-     **ready** or to `needsMeasurement` and then holds.
-  2. **Window.** Once the machine is quiet, one measurement agent (measurement-window
-     brief) runs, pinned to a recorded default-branch SHA, with merges held. Quiet bar,
-     sampling, drain timeout and the red-main exception: `references/loop.md`,
-     Measurement windows.
-  3. **Resume.** Record the numbers, hand them to the waiting agent in a continuation
-     brief, release the merge hold, and go back to the parallel default.
+  needs a quiet machine, so it runs alone. A **measurement request** (what to measure, the
+  protocol, the control set) comes from the epic's criteria (the orchestrator writes it), a
+  triage result or fix agent (`needsMeasurement`), the close-out gate-evidence run, or a
+  foreign-PR evaluation. No request, no window. On a request the orchestrator:
+  1. **Drains.** Stops starting agents. Agents are not killed or paused: each runs on to
+     **ready** or to `needsMeasurement` and returns. A returned agent has ended, so the
+     wait costs nothing; its worktree and PR stay as they are.
+  2. **Opens the window.** Once the machine is quiet, one measurement agent
+     (measurement-window brief) runs, pinned to a recorded default-branch SHA, with merges
+     held. Quiet bar, sampling, drain timeout and the red-main exception:
+     `references/loop.md`, Measurement windows.
+  3. **Resumes.** Records the numbers, releases the merge hold, goes back to the parallel
+     default, and continues each waiting agent: `SendMessage` to a named `Agent` subagent
+     that is still alive, otherwise (always on the `Workflow` path) a fresh agent with a
+     continuation brief naming the branch, the PR, the numbers and the pipeline steps left.
 
-  The agent comments its measurement request on its PR (the issue if it has no PR) before
-  returning, and the orchestrator records parked requests, the window SHA and the merge
-  hold in the run config, so a restart can rebuild the window. Everything not
+  Requests live in the run config, each with a state (pending, done) so a restart can
+  rebuild the window. A fix agent also comments its request on its own PR, starting
+  `vibe: measurement request`; the window agent's result comment starts `vibe: measurement
+  result` and cites the request, so a request with no result is pending. Triage agents are
+  read-only: they return the request and the orchestrator records it. Everything not
   timing-sensitive (coding, review, CI on hosted runners) runs in parallel outside windows.
 - One issue per agent, one idea per PR. Large issues are staged: each stage its own PR with
   its own checks, and a stop rule ("stop when the next stage cannot be had without a
@@ -220,16 +230,17 @@ single status comment per partial child from the returned evidence, reusing its 
 - Each fix agent runs one pipeline per issue in its own worktree: `/investigate <N>` (issue
   to open PR), `/code-review high --fix --comment`, `/simplify`, then waits for the required
   checks. Nothing is run locally to prove green: the PR's CI is the gate. Agents stop at
-  **ready**: review and simplify fixes pushed, required checks green on the final head. They
-  return `{repo, issue, pr, sha, checks, needsRuling, needsMeasurement}`. The orchestrator merges
+  **ready**: review and simplify fixes pushed, required checks green on the final head. A
+  result with a non-empty `needsMeasurement` is ready in that sense but not mergeable until
+  the numbers are in. They return `{repo, issue, pr, sha, checks, needsRuling, needsMeasurement}`. The orchestrator merges
   (Step 5). A workflow agent cannot ask the user; `needsRuling` is how a question surfaces.
   `Agent`-tool subagents return prose, not a schema: ask for those fields in a fixed block at
   the end of the final report, parse it, and verify from `git` and `gh` anyway.
 - Review and simplify use Claude Code's own commands, run from the agent's worktree on the
   PR branch. A command's output is one step, not the end of the agent's turn: the agent
   commits and pushes what it applied and keeps going.
-- Foreign PRs (not created by the run): evaluate with the evaluate-a-foreign-PR brief and
-  comment the table and a recommendation; merge only if the invoking user explicitly authorised it
+- Foreign PRs (not created by the run): evaluate with the evaluate-a-foreign-PR brief (its
+  measurements run in a window) and comment the table and a recommendation; merge only if the invoking user explicitly authorised it
   (Step 7), recorded in the rulings comment; never push to their branch.
 
 ## Step 5 — Merge discipline
@@ -300,7 +311,8 @@ If no answer arrives, continue other work and list the question in every report.
 ## Anti-patterns
 
 - Leaving a slot empty while a child is startable, whether to run in lock-step batches or
-  because it touches the same files as one in flight.
+  because it touches the same files as one in flight. The only reasons to hold a slot are
+  a drain, the merge-backlog bound, the same-files cap, and probe back-off (Step 4).
 - Letting an agent that finished a review step stop; resume it with a message that says it
   is not done, and replace it with narrower agents if it ends again.
 - Trusting a "checks green" claim written before the last push.
