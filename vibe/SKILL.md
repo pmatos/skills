@@ -162,7 +162,7 @@ One agent per theme (at most about eight related children each), as many at a ti
 agent never times anything: for a child whose reproducer is a measurement it returns a
 provisional status and `needsMeasurement`; the orchestrator runs that request in a window
 (Step 4) and sets the child's final status from the numbers; no fix agent launches for the
-child before then. Each reads the issue and
+child before then. Each triage agent reads the issue and
 every comment, runs the reproducer on the current default branch, and returns, per child,
 `done`, `partial`, `open` or `needs-ruling` with evidence, the exact remaining work,
 whether an agent can do it without a ruling, and a priority. No code changes, comments,
@@ -326,7 +326,7 @@ If no answer arrives, continue other work and list the question in every report.
 
 - Leaving a slot empty while a child is startable, whether to run in lock-step batches or
   because it touches the same files as one in flight. The only reasons to hold a slot are
-  a drain, the merge-backlog bound, the same-files cap, and probe back-off (Step 4).
+  the ones in the gating table (`references/loop.md`, Host probe) and the same-files cap.
 - Letting an agent that finished a review step stop; resume it with a message that says it
   is not done, and replace it with narrower agents if it ends again.
 - Trusting a "checks green" claim written before the last push.
