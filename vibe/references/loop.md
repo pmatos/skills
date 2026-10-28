@@ -5,7 +5,7 @@ Procedures behind `SKILL.md`. Nothing here overrides the rules table there.
 ## Phases and the queue
 
 ```text
-preflight → triage (read-only, parallel by theme unless measuring) → fix tracks → merge one PR at a time
+preflight → triage (read-only, parallel by theme; measuring themes wait for a window) → fix tracks → merge one PR at a time
         → keep main green → close-out audit → close or write the gap list
 ```
 
@@ -59,13 +59,60 @@ workflows. So:
 
 - Start agents to investigate and code in parallel, but never cancel a PR's checks because
   they have waited.
-- Prefer one correct PR to three that each hit conflicts: every merge moves the default
-  branch, so each queued PR may need a rebase and a fresh run of the checks.
-- Measurements that must not share the machine (timings) run only when the load is
-  low, by a bar you set in preflight (an example from the runs this was written from: other
-  runnable tasks at p95 of 6 or fewer); a contended number is labelled, never scored.
+- Keep PRs small and merge in priority order: every merge moves the default branch, so each
+  queued PR may need a rebase and a fresh run of the checks.
+- Measurements that must not share the machine (timings) run only in a measurement window
+  (below); a contended number is labelled, never scored.
 - Advisory checks (perf bots with noisy runners) are recorded in the PR, never rerun until
   green. If one shows a real regression, cite it against your own deterministic measurement.
+
+## Host probe
+
+Static facts (cores, container limits, `SwapTotal`) are read once in preflight; the dynamic
+ones (load, `MemAvailable`, `memory.current`, swap activity) are cheap and are read before
+each launch.
+
+- Linux: `nproc`; `/proc/loadavg`; `MemAvailable`, `SwapTotal`, `SwapFree` in
+  `/proc/meminfo`. Swap activity is the delta of `pswpin + pswpout` in `/proc/vmstat`
+  since the last read (or the second sample of `vmstat 1 2`: `si`/`so`).
+- Container: `/sys/fs/cgroup/cpu.max` (`max` means no CPU limit, else `quota period`),
+  `memory.max` (may be `max`), `memory.current` for usage. Host-wide figures overstate what
+  the container may use: take the cgroup limit as the core count and the smaller of the
+  limit minus usage and the host figure as the memory.
+- macOS: `sysctl -n hw.ncpu`, `uptime`, `vm_stat`, `sysctl vm.swapusage`.
+
+**Headroom** is cores minus the reserve minus (agents in flight, counted by the
+orchestrator, times the assumed cost), and the same for memory. The load average is only a
+cross-check: it lags, so a launch made just after another sees no added load; the agent
+count is what keeps back-to-back launches honest. An agent costs what the repo's build and
+test cost: assume about 2 cores and 4 GiB until you have watched real agents, then use the
+load and memory they actually added. Keep a reserve for the orchestrator and, on the
+user's own machine, for the user (at least 1 core and 2 GiB). Do not launch when the
+1-minute load is at or above the core count, when swap is actively moving (a little
+resident swap is normal and does not count), or after an agent died to OOM. Back off on
+API rate-limit errors. If memory runs short, stop launching; never kill a running agent
+to make room.
+
+## Measurement windows
+
+- **Quiet bar:** the repo's, else at most `min(6, max(1, cores/4))` other runnable tasks at
+  p95, with `cores` the cgroup limit in a container. Sample in one command, not one tool
+  call per read: runnable tasks are the numerator of the 4th field of `/proc/loadavg` minus
+  one for the sampler, read every 5 seconds for 2 minutes (e.g. a `for` loop around
+  `awk '{print $4}' /proc/loadavg; sleep 5`); on macOS use CPU idle of 90% or more from
+  `top -l 2 -n 0`. In a container `/proc/loadavg` is host-wide: prefer the cgroup's
+  `cpu.pressure` (`some avg10` under 5) when present. The 1-minute load average lags and is
+  not the bar. If other tenants keep the bar from ever being met, the window opens at the
+  drain limit and says so.
+- **Drain:** wait on agent completion notices rather than polling, for at most the repo's CI
+  time limit plus 30 minutes. Open the window as soon as the bar is met; at the limit open
+  it anyway and label the load it ran under.
+- **Merge hold:** merges wait until the window ends. The one exception is a merge that fixes
+  a red default branch (SKILL.md Step 6): let it merge and restart the window on the new SHA.
+- **Contaminated runs** are retried up to 3 times (measurement-window brief), then labelled,
+  never scored.
+- **Resuming:** a request in the run config with no `vibe: measurement result` comment
+  citing it is pending; rebuild the window from those.
 
 ## The check set (generic)
 
@@ -133,7 +180,7 @@ agents, the next brief for workflows), and record the change in the rulings comm
   avoid it on partial stages as a precaution.
 - A merged-but-open child goes through the close-out audit, not an optimistic close. If a
   gate criterion needs a fresh measurement of the default branch, run the gate-evidence
-  brief first; then launch the read-only audit brief: per child, a table of criteria met or
+  brief first, in a measurement window; then launch the read-only audit brief: per child, a table of criteria met or
   unmet with numbers, a recommendation, and a draft closing comment.
 - **Closed-as-measured**: criteria unmet but with numbers, the reason, and a stated decision
   rule ("regression-free, or don't force it"). Allowed only when the user stated the rule up
@@ -172,5 +219,7 @@ the revert command. When in doubt, ask.
 A session restart loses the schedule and the in-memory queue. Rebuild from durable state:
 the rulings comment on the epic (run config, cron id, run ids), `gh pr list --state all
 --search '"Part of #<epic>" in:body'`, `git worktree list`, the open children, and the default branch's
-CI. Recreate the cron job, resume dead named agents by name, relaunch workflows with
+CI. Rebuild any open measurement window from the run config and the measurement comments
+on the PRs (Measurement windows, Resuming); if the window's agent is gone, drain and reopen it.
+Recreate the cron job, resume dead named agents by name, relaunch workflows with
 `resumeFromRunId`, and continue from the first unmet step. Say what was found.
