@@ -44,12 +44,14 @@ orchestrator merges, one PR at a time, and finishes post-merge CI before the nex
    is merged as it stands.
 
    **Hand-back.** The orchestrator resolves only hunks where both sides can be kept
-   unchanged (import lists, adjacent additions, docs, changelogs). Any hunk where both sides
-   edit the same statement is handed back: run `git rebase --abort` first so the worktree
+   unchanged (import lists, adjacent additions, docs, changelogs). Anything not clearly that
+   (the same statement edited on both sides, delete/modify or rename conflicts, lockfiles or
+   generated files, overlapping edits to different statements) is handed back: run `git rebase --abort` first so the worktree
    is restored, then give the owning agent the hand-back continuation brief
    (`references/briefs.md`; `SendMessage` if it is alive, else a fresh agent). The handed-back
    PR leaves the head of the merge queue: merge the next READY PR meanwhile, and rebase
-   the handed-back one again if the default branch moved before it returns.
+   the handed-back one again if the default branch moved before it returns. A second
+   hand-back of the same PR becomes a decision memo (Human decisions), not a merge hold.
 3. Merge by the method the repo allows, only with every required check green on the PR's
    current head. Never `--auto`.
 4. Wait for the post-merge workflows on the merge commit to be green before starting the
