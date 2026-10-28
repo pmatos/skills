@@ -84,7 +84,7 @@ whether #<N> is done; anything filed; cleanup done.
 ```
 
 Workflow result schema (`READY`): `repo` (string), `issue` (number), `pr` (number, the PR
-this stage opened; 0 if none yet), `sha` (string, empty if none), `checks` (array of strings: check name and conclusion),
+this run is about; 0 if none yet), `sha` (string, empty if none), `checks` (array of strings: check name and conclusion),
 `needsRuling` (string, empty if none), `needsMeasurement` (string, empty if none), `notes`
 (string). Plain `Agent` subagents return
 prose: end the brief with "finish your report with a block: repo, issue, PR, SHA, checks,
