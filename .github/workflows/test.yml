@@ -4,13 +4,13 @@ on:
   pull_request:
     paths:
       - "review-offline/**"
-      - "pm-cr/**"
+      - "pm-risk/**"
       - ".github/workflows/test.yml"
   push:
     branches: [main]
     paths:
       - "review-offline/**"
-      - "pm-cr/**"
+      - "pm-risk/**"
       - ".github/workflows/test.yml"
 
 # Least privilege: the tests only read the checked-out tree.
@@ -38,4 +38,4 @@ jobs:
         uses: astral-sh/setup-uv@v10.3.0
 
       - name: Test
-        run: uv run --with pytest pytest review-offline/tests pm-cr/tests
+        run: uv run --with pytest pytest review-offline/tests pm-risk/tests

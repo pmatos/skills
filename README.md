@@ -167,17 +167,12 @@ Trigger phrases: `plan this`, `make a plan`, `implementation plan`, `deep plan`,
 npx skills@latest add pmatos/skills/pm-cr
 ```
 
-Reviews the current diff, or a PR number/branch/path target, for correctness bugs and reuse/simplification/efficiency/altitude/conventions cleanups, at a depth that a bundled script scores from the change's risk.
+Reviews the current diff, or a PR number/branch/path target, for correctness bugs and reuse/simplification/efficiency/altitude/conventions cleanups, at a depth set by the change's merge risk.
 
 What it does:
 - Gathers the diff under review (`git diff <base>...HEAD` against the resolved default branch — `origin/HEAD` symref, then `gh repo view --json defaultBranchRef`, then a local `main`/`master`, with `HEAD~1` only as a disclosed last resort — plus any uncommitted working-tree changes and any untracked, non-ignored files), or reviews an explicit PR/branch/path argument (a PR or branch target must be checked out — the review is refused with a `gh pr checkout` hint rather than silently diffing the current branch).
 - Runs on the latest Opus (`model: opus`) at `high` reasoning effort, set in the skill's frontmatter.
-- Takes no level argument. `scripts/score_depth.py` scores the depth from git metadata and paths:
-  - Size (changed lines, files and top-level directories) picks low, medium or high. Lockfiles, generated files and pure renames don't count.
-  - Code that changes without any test change raises the depth one level, to at most high, when the repo has tests.
-  - A high-stakes path raises it two levels, to at least high. Built-in paths cover CI, dependency manifests and lockfiles, deploy config and migrations. A repo adds its own as globs under a `High-stakes paths` heading in `REVIEW.md`, which the script reads from the base so a change can't lower its own depth.
-  - An edit to `CLAUDE.md`, `AGENTS.md` or `REVIEW.md` means at least medium.
-- The same change always gets the same depth, angles and cap, and the review prints the signals behind the choice. Findings can still vary between runs. There is no way to ask for a cheaper pass: for a quick check while iterating, use the built-in `/code-review low` or `/pm-simplify`.
+- Takes no level argument. The [`pm-risk`](#pm-risk--merge-risk) skill scores the change's merge risk, which sets the depth (`critical` maps to xhigh). The same change always gets the same depth, angles and cap, though findings can still vary between runs. For a quick check while iterating, use the built-in `/code-review low` or `/pm-simplify`.
 - At medium and above, first builds a reviewer brief that every finder and verifier receives. The brief holds the author's stated intent (from the PR title and body and the commit subjects) and the rules in `CLAUDE.md`, `AGENTS.md` and `REVIEW.md`. When the diff edits one of those files, the base version applies.
 - **low**: a single hunk-only read pass, no subagents, capped at 4 findings.
 - **medium**: 8 parallel finder angles (3 correctness + Reuse/Simplification/Efficiency/Altitude/Conventions), up to 6 candidates each, then a 3-state verify pass (CONFIRMED/PLAUSIBLE/REFUTED) — capped at 8 findings, tuned for precision.
@@ -189,6 +184,30 @@ What it does:
 - `--fix` applies the reported findings to the working tree directly, skipping anything that would change behavior or fall outside the diff. `--comment` posts findings as inline PR comments (GitHub MCP tool, falling back to `gh api`) and the assessment as one general comment.
 
 Trigger phrases: `code review this`, `review this PR`, `review the diff`, `review my changes`, `review with fixes`.
+
+**Requires**: the sibling `pm-risk` skill (`npx skills@latest add pmatos/skills/pm-risk`). Without it, every review runs at high. Install both at user scope to review untrusted PRs, because a project-scoped skill is loaded from the PR's own checkout.
+
+### `/pm-risk` — Merge risk
+
+```bash
+npx skills@latest add pmatos/skills/pm-risk
+```
+
+Scores how risky a PR, a branch or the working tree is to merge, as low, medium, high or critical, and lists the signals behind the score. A bundled script scores from git metadata and paths, so the same change always gets the same risk, and the agent that wrote a change can't argue it down.
+
+What it does:
+- Size (changed lines, files and top-level directories) picks low, medium or high. Lockfiles, generated and vendored files and pure renames don't count.
+- Code that changes without any test change raises the risk one level, to at most high, when the repo has tests.
+- A high-stakes path raises it two levels. Built-in paths cover CI, dependency manifests, lockfiles, vendored code, deploy config and migrations. A repo adds its own as globs under a `High-stakes paths` heading in `REVIEW.md`, read from the base so a change can't lower its own risk.
+- An edit to `CLAUDE.md`, `AGENTS.md` or `REVIEW.md` means at least medium.
+- Scores a PR without checking it out. `--comment` posts the report on the PR, so whoever merges it sees the risk and why.
+- pm-cr calls it to choose its review depth.
+
+Size is the strongest signal, so a large refactor that preserves behavior still scores medium or high. A refactor that keeps scoring high is a cue to split it.
+
+Trigger phrases: `how risky is this PR`, `what's the merge risk`, `score this change's risk`, `is this safe to merge`.
+
+**Requires**: Python 3, and an authenticated [GitHub CLI](https://cli.github.com/) (`gh`) for PR targets.
 
 ### `/pm-simplify` — Simplify
 
