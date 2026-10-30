@@ -167,24 +167,28 @@ Trigger phrases: `plan this`, `make a plan`, `implementation plan`, `deep plan`,
 npx skills@latest add pmatos/skills/pm-cr
 ```
 
-Reviews the current diff, or a PR number/branch/path target, for correctness bugs and reuse/simplification/efficiency/altitude/conventions cleanups at a chosen effort level.
+Reviews the current diff, or a PR number/branch/path target, for correctness bugs and reuse/simplification/efficiency/altitude/conventions cleanups, at a depth that a bundled script scores from the change's risk.
 
 What it does:
 - Gathers the diff under review (`git diff <base>...HEAD` against the resolved default branch — `origin/HEAD` symref, then `gh repo view --json defaultBranchRef`, then a local `main`/`master`, with `HEAD~1` only as a disclosed last resort — plus any uncommitted working-tree changes and any untracked, non-ignored files), or reviews an explicit PR/branch/path argument (a PR or branch target must be checked out — the review is refused with a `gh pr checkout` hint rather than silently diffing the current branch).
 - Runs on the latest Opus (`model: opus`) at `high` reasoning effort, set in the skill's frontmatter.
+- Takes no level argument. `scripts/score_depth.py` scores the depth from git metadata and paths:
+  - Size (changed lines, files and top-level directories) picks low, medium or high. Lockfiles, generated files and pure renames don't count.
+  - Code that changes without any test change raises the depth one level, to at most high, when the repo has tests.
+  - A high-stakes path raises it two levels, to at least high. Built-in paths cover CI, dependency manifests and lockfiles, deploy config and migrations. A repo adds its own as globs under a `High-stakes paths` heading in `REVIEW.md`, which the script reads from the base so a change can't lower its own depth.
+  - An edit to `CLAUDE.md`, `AGENTS.md` or `REVIEW.md` means at least medium.
+- The same change always gets the same depth, angles and cap, and the review prints the signals behind the choice. Findings can still vary between runs. There is no way to ask for a cheaper pass: for a quick check while iterating, use the built-in `/code-review low` or `/pm-simplify`.
 - At medium and above, first builds a reviewer brief that every finder and verifier receives. The brief holds the author's stated intent (from the PR title and body and the commit subjects) and the rules in `CLAUDE.md`, `AGENTS.md` and `REVIEW.md`. When the diff edits one of those files, the base version applies.
 - **low**: a single hunk-only read pass, no subagents, capped at 4 findings.
 - **medium**: 8 parallel finder angles (3 correctness + Reuse/Simplification/Efficiency/Altitude/Conventions), up to 6 candidates each, then a 3-state verify pass (CONFIRMED/PLAUSIBLE/REFUTED) — capped at 8 findings, tuned for precision.
 - **high**: the same 8 angles, but a recall-biased verify pass ("PLAUSIBLE by default") — capped at 10 findings, tuned for recall.
-- **xhigh/max**: 11 parallel finder angles (adds a language-pitfall, a wrapper/proxy-correctness and a trust-boundary angle), up to 8 candidates each, recall-biased verify, plus a final gap-sweep pass — capped at 15 findings. With a subagent tool, `max` runs its finders at `max` reasoning effort.
+- **xhigh**: 11 parallel finder angles (adds a language-pitfall, a wrapper/proxy-correctness and a trust-boundary angle), up to 8 candidates each, recall-biased verify, plus a final gap-sweep pass — capped at 15 findings. With a subagent tool, finders and the sweep run at `xhigh` reasoning effort.
 - Ranks findings security, then correctness, then performance, then cleanup. Findings are worded as plain statements with a fix and no hedges. A shared "never report" list drops praise, restatements of the change, "check that…" requests and bare requests for more tests.
 - At medium and above, may add one `scope` finding that suggests splitting a large or mixed change, and ends every review with a short overall assessment.
-- **ultra**: no local equivalent to the built-in command's cloud multi-agent review, so it falls back to a local max-effort run instead.
-- Falls back to a single inline pass through all angles for a level when no native subagent tool is available, instead of fanning out.
-- `--fix` applies the reported findings to the working tree directly, skipping anything that would change behavior or fall outside the diff. `--comment` posts findings as inline PR comments (GitHub MCP tool, falling back to `gh api`) and the assessment as one general comment. `--post`/`--no-post` only apply to `ultra` and are otherwise ignored with a note.
-- Reuses the effort level last used earlier in the same conversation when none is given, defaulting to `medium` on first use.
+- Falls back to a single inline pass through all angles for a depth when no native subagent tool is available, instead of fanning out.
+- `--fix` applies the reported findings to the working tree directly, skipping anything that would change behavior or fall outside the diff. `--comment` posts findings as inline PR comments (GitHub MCP tool, falling back to `gh api`) and the assessment as one general comment.
 
-Trigger phrases: `code review this`, `review this PR`, `review the diff`, `review my changes`, `review at high effort`, `review with fixes`.
+Trigger phrases: `code review this`, `review this PR`, `review the diff`, `review my changes`, `review with fixes`.
 
 ### `/pm-simplify` — Simplify
 
