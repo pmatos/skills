@@ -12,8 +12,7 @@ allowed-tools:
 # Code Review
 
 Review the current diff, or a PR, branch, or path, for correctness bugs and
-cleanups. The `pm-risk` skill rates the change's merge risk, which sets the
-review depth.
+cleanups.
 
 ## Task
 
@@ -43,20 +42,16 @@ report its `message` and stop. Otherwise:
 - Read each `untracked` entry, relative to `top`, as a new file. For a
   `symlink`, the `target` text is the only added line: never read
   through it.
-- Report each `skipped` entry as not reviewed, and report every `warnings`
-  entry.
-- Keep `top`, `head`, `base`, `merge_base`, `path`, and `pr` for the later
-  phases.
+- List each `skipped` entry as not reviewed.
 
 ## Phase 2 — Rate the depth
 
 Invoke the `pm-risk` skill with `--base '<base>'`, plus
-`--path '<top>/<path>'` for a path target. pm-risk then uses the same
-working tree and merge base, and judges from the diff and PR text already
-loaded. Map its merge risk to the depth: `low`, `medium`, and `high` keep
-their names, and `critical` becomes `xhigh`. State `Depth: <depth>` in one
-line, and never adjust it by hand. If pm-risk is not installed or gives no
-rating, review at `high` and say why.
+`--path '<top>/<path>'` for a path target. Map its merge risk to the
+depth: `low`, `medium`, and `high` keep their names, and `critical` becomes
+`xhigh`. State `Depth: <depth>` in one line, and never adjust it by hand.
+If pm-risk is not installed or gives no rating, review at `high` and say
+why.
 
 ## Phase 3 — Review
 
@@ -64,7 +59,8 @@ Follow the depth's procedure in `references/review-depth.md`.
 
 ## Phase 4 — Report
 
-Rank findings by severity tier within the depth's cap. Each finding has:
+With `--comment` or `--fix`, first read `references/flags.md`. Each finding
+has:
 
 - `file` and `line`;
 - `summary`: the defect stated as fact, then the fix, with a directive
@@ -75,7 +71,7 @@ Rank findings by severity tier within the depth's cap. Each finding has:
 - `category`: `security`, `correctness`, or `performance` for those
   tiers, and otherwise the angle: `reuse`, `simplification`,
   `efficiency`, `altitude`, `conventions`, or `scope`;
-- `verdict`: `CONFIRMED` or `PLAUSIBLE`, after a verify pass.
+- `verdict`: `CONFIRMED` or `PLAUSIBLE`, when a verify pass ran.
 
 Never hedge with words such as "maybe" or "consider": a PLAUSIBLE
 finding carries its uncertainty in `verdict` and its trigger.
@@ -84,16 +80,15 @@ If the `ReportFindings` tool is available, call it once with the findings,
 or with an empty array, and do not also print them. Otherwise, if the
 caller asked for JSON, make the final message nothing but a JSON array of
 the findings. Otherwise print one line per finding, `path:line
-[verdict] — the defect and the concrete failure`, or `(none)`. Never
-publish an artifact of the review.
+[verdict] — the defect and the concrete failure`, with no `[verdict]` when
+no verify ran, or `(none)`. Never publish an artifact of the review.
 
 Then, except in JSON mode, give the assessment: your overall take on the
 change in one to three sentences, or one at the low depth, such as its
 main risk area or that it looks sound. Do not summarize the change or
-count the findings. State every disclosure here: files not reviewed,
-edited review instructions, a stale base, or a single-pass review.
-
-With `--comment` or `--fix`, also follow `references/flags.md`.
+count the findings. State every disclosure here: the scope's `message`
+and `warnings`, files not reviewed, edited review instructions, and a
+single-pass review.
 
 ## Constraints
 

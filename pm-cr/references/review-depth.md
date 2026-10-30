@@ -12,7 +12,7 @@ check** last (`angles.md`).
 
 ## low
 
-Use only what Phase 1 loaded, with no subagents. When the diff changes
+Use only what Phase 1 loaded, with no subagents and no `REVIEW.md` rules. When the diff changes
 anything besides tests, skip test and fixture hunks (`test/`, `tests/`,
 `spec/`, `__tests__/`, `fixtures/`, `testdata/`, `*_test.*`, `*.test.*`).
 
@@ -38,12 +38,10 @@ sweep. Give each subagent the brief and tell it not to modify anything.
 2. Finders pass every candidate with a nameable failure scenario to verify.
    Two angles that flag one line for different reasons give two
    candidates.
-3. Verify each candidate with one verifier: 3-state at medium, and
-   recall-biased at high and xhigh (`angles.md`).
+3. Dedup the candidates, then verify each with one verifier (`angles.md`).
 4. At xhigh, run the **Sweep for gaps** (`angles.md`), and verify its
    candidates the same way.
 
 Without a subagent tool, work through every angle yourself in one pass,
 dedup near-duplicates, re-check each candidate against the diff, and still
-run the sweep at xhigh. Say in the assessment that the review was a single
-pass.
+run the sweep at xhigh.
