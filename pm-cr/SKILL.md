@@ -29,10 +29,6 @@ high through max favor broader coverage and may include less-certain
 findings. This is a bug hunt *and* a cleanup pass, unlike `pm-simplify`
 (cleanup only) — run that instead if you only want the quality pass.
 
-The effort level in the arguments sets review depth. The frontmatter
-`effort: high` sets the model's reasoning effort, which is a separate
-setting.
-
 ## Task
 
 $ARGUMENTS
