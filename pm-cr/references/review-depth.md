@@ -9,46 +9,6 @@ Every level shares `../SKILL.md`'s Phase 1 (gather the diff) and Phase 2
 **Reviewer brief** (`angles.md`) and finish with the **Scope check**
 (`angles.md`) before reporting.
 
-## How the depth is scored
-
-`../scripts/score_depth.py` applies these rules in order. Its thresholds and
-path lists are constants at the top of the script.
-
-1. **Size.** Count changed lines (added plus deleted), changed files, and
-   top-level directories, untracked files included. Lockfiles, minified
-   files, source maps, and vendored code don't count, and a pure rename
-   counts no lines. A small change is `low`, a mid-sized one is `medium`,
-   and anything larger is `high`. Size alone never reaches `xhigh`.
-2. **Untested code.** When code changes, no test changes, and the base has
-   tests, raise one level, to at most `high`. Docs and config files never
-   count as untested code.
-3. **High-stakes paths.** When the change touches one, raise two levels, to
-   at least `high`. The built-in list covers CI and automation, dependency
-   manifests and lockfiles, deploy config, and schema migrations.
-4. **Instruction files.** When the change edits a `CLAUDE.md`,
-   `CLAUDE.local.md`, `AGENTS.md`, or `REVIEW.md`, the level is at least
-   `medium`. The reviewer brief then runs and judges the change by the base
-   version of those files.
-
-A repo adds its own high-stakes paths in its root `REVIEW.md`, one
-backticked glob per bullet under a `High-stakes paths` heading:
-
-```markdown
-## High-stakes paths
-
-- `src/auth/*`
-- `billing/*`
-```
-
-A glob without `/` matches a file name in any directory, and `*` also
-matches `/`. The script reads `REVIEW.md` from the base, never from the
-change, so a change cannot lower its own depth by editing the list. The
-exception is Phase 1's `HEAD~1` fallback, where the base is the author's
-own previous commit.
-
-The same change and base always get the same level, angles, and cap. The
-findings can still differ between runs.
-
 ## Subagent settings
 
 Use fresh subagents for finders, verifiers, and the sweep. On Claude Code,
@@ -63,10 +23,9 @@ skill. Give every subagent the brief.
 ## low — `1 diff pass → no verify → ≤4 findings`
 
 **Turn 1 — read.** One tool call: read the unified diff. When the diff
-changes anything besides tests, skip test and fixture hunks. Those are files
-under a `test`, `tests`, `spec`, `specs`, `__tests__`, `testdata`, or
-`fixtures` directory, or named `test_*`, `*_test.*`, `*.test.*`, `*_spec.*`,
-or `*.spec.*`. A diff that changes only tests is read in full. No subagents,
+changes anything besides tests, skip test and fixture hunks (`test/`,
+`tests/`, `spec/`, `__tests__/`, `fixtures/`, `testdata/`, `*_test.*`,
+`*.test.*`). A diff that changes only tests is read in full. No subagents,
 no full-file reads.
 
 **Turn 2 — findings.** Flag runtime-correctness bugs visible from the hunk

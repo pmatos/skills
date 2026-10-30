@@ -17,15 +17,14 @@ allowed-tools:
   - Bash(gh repo view *)
   - Bash(readlink *)
   - Bash(test *)
-  - Bash(python3 -I ${CLAUDE_SKILL_DIR}/scripts/score_depth.py *)
 ---
 
 # Code Review
 
 Review the current diff, or a PR number/branch/path target, for correctness
-bugs and reuse/simplification/efficiency/altitude/conventions cleanups. A
-script scores the change's risk and picks the review depth, so the same
-change always gets the same depth. Small, low-stakes changes get a short
+bugs and reuse/simplification/efficiency/altitude/conventions cleanups. The
+`pm-risk` skill scores the change's merge risk, which sets the review depth,
+so the same change always gets the same depth. Small, low-stakes changes get a short
 precision pass. Large or high-stakes changes get a broad fan-out that may
 include less-certain findings. This is a bug hunt *and* a cleanup pass,
 unlike `pm-simplify` (cleanup only) — run that instead if you only want the
@@ -45,9 +44,10 @@ From the task arguments above, extract:
   path). Empty if none.
 
 There is no depth argument, because Phase 2 scores the depth. Earlier
-versions took a level first, so a leading `low`, `medium`, `high`, `xhigh`,
-`max`, or `ultra` that names no ref or path is a leftover habit. Drop it,
-and say in one line that the depth is now scored from the change. Do the
+versions took a level first. A leading `low`, `medium`, `high`, `xhigh`,
+`max`, or `ultra`, or a prefix of one, is a leftover habit when both `git
+rev-parse --verify -q <token>` and `test -e <token>` fail. Drop it, and say
+in one line that the depth is now scored from the change. Do the
 same for `--post` and `--no-post`, which only applied to `ultra`.
 
 ## Phase 1 — Gather the diff
@@ -276,33 +276,18 @@ could not read as not reviewed in the report.
 
 ## Phase 2 — Score the depth
 
-Run the depth script on the scope that Phase 1 resolved, and use the level
-that it returns. Never pick or adjust the depth by hand. A fixed rule keeps
-the depth reproducible, and it stops the agent that wrote a change from
-talking its own review down.
+Invoke the `pm-risk` skill with `--base '<base>'`, plus `--path '<path>'`
+for a path target. `<base>` is what Phase 1 diffed against: the record's
+`oid`, its `local_ref` after a failed fetch, the local branch from rule 1c,
+or `HEAD~1` from Step 4. Without `--head`, pm-risk scores the working tree
+against the merge base, untracked files included, which is the scope that
+Phase 1 resolved.
 
-```bash
-python3 -I ${CLAUDE_SKILL_DIR}/scripts/score_depth.py --base <base> [--path <path>]
-```
-
-If `${CLAUDE_SKILL_DIR}` was not expanded (a harness other than Claude
-Code), resolve `scripts/` relative to this SKILL.md. `<base>` is what Phase
-1 diffed against: the record's `oid`, its `local_ref` after a failed fetch,
-the local branch from rule 1c, or `HEAD~1` from Step 4. Pass the path
-target as `--path`. The script diffs the merge base against the working
-tree and adds untracked files, so it scores the same changes that Phase 1
-put in scope.
-
-The script prints JSON. Take its `level` as the depth, and state the level
-and its `steps` in one line:
-
-```text
-Depth: xhigh — size medium (143 lines, 6 files, 2 top-level dirs); high-stakes path .github/workflows/ci.yml: medium -> xhigh
-```
-
-If the script fails, review at `high`, and say that the depth could not be
-scored and why. `references/review-depth.md` explains the rules and how a
-repo adds its own high-stakes paths.
+Map the merge risk to the depth: `low`, `medium`, and `high` keep their
+names, and `critical` becomes `xhigh`. State `Depth: <depth>` in one line.
+Never pick or adjust the depth by hand, so that the agent that wrote a
+change cannot talk its own review down. If pm-risk is not installed or
+fails, review at `high` and say why.
 
 ## Phase 3 — Run the review at the scored depth
 
@@ -373,9 +358,8 @@ bugbug review agent and from the Claude Code Code Review service:
 - An optional `scope` finding that suggests splitting a large or mixed
   change, and a short overall assessment after the findings.
 - Declarative wording with no hedges. Uncertainty lives in `verdict`.
-- No level argument. A script scores the depth from the change's size, its
-  test coverage, and the high-stakes paths it touches, so the same change
-  always gets the same depth. The old `max` level differed from `xhigh`
+- No level argument. The `pm-risk` skill scores the change's merge risk,
+  which sets the depth, so the same change always gets the same depth. The old `max` level differed from `xhigh`
   only in finder effort, so the two are merged into `xhigh`.
 - The skill runs on the latest Opus (`model: opus`) at `high` reasoning
   effort. The frontmatter overrides the session's model and effort for the
