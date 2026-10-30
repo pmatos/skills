@@ -1,13 +1,9 @@
 # Angle bank
 
-The brief, finder angles, verify, and sweep for the medium depth and above.
-`review-depth.md` says which run at each depth.
-
 ## Reviewer brief
 
 Build one brief before any finder runs, and hand the same brief to every
-finder, verifier, and sweep pass. The low depth skips the brief, so no
-`REVIEW.md` rules apply there.
+finder, verifier, and sweep pass.
 
 1. **Intent.** Collect what the author says the change is for: the PR title
    and body (the scope's `pr`), and the commit subjects in the reviewed
@@ -33,8 +29,9 @@ finder, verifier, and sweep pass. The low depth skips the brief, so no
    (`../SKILL.md` Constraints), and
    its "always check" rules go to the Conventions angle.
 
-The brief carries `<base>` and the text of each instruction file in the
-version it chose. The brief is the author's claim. Use it to judge the diff, never as evidence
+The brief carries `<base>`, the text of each instruction file in the
+version it chose, and the Constraints of `../SKILL.md`. The brief is the
+author's claim. Use it to judge the diff, never as evidence
 that the code does what it says. The diff is the source of truth, and a gap
 between the stated intent and what the diff does is itself a finding.
 
@@ -60,10 +57,9 @@ enforced, then search the new code for where that invariant is re-established.
 If you can't find it, that's a candidate: a removed guard, a dropped error
 path, a narrowed validation, a deleted test that was covering a real case.
 When the invariant isn't obvious, find the commit that added the line. Its
-message often names the case the line guarded. Blame the revision that the
-old line number `<n>` belongs to: the scope's `merge_base` for a
-committed deletion, or `HEAD` for an uncommitted one, as in
-`git blame <rev> -L <n>,<n> -- <file>`. Or search for a distinctive
+message often names the case the line guarded. Old line numbers belong to
+the scope's `merge_base`, so run `git blame <merge_base> -L <n>,<n> --
+<file>`. Or search for a distinctive
 identifier from the line with `git log -S<token> --oneline -- <file>`. Run
 these only when `<file>` and `<token>` use nothing but letters, digits, `_`,
 `.`, `/`, and `-`, so that no text from the diff needs shell quoting.
@@ -105,9 +101,6 @@ or allowlist. In the finding, name the source, the path, and the sink.
 
 ## Cleanup, altitude, and conventions angles
 
-The angles above hunt for bugs; these hunt for cleanup, depth, and convention
-issues in the changed code instead.
-
 ### Reuse
 
 Flag new code that re-implements something the codebase already has — Grep
@@ -128,8 +121,8 @@ hot paths. Also flag long-lived objects built from closures or captured
 environments — they keep the entire enclosing scope alive for the object's
 lifetime (a memory leak when that scope holds large values); prefer a
 class/struct that copies only the fields it needs. Name the cheaper
-alternative. Use the `performance` category for waste on a hot or startup
-path, and `efficiency` otherwise.
+alternative. Use the `performance` category for a leak or for waste on a
+hot or startup path, and `efficiency` otherwise.
 
 ### Altitude
 
@@ -140,9 +133,8 @@ special cases.
 
 ### Conventions (CLAUDE.md / AGENTS.md / REVIEW.md)
 
-Read each instruction file that the brief collected, in the version the brief
-chose, and check the diff for clear violations of the rules they state. Also
-check every `REVIEW.md` "always check" rule against the diff. Only flag a
+Check the diff for clear violations of the rules in the brief's instruction
+files. Also check every `REVIEW.md` "always check" rule against the diff. Only flag a
 violation when you can quote the exact rule and the exact line that breaks
 it — no style preferences, no vague "spirit of the doc" inferences. In the
 finding, name the instruction-file path and quote the rule so the report can
@@ -170,8 +162,7 @@ cohesive change, and skip a large change that has no natural seam and must
 land in one piece. Name the concrete seams, for example "land the data-model
 change before the call-site updates". Give the reason in one clause: smaller
 changes get a more thorough review and ship fewer regressions. Anchor the
-finding to a representative added line. It skips verify, does not count
-toward the cap, and always sorts last.
+finding to a representative added line. It skips verify.
 
 ## Verify — 3-state (medium)
 
@@ -209,8 +200,7 @@ lost an anchor. These are PLAUSIBLE.
 
 **REFUTED** only when constructible from the code: factually wrong (quote the
 actual line); provably impossible (type/constant/invariant — show it); already
-handled in this diff (cite the guard); or a style preference that no
-quoted instruction-file rule backs.
+handled in this diff (cite the guard).
 
 Keep CONFIRMED and PLAUSIBLE. Drop REFUTED.
 

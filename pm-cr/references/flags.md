@@ -10,8 +10,8 @@ that the PR lacks. If `headRefOid` is not in the local repository, treat
 every path as dirty. Withhold each finding
 whose file is dirty, whole: no inline, file-level, or general comment.
 Local edits shift line numbers, so a posted comment could land on code that
-the author never wrote. Print the withheld findings instead, and say how
-many were withheld and why.
+the author never wrote. Say in the assessment how many findings were
+withheld and why.
 
 If the scope has a `pr`, post each finding except the `scope` finding as an
 inline comment. Use `mcp__github_inline_comment__create_inline_comment` when
@@ -35,7 +35,9 @@ If there is no PR, or no way to post, print the findings and say that
 
 ## `--fix`
 
-After any `--comment` posting, apply each finding to the working tree. Skip
+After any `--comment` posting, check that `git -C '<top>' rev-parse HEAD`
+still equals the scope's `head`. If it does not, apply nothing and say so.
+Otherwise apply each finding to the working tree. Skip
 a finding whose fix would change intended behavior, reach well outside the
 diff, or that you judge a false positive, and say so. Never apply the
 `scope` finding or a reported rule rewrite.

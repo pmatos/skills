@@ -1,8 +1,5 @@
 # Review depth
 
-Angle text lives in `angles.md`. This file says which angles run at each
-depth, and how.
-
 | Depth | Finder angles | Candidates each | Verify | Sweep | Cap |
 |---|---|---|---|---|---|
 | low | none, one hunk-only pass | — | none | no | 4 |
@@ -15,10 +12,9 @@ check** last (`angles.md`).
 
 ## low
 
-Read the unified diff in one tool call, with no subagents and no full-file
-reads. When the diff changes anything besides tests, skip test and fixture
-hunks (`test/`, `tests/`, `spec/`, `__tests__/`, `fixtures/`, `testdata/`,
-`*_test.*`, `*.test.*`).
+Use only what Phase 1 loaded, with no subagents. When the diff changes
+anything besides tests, skip test and fixture hunks (`test/`, `tests/`,
+`spec/`, `__tests__/`, `fixtures/`, `testdata/`, `*_test.*`, `*.test.*`).
 
 Flag only runtime-correctness bugs visible from the hunk alone: an inverted
 condition, an off-by-one, a null deref where adjacent lines show the value
@@ -31,23 +27,23 @@ report** unchecked.
 
 ## Medium and above
 
-1. Launch every finder angle for the depth in one message, as fresh `Plan`
-   subagents, which have no Edit or Write tool but still have Bash. Never
-   use `subagent_type: "fork"`: a fork inherits this conversation, so a
-   verifier would see the finders' reasoning. Pass `model: "opus"`, and at
-   xhigh pass `effort: "xhigh"` to finders and the sweep. Give each
-   subagent the brief, tell it not to modify anything, and give it the
+Run every finder, verifier, and sweep as a fresh `Plan` subagent, which has
+no Edit or Write tool but still has Bash, and never as a fork. Pass
+`model: "opus"`, and at xhigh pass `effort: "xhigh"` to finders and the
+sweep. Give each subagent the brief and tell it not to modify anything.
+
+1. Launch every finder angle for the depth in one message. Give each the
    output shape: `file`, `line`, a one-line `summary`, a concrete
    `failure_scenario`, and a `category`.
-2. Finders pass every candidate with a nameable failure scenario to verify,
-   because dropping half-believed candidates early is the main cause of
-   misses. Two angles that flag one line for different reasons give two
+2. Finders pass every candidate with a nameable failure scenario to verify.
+   Two angles that flag one line for different reasons give two
    candidates.
-3. Verify each candidate with one fresh verifier: 3-state at medium, and
+3. Verify each candidate with one verifier: 3-state at medium, and
    recall-biased at high and xhigh (`angles.md`).
-4. At xhigh, run the **Sweep for gaps** (`angles.md`).
+4. At xhigh, run the **Sweep for gaps** (`angles.md`), and verify its
+   candidates the same way.
 
 Without a subagent tool, work through every angle yourself in one pass,
 dedup near-duplicates, re-check each candidate against the diff, and still
-run the sweep at xhigh. That pass runs at the skill's `high` effort. Say in
-the assessment that the review was a single pass.
+run the sweep at xhigh. Say in the assessment that the review was a single
+pass.

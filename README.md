@@ -193,7 +193,7 @@ Differences from the built-in `/code-review`:
 
 Trigger phrases: `code review this`, `review this PR`, `review the diff`, `review my changes`, `find bugs in my changes`, `review with fixes`.
 
-**Requires**: Python 3, the [GitHub CLI](https://cli.github.com/) (`gh`) for PR targets, and the sibling `pm-risk` skill (`npx skills@latest add pmatos/skills/pm-risk`). Without pm-risk, every review runs at high. Install both at user scope to review untrusted PRs, because a project-scoped skill is loaded from the PR's own checkout.
+**Requires**: Python 3.9+, the [GitHub CLI](https://cli.github.com/) (`gh`) for PR targets, and the sibling `pm-risk` skill (`npx skills@latest add pmatos/skills/pm-risk`). Without pm-risk, every review runs at high. Install both at user scope to review untrusted PRs, because a project-scoped skill is loaded from the PR's own checkout.
 
 ### `/pm-risk` — Merge risk
 

@@ -6,13 +6,14 @@ model: opus
 effort: high
 allowed-tools:
   - Bash(python3 -I ${CLAUDE_SKILL_DIR}/scripts/scope.py *)
+  - Bash(test *)
 ---
 
 # Code Review
 
 Review the current diff, or a PR, branch, or path, for correctness bugs and
 cleanups. The `pm-risk` skill rates the change's merge risk, which sets the
-review depth. For a cleanup-only pass, use `pm-simplify` instead.
+review depth.
 
 ## Task
 
@@ -22,8 +23,6 @@ $ARGUMENTS
 
 Take `--fix` and `--comment` from anywhere in the arguments. The rest is the
 target: a PR number or URL, a branch or other ref, a path, or nothing.
-Ignore `--post` and `--no-post`, which only applied to the old `ultra`
-level.
 
 ## Phase 1 — Gather the scope
 
@@ -32,28 +31,32 @@ python3 -I ${CLAUDE_SKILL_DIR}/scripts/scope.py --target='<target>'
 ```
 
 Put the target in single quotes, stop with an error if it contains one,
-and leave `--target` out when there is none. Outside Claude Code, resolve `scripts/` relative to this file. The
-script prints JSON. On any `status` other than `ok`, report its `message`
-and stop. Otherwise:
+and leave `--target` out when there is none. Outside Claude Code, resolve
+`scripts/` relative to this file. The script prints JSON. If it exits
+non-zero, report its error and stop. On any `status` other than `ok`,
+report its `message` and stop. Otherwise:
 
-- Run `git diff <merge_base>` from the repo top, adding `-- '<path>'` for a
-  path target. It covers committed and uncommitted changes together. Read a
+- Run `git -C '<top>' diff <merge_base>`, adding `-- '<path>'` for a path
+  target. It covers committed and uncommitted changes together. Read a
   truncated diff in parts, and list any file you still could not read as
-  not reviewed.
-- Read each `untracked` entry as a new file. For a `symlink`, the `target`
-  text is the only added line: never read through it.
+  not reviewed. When the diff calls a text file binary, Read that file.
+- Read each `untracked` entry, relative to `top`, as a new file. For a
+  `symlink`, the `target` text is the only added line: never read
+  through it.
 - Report each `skipped` entry as not reviewed, and report every `warnings`
   entry.
-- Keep `base`, `merge_base`, `path`, and `pr` for the later phases.
+- Keep `top`, `head`, `base`, `merge_base`, `path`, and `pr` for the later
+  phases.
 
 ## Phase 2 — Rate the depth
 
-Invoke the `pm-risk` skill with `--base '<base>'`, plus `--path '<path>'`
-for a path target. pm-risk then uses the same working tree and merge base,
-and judges from the diff and PR text already loaded. Map its merge risk to
-the depth: `low`, `medium`, and `high` keep their names, and `critical`
-becomes `xhigh`. State `Depth: <depth>` in one line, and never adjust it by
-hand. If pm-risk is not installed or fails, review at `high` and say why.
+Invoke the `pm-risk` skill with `--base '<base>'`, plus
+`--path '<top>/<path>'` for a path target. pm-risk then uses the same
+working tree and merge base, and judges from the diff and PR text already
+loaded. Map its merge risk to the depth: `low`, `medium`, and `high` keep
+their names, and `critical` becomes `xhigh`. State `Depth: <depth>` in one
+line, and never adjust it by hand. If pm-risk is not installed or gives no
+rating, review at `high` and say why.
 
 ## Phase 3 — Review
 
@@ -61,8 +64,36 @@ Follow the depth's procedure in `references/review-depth.md`.
 
 ## Phase 4 — Report
 
-Report per `references/output.md`. With `--comment` or `--fix`, also follow
-`references/flags.md`, posting comments before applying any fix.
+Rank findings by severity tier within the depth's cap. Each finding has:
+
+- `file` and `line`;
+- `summary`: the defect stated as fact, then the fix, with a directive
+  verb such as Fix, Remove, or Guard;
+- `short_summary`: the claim in 60 characters or fewer, with no rationale;
+- `failure_scenario`: concrete inputs or state, then the wrong output or
+  crash, or for a cleanup finding the concrete cost;
+- `category`: `security`, `correctness`, or `performance` for those
+  tiers, and otherwise the angle: `reuse`, `simplification`,
+  `efficiency`, `altitude`, `conventions`, or `scope`;
+- `verdict`: `CONFIRMED` or `PLAUSIBLE`, after a verify pass.
+
+Never hedge with words such as "maybe" or "consider": a PLAUSIBLE
+finding carries its uncertainty in `verdict` and its trigger.
+
+If the `ReportFindings` tool is available, call it once with the findings,
+or with an empty array, and do not also print them. Otherwise, if the
+caller asked for JSON, make the final message nothing but a JSON array of
+the findings. Otherwise print one line per finding, `path:line
+[verdict] — the defect and the concrete failure`, or `(none)`. Never
+publish an artifact of the review.
+
+Then, except in JSON mode, give the assessment: your overall take on the
+change in one to three sentences, or one at the low depth, such as its
+main risk area or that it looks sound. Do not summarize the change or
+count the findings. State every disclosure here: files not reviewed,
+edited review instructions, a stale base, or a single-pass review.
+
+With `--comment` or `--fix`, also follow `references/flags.md`.
 
 ## Constraints
 
@@ -84,8 +115,7 @@ Report per `references/output.md`. With `--comment` or `--fix`, also follow
   A finding's tier follows its `category`. Inside a tier, CONFIRMED goes
   before PLAUSIBLE, then higher impact. The `scope` finding sits outside the
   tiers and the cap, and always goes last.
-- **Never report** these. Finders pass the two † items to verify, which
-  settles them by running the check (`references/angles.md`):
+- **Never report** these:
   - a description of the change, or praise;
   - † a request to check, verify, ensure, or confirm something;
   - a problem that the visible code already handles;
