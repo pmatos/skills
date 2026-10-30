@@ -290,7 +290,8 @@ def high_stakes_match(paths, review_globs):
 
 def review_glob(entry):
     """Return the entry as shown and the globs it expands to. An entry with no
-    wildcard also covers a directory of that name."""
+    wildcard also covers a directory of that name, in any directory when the
+    entry has no "/"."""
     glob = entry.strip()
     for prefix in ("./", "/"):
         glob = glob.removeprefix(prefix)
@@ -298,7 +299,7 @@ def review_glob(entry):
         glob += "*"
     globs = expand_glob(glob)
     if not any(c in glob for c in "*?["):
-        globs += expand_glob(f"{glob}/*")
+        globs += expand_glob(f"{glob}/*" if "/" in glob else f"**/{glob}/*")
     return glob, globs
 
 
@@ -539,7 +540,11 @@ def main():
         top = git(os.getcwd(), "rev-parse", "--show-toplevel").stdout.strip()
         path = None
         if args.path:
-            rel = os.path.relpath(os.path.realpath(args.path), os.path.realpath(top))
+            # Resolve only the parent, so a symlink names itself, as in pm-cr.
+            absolute = os.path.abspath(args.path)
+            parent = os.path.realpath(os.path.dirname(absolute))
+            full = os.path.join(parent, os.path.basename(absolute))
+            rel = os.path.relpath(full, os.path.realpath(top))
             path = rel.replace(os.sep, "/")
         result = gather(top, args.base, args.head, path)
     except RuntimeError as e:

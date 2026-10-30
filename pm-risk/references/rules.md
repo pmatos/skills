@@ -10,10 +10,10 @@ paths. Its thresholds and path lists are constants at the top of the script.
   base has tests. Docs, config, and dotfiles never count as code. Vendored,
   generated, and CI files never count as tests, and a deleted test is not
   coverage.
-- **High-stakes paths**: CI, hooks, and agent config, wherever they sit.
-  Dependency manifests, lockfiles, vendored third-party code, deploy config,
-  and schema migrations, except under a test or fixture directory. Plus the
-  repo's own list.
+- **High-stakes paths**: CI, hooks, and agent config, even under a test
+  directory. Dependency manifests, lockfiles, vendored third-party code,
+  deploy config, and schema migrations, except under a `test`, `tests`,
+  `__tests__`, `fixtures`, or `testdata` directory. Plus the repo's own list.
 - **Review instructions**: edits to `CLAUDE.md`, `CLAUDE.local.md`,
   `AGENTS.md`, or `REVIEW.md`.
 
