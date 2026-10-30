@@ -25,11 +25,10 @@ the findings as text, and do not create or publish an artifact of the
 review — the tool call is the report.
 
 If `ReportFindings` is not available, output the same findings as a JSON
-array of objects with `file`, `line`, `summary`, `failure_scenario` (the
-tool-only fields — `short_summary`, `category`, `verdict` — are omitted),
-respecting the same cap and ranking. Print nothing but the array, because a
-caller may parse the output as JSON: skip the assessment, and count the
-scope finding toward the cap.
+array of objects with `file`, `line`, `summary`, `failure_scenario`,
+`category`, and `verdict`, respecting the same cap and ranking. Make the
+final message nothing but the array, because a caller may parse it as JSON,
+so skip the assessment there.
 
 At **low** effort specifically, if neither a structured-output context nor
 `ReportFindings` applies (e.g. a plain terminal session), output one line per
@@ -59,7 +58,9 @@ take on the change, such as its main risk area or whether it looks sound.
 At low effort, one sentence. Do not summarize what the change does, because
 the author already knows. Do not count, list, or repeat the findings,
 because `--comment` can withhold some of them. The assessment is not a
-finding, so printing it does not duplicate the `ReportFindings` call.
+finding, so printing it does not duplicate the `ReportFindings` call. Put
+every disclosure in it too: files not reviewed, edited review instructions,
+a stale base, or a single-pass review.
 
 ## `--fix`
 
@@ -100,10 +101,10 @@ was fixed and what was skipped.
 **Post nothing to the PR about code the PR does not contain.** Phase 1's
 Step 5 folds uncommitted and untracked files into the review scope, so on a
 dirty checkout some findings describe code that exists only on this machine.
-Before posting anything, list the dirty paths once with `git -c
-core.quotePath=false status --porcelain` — it covers staged, unstaged, and
-untracked alike — and treat every path it names, both sides of a rename, as
-dirty. A finding whose `file` is dirty is withheld from the PR entirely: no
+Before posting anything, list the dirty paths once: every path in `git
+-c core.quotePath=false diff --name-only <headRefOid>`, which also covers
+local commits the PR lacks, plus every untracked file. If `headRefOid` is
+not in the local repository, withhold everything. A finding whose `file` is dirty is withheld from the PR entirely: no
 inline comment, no `gh api` fallback, and no file-level or general comment
 either. Withhold a dirty file *whole*, never per hunk: local edits shift
 every line below them, so a finding about a committed line in an edited file
@@ -114,27 +115,23 @@ findings instead and say in one line how many were withheld and why. Nothing
 else changes: the review scope, the report, and `--fix` still cover the
 working tree.
 
-If the review target is a GitHub PR, post each finding as an inline PR
-comment: use `mcp__github_inline_comment__create_inline_comment` (one call
+If rule 1a found a PR, post each finding except the `scope` finding as an
+inline PR comment: use `mcp__github_inline_comment__create_inline_comment` (one call
 per finding; include a suggestion block only when it fully fixes the issue)
 if available. A PLAUSIBLE finding's comment starts with `PLAUSIBLE:` and
 names the trigger from its `failure_scenario`, so the author can see how
 certain the review is. If that tool isn't available in this session, fall back to
-`gh api repos/{owner}/{repo}/pulls/{pr}/comments`. If neither is usable,
+`gh api --hostname <host> repos/<owner>/<repo>/pulls/<n>/comments`, using
+the host, owner, and repo that rule 1a parsed from the PR URL. If neither is usable,
 print the findings instead. If the target is not a PR, print the findings to
 the terminal and note that `--comment` was ignored.
 
-When the target is a PR and the findings were posted to it, also post the
-assessment once as a general PR comment. Pass it on stdin, so that no file
-lands in the working tree:
-
-```bash
-gh pr comment <n> --body-file - <<'EOF'
-<assessment>
-EOF
-```
-
-Otherwise print the assessment. Write it about code the PR contains: if the
+When the findings were posted to the PR, also post the assessment, and the
+`scope` finding if there is one, once as a general PR comment. Write the
+text with the Write tool to a file from `mktemp`, outside the working tree,
+then run `gh pr comment <url> --body-file <file>`. Never use a heredoc: the
+text derives from untrusted input and could end it early. Otherwise print
+the assessment, except in the bare JSON array mode. Write it about code the PR contains: if the
 risk you would name lives in a withheld dirty file, leave that risk out of
 the posted text.
 

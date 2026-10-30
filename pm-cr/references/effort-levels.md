@@ -10,11 +10,10 @@ and finish with the **Scope check** (`angles.md`) before reporting.
 
 ## Subagent settings
 
-Use fresh, read-only subagents for finders, verifiers, and the sweep. On
-Claude Code, that is the `Plan` type, which has no Edit or Write tool. These
-subagents read untrusted text, and a read-only type keeps an injected
-instruction from editing files. If the harness has no read-only type, use
-the default type and tell each subagent not to modify anything. Never use
+Use fresh subagents for finders, verifiers, and the sweep. On Claude Code,
+use the `Plan` type, which has no Edit or Write tool but still has Bash.
+Tell each subagent not to modify anything, and give it the exact output
+shape to return. Never use
 `subagent_type: "fork"`: a fork inherits this conversation, so a verifier
 would see the finders' reasoning. On Claude Code, pass `model: "opus"` on
 each of these Agent calls so the fan-out runs on the same model as the
@@ -36,9 +35,10 @@ unescaped. Also flag — still from the hunk alone — new code that
 duplicates an existing helper visible in the diff context, and dead code the
 diff leaves behind. Do **not** flag style, naming, perf, missing tests, or
 anything outside the hunk. Report a finding only when the hunk makes you at
-least 80% sure it is real, and apply **Never report** (`angles.md`).
+least 80% sure it is real, and apply **Never report** (`angles.md`),
+dropping the † items unchecked.
 
-Report at most **4 findings**, most-severe first (see `output-and-flags.md`
+Report at most **4 findings**, ranked by severity tier (see `output-and-flags.md`
 for the exact output contract). If nothing qualifies, say so explicitly
 (empty findings / `(none)`).
 

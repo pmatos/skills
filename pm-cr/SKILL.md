@@ -8,7 +8,6 @@ effort: high
 allowed-tools:
   - Bash(git rev-parse *)
   - Bash(git merge-base *)
-  - Bash(git symbolic-ref refs/remotes/*)
   - Bash(git remote)
   - Bash(git remote -v)
   - Bash(git remote get-url *)
@@ -308,9 +307,9 @@ The scope finding never counts toward the cap.
 ## Phase 3 — Report (and apply flags)
 
 Report findings per the output contract in `references/output-and-flags.md`.
-If `--fix` was passed, apply the fixes per that file's `--fix` section
-immediately after reporting. If `--comment` was passed, post inline PR
-comments per that file's `--comment` section. If `--post` or `--no-post` was
+If `--comment` was passed, post the findings per that file's `--comment`
+section before applying any fix. If `--fix` was passed, apply the fixes per
+its `--fix` section. If `--post` or `--no-post` was
 passed, handle it per that file's section (it only matters for `ultra`).
 
 ## Constraints
