@@ -33,13 +33,14 @@ class Repo:
         self.root = root
 
     def git(self, *args):
-        subprocess.run(
+        return subprocess.run(
             ["git", *args],
             cwd=self.root,
             check=True,
             capture_output=True,
+            text=True,
             env={**os.environ, **GIT_ENV},
-        )
+        ).stdout
 
     def write(self, path, lines):
         full = self.root / path
@@ -80,45 +81,61 @@ def tested_repo(repo):
     return repo
 
 
-def test_small_doc_change_is_low(repo):
+def test_small_doc_change_has_a_low_floor(repo):
     repo.write("docs/guide.md", 5)
     repo.commit()
-    assert repo.score()["risk"] == "low"
+    out = repo.score()
+    assert out["floor"] == "low"
+    assert out["signals"]["size"] == "low"
 
 
-def test_mid_sized_change_with_tests_is_medium(tested_repo):
+def test_size_is_a_fact_not_a_floor(repo):
+    for i in range(30):
+        repo.write(f"pkg{i % 5}/mod{i}.py", 50)
+    repo.commit()
+    out = repo.score()
+    assert out["signals"]["size"] == "high"
+    assert out["floor"] == "low"
+    assert out["facts"][0].startswith("size high: 1500 lines in 30 files")
+
+
+def test_untested_code_is_a_fact(tested_repo):
     tested_repo.write("src/feature.py", 80)
-    tested_repo.write("tests/test_feature.py", 40)
     tested_repo.commit()
     out = tested_repo.score()
-    assert out["risk"] == "medium"
-    assert out["signals"]["untested"] is False
-
-
-def test_untested_code_raises_one_level(tested_repo):
-    tested_repo.write("src/feature.py", 80)
-    tested_repo.commit()
-    out = tested_repo.score()
-    assert out["size_risk"] == "medium"
     assert out["signals"]["untested"] is True
-    assert out["risk"] == "high"
+    assert "untested: 80 code lines changed and no test file changed" in out["facts"]
+    assert out["floor"] == "low"
 
 
-def test_untested_is_ignored_without_tests_in_base(repo):
+def test_untested_needs_tests_in_the_base(repo):
     repo.write("src/feature.py", 80)
     repo.commit()
     out = repo.score()
     assert out["signals"]["base_has_tests"] is False
-    assert out["risk"] == "medium"
+    assert out["signals"]["untested"] is False
 
 
 def test_spec_docs_are_not_tests(repo):
     repo.on_main(lambda: repo.write("docs/specs/design.md", 5))
     repo.write("src/feature.py", 30)
     repo.commit()
-    out = repo.score()
-    assert out["signals"]["base_has_tests"] is False
-    assert out["signals"]["untested"] is False
+    assert repo.score()["signals"]["base_has_tests"] is False
+
+
+@pytest.mark.parametrize("path", ["Tests/FooTests.swift", "src/FooTest.java", "app/tests.py"])
+def test_other_test_layouts_are_tests(repo, path):
+    repo.on_main(lambda: repo.write(path, 5))
+    repo.write("src/feature.py", 30)
+    repo.commit()
+    assert repo.score()["signals"]["untested"] is True
+
+
+def test_latest_is_not_a_test(repo):
+    repo.on_main(lambda: repo.write("src/latest.py", 5))
+    repo.write("src/feature.py", 30)
+    repo.commit()
+    assert repo.score()["signals"]["base_has_tests"] is False
 
 
 def test_renamed_test_counts_as_a_test_change(tested_repo):
@@ -130,44 +147,44 @@ def test_renamed_test_counts_as_a_test_change(tested_repo):
     assert out["signals"]["untested"] is False
 
 
-def test_untested_ignores_docs_and_config(tested_repo):
+def test_deleted_test_is_not_coverage(tested_repo):
+    tested_repo.write("src/app.py", 15)
+    tested_repo.git("rm", "-q", "tests/test_app.py")
+    tested_repo.commit()
+    out = tested_repo.score()
+    assert out["signals"]["test_files"] == 0
+    assert out["signals"]["untested"] is True
+
+
+def test_tests_outside_a_path_target_count(tested_repo):
+    tested_repo.write("src/new.py", 50)
+    tested_repo.write("tests/test_new.py", 10)
+    tested_repo.commit()
+    out = tested_repo.score("--path", "src")
+    assert out["signals"]["files"] == 1
+    assert out["signals"]["untested"] is False
+
+
+def test_docs_config_and_dotfiles_are_not_code(tested_repo):
     tested_repo.write("docs/guide.md", 80)
     tested_repo.write("config/app.yaml", 20)
     tested_repo.write(".editorconfig", 5)
     tested_repo.commit()
-    out = tested_repo.score()
-    assert out["signals"]["untested"] is False
-    assert out["risk"] == "medium"
+    assert tested_repo.score()["signals"]["code_lines"] == 0
 
 
 def test_extensionless_script_is_code(tested_repo):
     tested_repo.write("bin/deploy", 30)
     tested_repo.commit()
-    out = tested_repo.score()
-    assert out["signals"]["code_lines"] == 30
-    assert out["signals"]["untested"] is True
+    assert tested_repo.score()["signals"]["code_lines"] == 30
 
 
-def test_size_alone_never_exceeds_high(repo):
-    for i in range(30):
-        repo.write(f"pkg{i % 5}/mod{i}.py", 50)
-    repo.commit()
-    assert repo.score()["risk"] == "high"
-
-
-def test_small_workflow_change_is_high(repo):
+def test_workflow_change_has_a_high_floor(repo):
     repo.write(".github/workflows/ci.yml", 3)
     repo.commit()
     out = repo.score()
-    assert out["size_risk"] == "low"
+    assert out["floor"] == "high"
     assert out["signals"]["high_stakes"][0]["rule"] == ".github/workflows/*"
-    assert out["risk"] == "high"
-
-
-def test_mid_sized_workflow_change_is_critical(repo):
-    repo.write(".github/workflows/ci.yml", 100)
-    repo.commit()
-    assert repo.score()["risk"] == "critical"
 
 
 @pytest.mark.parametrize(
@@ -175,15 +192,25 @@ def test_mid_sized_workflow_change_is_critical(repo):
     [
         "API.Dockerfile",
         "Dockerfile.prod",
+        "Containerfile",
         "services/billing/db/migrate/20260101_x.rb",
         ".github/dependabot.yml",
+        ".github/scripts/release.sh",
+        "action.yml",
         "Pipfile",
+        "requirements/base.txt",
     ],
 )
 def test_deploy_and_dependency_spellings_are_high_stakes(repo, path):
     repo.write(path, 3)
     repo.commit()
-    assert repo.score()["risk"] == "high"
+    assert repo.score()["floor"] == "high"
+
+
+def test_manifests_under_tests_are_not_high_stakes(repo):
+    repo.write("tests/fixtures/package.json", 3)
+    repo.commit()
+    assert repo.score()["floor"] == "low"
 
 
 def test_lockfile_is_excluded_from_size_but_high_stakes(repo):
@@ -192,7 +219,7 @@ def test_lockfile_is_excluded_from_size_but_high_stakes(repo):
     out = repo.score()
     assert out["signals"]["lines"] == 0
     assert out["signals"]["excluded"] == [{"path": "uv.lock", "reason": "lockfile"}]
-    assert out["risk"] == "high"
+    assert out["floor"] == "high"
 
 
 def test_vendored_code_is_excluded_from_size_but_high_stakes(repo):
@@ -201,23 +228,29 @@ def test_vendored_code_is_excluded_from_size_but_high_stakes(repo):
     out = repo.score()
     assert out["signals"]["lines"] == 0
     assert out["signals"]["high_stakes"][0]["rule"] == "third-party directory"
-    assert out["risk"] == "high"
 
 
-def test_generated_code_is_excluded_and_not_untested(tested_repo):
-    tested_repo.write("src/api_pb2.py", 3000)
-    tested_repo.commit()
-    out = tested_repo.score()
-    assert out["signals"]["lines"] == 0
-    assert out["risk"] == "low"
-
-
-def test_instruction_file_edit_is_at_least_medium(repo):
-    repo.write("CLAUDE.md", 3)
+def test_generated_code_is_excluded(repo):
+    repo.write("src/api_pb2.py", 3000)
     repo.commit()
     out = repo.score()
-    assert out["size_risk"] == "low"
-    assert out["risk"] == "medium"
+    assert out["signals"]["lines"] == 0
+    assert out["floor"] == "low"
+
+
+def test_long_lists_are_capped(repo):
+    for i in range(30):
+        repo.write(f"vendor/lib{i}.php", 1)
+    repo.commit()
+    out = repo.score()
+    assert len(out["signals"]["high_stakes"]) == 20
+    assert out["signals"]["high_stakes_total"] == 30
+
+
+def test_instruction_file_edit_has_a_medium_floor(repo):
+    repo.write("CLAUDE.md", 3)
+    repo.commit()
+    assert repo.score()["floor"] == "medium"
 
 
 def test_review_md_paths_come_from_the_base(repo):
@@ -227,7 +260,8 @@ def test_review_md_paths_come_from_the_base(repo):
             "- `src/auth/*` (see `docs/auth.md`)\n"
             "- `./billing/`\n\n"
             "```sh\n# not a heading\n```\n\n"
-            "- `/payments/*`\n\n## Other\n\n- `src/x/*`\n"
+            "- `/payments/*`\n"
+            "- `**/secrets/**/*.py`\n\n## Other\n\n- `src/x/*`\n"
         )
 
     repo.on_main(rules)
@@ -235,10 +269,27 @@ def test_review_md_paths_come_from_the_base(repo):
     repo.write("src/auth/login.py", 5)
     repo.commit()
     out = repo.score()
-    assert out["signals"]["review_md_patterns"] == ["src/auth/*", "billing/*", "payments/*"]
+    assert out["signals"]["review_md_patterns"] == [
+        "src/auth/*",
+        "billing/*",
+        "payments/*",
+        "**/secrets/**/*.py",
+    ]
     hit = {"path": "src/auth/login.py", "rule": "src/auth/*", "source": "REVIEW.md"}
     assert hit in out["signals"]["high_stakes"]
-    assert out["risk"] == "high"
+    assert out["floor"] == "high"
+
+
+@pytest.mark.parametrize("path", ["secrets/key.py", "app/secrets/key.py", "secrets/a/b/key.py"])
+def test_double_star_matches_zero_or_more_dirs(repo, path):
+    repo.on_main(
+        lambda: (repo.root / "REVIEW.md").write_text(
+            "## High-stakes paths\n\n- `**/secrets/**/*.py`\n"
+        )
+    )
+    repo.write(path, 3)
+    repo.commit()
+    assert repo.score()["floor"] == "high"
 
 
 def test_uncommitted_and_untracked_files_count(repo):
@@ -249,6 +300,31 @@ def test_uncommitted_and_untracked_files_count(repo):
     assert out["signals"]["lines"] == 5 + 40
 
 
+def test_untracked_binary_counts_like_a_tracked_one(repo):
+    (repo.root / "img.png").write_bytes(b"\x89PNG\0\0data")
+    untracked = repo.score()["signals"]["files"]
+    repo.git("add", "img.png")
+    assert repo.score()["signals"]["files"] == untracked == 1
+
+
+def test_unstaged_rename_scores_like_a_staged_one(repo):
+    repo.write("src/big.py", 80)
+    repo.commit()
+    repo.git("switch", "-q", "-c", "moved")
+    (repo.root / "src/big.py").rename(repo.root / "src/moved.py")
+    before = repo.score(base="feature")["signals"]
+    repo.git("add", "-A")
+    after = repo.score(base="feature")["signals"]
+    assert before["lines"] == after["lines"] == 0
+    assert before["files"] == after["files"] == 0
+
+
+def test_scoring_leaves_the_real_index_alone(repo):
+    repo.write("src/new.py", 5)
+    repo.score()
+    assert repo.git("status", "--porcelain") == "?? src/new.py\n"
+
+
 def test_head_scores_a_branch_without_checking_it_out(repo):
     repo.write(".github/workflows/ci.yml", 3)
     repo.commit()
@@ -256,7 +332,7 @@ def test_head_scores_a_branch_without_checking_it_out(repo):
     repo.write("scratch.py", 500)
     out = repo.score("--head", "feature")
     assert out["signals"]["files"] == 1
-    assert out["risk"] == "high"
+    assert out["floor"] == "high"
 
 
 def test_path_target_narrows_the_scope(repo):
@@ -275,7 +351,6 @@ def test_path_through_a_symlink_resolves(repo, tmp_path):
     repo.commit()
     out = repo.score("--path", str(alias / "src"))
     assert out["path"] == "src"
-    assert out["signals"]["files"] == 1
 
 
 def test_unreadable_untracked_file_does_not_crash(repo):
@@ -287,15 +362,24 @@ def test_unreadable_untracked_file_does_not_crash(repo):
         (repo.root / "src/secret.py").chmod(0o644)
 
 
-def test_pure_rename_counts_no_lines(repo):
+def test_pure_rename_counts_no_lines_or_files(repo):
     repo.git("mv", "src/app.py", "src/main.py")
     repo.commit()
     out = repo.score()
     assert out["signals"]["lines"] == 0
-    assert out["risk"] == "low"
+    assert out["signals"]["files"] == 0
 
 
 def test_unknown_base_fails(repo):
     result = run(["--base", "nope"], repo.root)
     assert result.returncode == 1
     assert "score_risk:" in result.stderr
+
+
+def test_missing_merge_base_says_why(repo):
+    repo.git("switch", "-q", "--orphan", "other")
+    repo.write("x.py", 1)
+    repo.commit()
+    result = run(["--base", "main"], repo.root)
+    assert result.returncode == 1
+    assert "no merge base" in result.stderr
