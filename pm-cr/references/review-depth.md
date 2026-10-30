@@ -1,12 +1,13 @@
-# Effort levels
+# Review depth
 
 Full per-level templates. All angle text lives in `angles.md` — this file
 only says which angles run, how many candidates each may surface, whether a
 verify pass runs, and the output cap.
 
-Every level shares `../SKILL.md`'s Phase 1 (gather the diff) before any of
-this runs. Medium and above then build the **Reviewer brief** (`angles.md`)
-and finish with the **Scope check** (`angles.md`) before reporting.
+Every level shares `../SKILL.md`'s Phase 1 (gather the diff) and Phase 2
+(score the depth) before any of this runs. Medium and above then build the
+**Reviewer brief** (`angles.md`) and finish with the **Scope check**
+(`angles.md`) before reporting.
 
 ## Subagent settings
 
@@ -21,10 +22,11 @@ skill. Give every subagent the brief.
 
 ## low — `1 diff pass → no verify → ≤4 findings`
 
-**Turn 1 — read.** One tool call: read the unified diff. Skip test/fixture
-hunks (`test/`, `spec/`, `__tests__/`, `*_test.*`, `*.test.*`, `fixtures/`,
-`testdata/`) — test-file changes are not reviewed at this level. No
-subagents, no full-file reads.
+**Turn 1 — read.** One tool call: read the unified diff. When the diff
+changes anything besides tests, skip test and fixture hunks (`test/`,
+`tests/`, `spec/`, `__tests__/`, `fixtures/`, `testdata/`, `*_test.*`,
+`*.test.*`). A diff that changes only tests is read in full. No subagents,
+no full-file reads.
 
 **Turn 2 — findings.** Flag runtime-correctness bugs visible from the hunk
 alone: inverted/wrong condition, off-by-one, null/undefined deref where
@@ -69,30 +71,27 @@ single-pass review, not the full fan-out.
 
 Cap at **8 findings**, ranked by severity tier (`angles.md`).
 
-## high — `8 angles × 6 candidates → recall-biased verify → ≤10 findings`
+## high — `9 angles × 6 candidates → recall-biased verify → ≤10 findings`
 
 You are reviewing for **recall**: catch every real bug a careful reviewer
 would catch in one sitting. At this level, catching real bugs matters more
 than avoiding false positives — err on the side of surfacing.
 
-Same angle set and fan-out/fallback mechanics as **medium** (8 angles, up to
-6 candidates each), but verify uses the **recall-biased verify**
+Medium's angle set plus Angle F (9 angles, up to 6 candidates each), with
+the same fan-out/fallback mechanics, but verify uses the **recall-biased verify**
 (`angles.md`, "PLAUSIBLE by default") instead of the 3-state verify.
 
 Cap at **10 findings**, ranked by severity tier.
 
-## xhigh / max — `11 angles × 8 candidates → recall-biased verify → sweep → ≤15 findings`
+## xhigh — `11 angles × 8 candidates → recall-biased verify → sweep → ≤15 findings`
 
 You are reviewing for **maximum recall**: catch every real bug. At this
 level, catching real bugs matters more than avoiding false positives — a
 missed bug ships. Err on the side of surfacing.
 
-`xhigh` and `max` run the same angles, verify, sweep, and cap. They differ
-only in the reasoning effort of the finders and the sweep: pass
-`effort: "xhigh"` on those Agent calls at `xhigh`, and `effort: "max"` at
-`max`. Verifiers keep the inherited effort, because there is one per
-candidate. Without a subagent tool, the single pass runs at the skill's
-`high` effort, so `xhigh` and `max` match.
+Pass `effort: "xhigh"` on the finder and sweep Agent calls. Verifiers keep
+the inherited effort, because there is one per candidate. Without a subagent
+tool, the single pass runs at the skill's `high` effort.
 
 **If a native subagent tool is available:** launch **11 independent finder
 angles** in a single message — Angle A through F, plus Reuse,
@@ -114,15 +113,3 @@ sweep-for-gaps pass yourself before reporting. State clearly that this was a
 single-pass review.
 
 Cap at **15 findings**, ranked by severity tier.
-
-## ultra — cloud multi-agent review (no local equivalent)
-
-The built-in `/code-review ultra` dispatches a deep multi-agent review in
-Anthropic's cloud (requires `claude.ai` account access) and, for a GitHub PR
-target, offers `--post` to publish the findings to the PR as a single
-comment. This skill has no access to that cloud infrastructure.
-
-If the user requests `ultra`, say so explicitly in your opening line, then
-fall back to a local **max**-effort review — this mirrors the built-in
-command's own documented behavior when cloud access isn't available in the
-current session.
