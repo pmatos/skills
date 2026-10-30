@@ -145,7 +145,7 @@ not back through a registry/session/global — e.g. a caching provider holding a
 `delegate.get(...)` will re-enter the cache or recurse. Also check that the
 wrapper forwards all the methods the callers actually use.
 
-### Angle F — trust-boundary tracer (xhigh only)
+### Angle F — trust-boundary tracer (high and xhigh)
 
 List every place where the diff lets outside input in: request handlers, CLI
 arguments, environment variables, files read, IPC, deserialized payloads,

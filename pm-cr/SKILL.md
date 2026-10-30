@@ -284,9 +284,10 @@ against the merge base, untracked files included, which is the scope that
 Phase 1 resolved. It judges from the diff and PR text already loaded.
 
 Map the merge risk to the depth: `low`, `medium`, and `high` keep their
-names, and `critical` becomes `xhigh`. State `Depth: <depth>` in one line,
-and never adjust it by hand. If pm-risk is not installed or fails, review at
-`high` and say why.
+names, and `critical` becomes `xhigh`. State `Depth: <depth> (merge risk
+<risk>)` in one line, adding the floor reason when the floor raised the
+risk, and never adjust it by hand. If pm-risk is not installed or fails,
+review at `high` and say why.
 
 ## Phase 3 — Run the review at the scored depth
 
@@ -301,7 +302,7 @@ brief** first and run the **Scope check** last, both in `angles.md`.
 |-------|--------|-------------------|--------|-------|-----|
 | low | hunk-visible only, no angle fan-out | — | none | no | 4 |
 | medium | 8 (A, B, C + Reuse, Simplification, Efficiency, Altitude, Conventions) | 6 | 3-state | no | 8 |
-| high | same 8 | 6 | recall-biased | no | 10 |
+| high | 9 (the same 8 + F) | 6 | recall-biased | no | 10 |
 | xhigh | 11 (A–F + Reuse, Simplification, Efficiency, Altitude, Conventions) | 8 | recall-biased | yes | 15 |
 
 The scope finding never counts toward the cap.
@@ -353,7 +354,7 @@ bugbug review agent and from the Claude Code Code Review service:
 - Instruction files include `REVIEW.md`, which local `/code-review` does not
   read. A diff that edits an instruction file is judged by the base version.
 - A security tier above correctness, trust-boundary checks in Angle A, and a
-  dedicated Angle F at xhigh.
+  dedicated Angle F from high up.
 - An optional `scope` finding that suggests splitting a large or mixed
   change, and a short overall assessment after the findings.
 - Declarative wording with no hedges. Uncertainty lives in `verdict`.
