@@ -27,7 +27,9 @@ review — the tool call is the report.
 If `ReportFindings` is not available, output the same findings as a JSON
 array of objects with `file`, `line`, `summary`, `failure_scenario` (the
 tool-only fields — `short_summary`, `category`, `verdict` — are omitted),
-respecting the same cap and ranking.
+respecting the same cap and ranking. Print nothing but the array, because a
+caller may parse the output as JSON: skip the assessment, and count the
+scope finding toward the cap.
 
 At **low** effort specifically, if neither a structured-output context nor
 `ReportFindings` applies (e.g. a plain terminal session), output one line per
@@ -51,7 +53,8 @@ Good: user.id throws on an expired session, because getUser() returns null
 
 ### Assessment
 
-After the findings, print a one-to-three-sentence assessment: your overall
+After the findings, print a one-to-three-sentence assessment, except in
+the bare JSON array mode above: your overall
 take on the change, such as its main risk area or whether it looks sound.
 At low effort, one sentence. Do not summarize what the change does, because
 the author already knows. Do not count, list, or repeat the findings,
@@ -114,15 +117,26 @@ working tree.
 If the review target is a GitHub PR, post each finding as an inline PR
 comment: use `mcp__github_inline_comment__create_inline_comment` (one call
 per finding; include a suggestion block only when it fully fixes the issue)
-if available. If that tool isn't available in this session, fall back to
+if available. A PLAUSIBLE finding's comment starts with `PLAUSIBLE:` and
+names the trigger from its `failure_scenario`, so the author can see how
+certain the review is. If that tool isn't available in this session, fall back to
 `gh api repos/{owner}/{repo}/pulls/{pr}/comments`. If neither is usable,
 print the findings instead. If the target is not a PR, print the findings to
 the terminal and note that `--comment` was ignored.
 
-After the inline comments, post the assessment once as a general PR comment
-(`gh pr comment <n> --body-file <file>`). Write it about code the PR
-contains: if the risk you would name lives in a withheld dirty file, leave
-that risk out of the posted text.
+When the target is a PR and the findings were posted to it, also post the
+assessment once as a general PR comment. Pass it on stdin, so that no file
+lands in the working tree:
+
+```bash
+gh pr comment <n> --body-file - <<'EOF'
+<assessment>
+EOF
+```
+
+Otherwise print the assessment. Write it about code the PR contains: if the
+risk you would name lives in a withheld dirty file, leave that risk out of
+the posted text.
 
 GitHub only accepts an inline comment on a line that is part of the PR's
 diff hunks (added, removed, or context lines). Angle A findings can land on

@@ -13,11 +13,15 @@ effort, which the skill's frontmatter sets to `high`.
 
 ## Subagent settings
 
-Use fresh subagents (the default `general-purpose` type) for finders,
-verifiers, and the sweep — never `subagent_type: "fork"`. A fork inherits
-this conversation, so a verifier would see the finders' reasoning. On Claude
-Code, pass `model: "opus"` on each of these Agent calls so the fan-out runs
-on the same model as the skill. Give every subagent the brief.
+Use fresh, read-only subagents for finders, verifiers, and the sweep. On
+Claude Code, that is the `Plan` type, which has no Edit or Write tool. These
+subagents read untrusted text, and a read-only type keeps an injected
+instruction from editing files. If the harness has no read-only type, use
+the default type and tell each subagent not to modify anything. Never use
+`subagent_type: "fork"`: a fork inherits this conversation, so a verifier
+would see the finders' reasoning. On Claude Code, pass `model: "opus"` on
+each of these Agent calls so the fan-out runs on the same model as the
+skill. Give every subagent the brief.
 
 ## low — `1 diff pass → no verify → ≤4 findings`
 
@@ -90,7 +94,8 @@ missed bug ships. Err on the side of surfacing.
 only in the reasoning effort of the finders and the sweep: pass
 `effort: "xhigh"` on those Agent calls at `xhigh`, and `effort: "max"` at
 `max`. Verifiers keep the inherited effort, because there is one per
-candidate.
+candidate. Without a subagent tool, the single pass runs at the skill's
+`high` effort, so `xhigh` and `max` match.
 
 **If a native subagent tool is available:** launch **11 independent finder
 angles** in a single message — Angle A through F, plus Reuse,
