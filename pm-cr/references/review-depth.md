@@ -1,115 +1,53 @@
 # Review depth
 
-Full per-level templates. All angle text lives in `angles.md` — this file
-only says which angles run, how many candidates each may surface, whether a
-verify pass runs, and the output cap.
+Angle text lives in `angles.md`. This file says which angles run at each
+depth, and how.
 
-Every level shares `../SKILL.md`'s Phase 1 (gather the diff) and Phase 2
-(score the depth) before any of this runs. Medium and above then build the
-**Reviewer brief** (`angles.md`) and finish with the **Scope check**
-(`angles.md`) before reporting.
+| Depth | Finder angles | Candidates each | Verify | Sweep | Cap |
+|---|---|---|---|---|---|
+| low | none, one hunk-only pass | — | none | no | 4 |
+| medium | A, B, C, Reuse, Simplification, Efficiency, Altitude, Conventions | 6 | 3-state | no | 8 |
+| high | the same 8 | 6 | recall-biased | no | 10 |
+| xhigh | A–F, plus the same 5 cleanup angles | 8 | recall-biased | yes | 15 |
 
-## Subagent settings
+Medium and above build the **Reviewer brief** first and run the **Scope
+check** last (`angles.md`).
 
-Use fresh subagents for finders, verifiers, and the sweep. On Claude Code,
-use the `Plan` type, which has no Edit or Write tool but still has Bash.
-Tell each subagent not to modify anything, and give it the exact output
-shape to return. Never use
-`subagent_type: "fork"`: a fork inherits this conversation, so a verifier
-would see the finders' reasoning. On Claude Code, pass `model: "opus"` on
-each of these Agent calls so the fan-out runs on the same model as the
-skill. Give every subagent the brief.
+## low
 
-## low — `1 diff pass → no verify → ≤4 findings`
+Read the unified diff in one tool call, with no subagents and no full-file
+reads. When the diff changes anything besides tests, skip test and fixture
+hunks (`test/`, `tests/`, `spec/`, `__tests__/`, `fixtures/`, `testdata/`,
+`*_test.*`, `*.test.*`).
 
-**Turn 1 — read.** One tool call: read the unified diff. When the diff
-changes anything besides tests, skip test and fixture hunks (`test/`,
-`tests/`, `spec/`, `__tests__/`, `fixtures/`, `testdata/`, `*_test.*`,
-`*.test.*`). A diff that changes only tests is read in full. No subagents,
-no full-file reads.
+Flag only runtime-correctness bugs visible from the hunk alone: an inverted
+condition, an off-by-one, a null deref where adjacent lines show the value
+can be absent, a removed guard, a falsy-zero check, a missing `await`, a
+wrong-variable copy-paste, a swallowed error, or untrusted input reaching a
+shell, SQL, or HTML sink. Also flag a duplicate of a helper visible in the
+diff context, and dead code that the diff leaves behind. Report a finding
+only when you are at least 80% sure, and drop the † items of **Never
+report** unchecked.
 
-**Turn 2 — findings.** Flag runtime-correctness bugs visible from the hunk
-alone: inverted/wrong condition, off-by-one, null/undefined deref where
-adjacent lines show the value can be absent, removed guard, falsy-zero check,
-missing `await`, wrong-variable copy-paste, error swallowed in a catch that
-should propagate, untrusted input reaching a shell, SQL, or HTML sink
-unescaped. Also flag — still from the hunk alone — new code that
-duplicates an existing helper visible in the diff context, and dead code the
-diff leaves behind. Do **not** flag style, naming, perf, missing tests, or
-anything outside the hunk. Report a finding only when the hunk makes you at
-least 80% sure it is real, and apply **Never report** (`angles.md`),
-dropping the † items unchecked.
+## Medium and above
 
-Report at most **4 findings**, ranked by severity tier (see `output-and-flags.md`
-for the exact output contract). If nothing qualifies, say so explicitly
-(empty findings / `(none)`).
+1. Launch every finder angle for the depth in one message, as fresh `Plan`
+   subagents, which have no Edit or Write tool but still have Bash. Never
+   use `subagent_type: "fork"`: a fork inherits this conversation, so a
+   verifier would see the finders' reasoning. Pass `model: "opus"`, and at
+   xhigh pass `effort: "xhigh"` to finders and the sweep. Give each
+   subagent the brief, tell it not to modify anything, and give it the
+   output shape: `file`, `line`, a one-line `summary`, a concrete
+   `failure_scenario`, and a `category`.
+2. Finders pass every candidate with a nameable failure scenario to verify,
+   because dropping half-believed candidates early is the main cause of
+   misses. Two angles that flag one line for different reasons give two
+   candidates.
+3. Verify each candidate with one fresh verifier: 3-state at medium, and
+   recall-biased at high and xhigh (`angles.md`).
+4. At xhigh, run the **Sweep for gaps** (`angles.md`).
 
-## medium — `8 angles × 6 candidates → 3-state verify → ≤8 findings`
-
-You are reviewing for **precision**: every finding you surface should be one
-a maintainer would act on.
-
-**If a native subagent tool (the `Agent`/`Task` tool) is available:** launch
-**8 independent finder angles** in a single message — Angle A, B, C (from
-`angles.md`) plus Reuse, Simplification, Efficiency, Altitude, and
-Conventions. Each surfaces up to **6 candidate findings** with `file`,
-`line`, a one-line `summary`, a concrete `failure_scenario`, and a severity
-tier. Pass every candidate with a nameable failure scenario through to
-verify — finders that silently drop half-believed candidates bypass the
-verify step and are the dominant cause of misses.
-
-Then run the **3-state verify** (`angles.md`) on each surviving candidate,
-one independent verifier per candidate, dispatched via the same subagent
-tool. Keep CONFIRMED and PLAUSIBLE; drop REFUTED.
-
-**If no native subagent tool is available:** work through all 8 angles
-yourself, in this same context, in a single pass — do not skip an angle for
-lack of fan-out. Dedup near-duplicates (same defect, same location, same
-reason → keep one) and re-check each remaining candidate yourself against the
-diff before keeping it. State clearly in your summary that this was a
-single-pass review, not the full fan-out.
-
-Cap at **8 findings**, ranked by severity tier (`angles.md`).
-
-## high — `9 angles × 6 candidates → recall-biased verify → ≤10 findings`
-
-You are reviewing for **recall**: catch every real bug a careful reviewer
-would catch in one sitting. At this level, catching real bugs matters more
-than avoiding false positives — err on the side of surfacing.
-
-Medium's angle set plus Angle F (9 angles, up to 6 candidates each), with
-the same fan-out/fallback mechanics, but verify uses the **recall-biased verify**
-(`angles.md`, "PLAUSIBLE by default") instead of the 3-state verify.
-
-Cap at **10 findings**, ranked by severity tier.
-
-## xhigh — `11 angles × 8 candidates → recall-biased verify → sweep → ≤15 findings`
-
-You are reviewing for **maximum recall**: catch every real bug. At this
-level, catching real bugs matters more than avoiding false positives — a
-missed bug ships. Err on the side of surfacing.
-
-Pass `effort: "xhigh"` on the finder and sweep Agent calls. Verifiers keep
-the inherited effort, because there is one per candidate. Without a subagent
-tool, the single pass runs at the skill's `high` effort.
-
-**If a native subagent tool is available:** launch **11 independent finder
-angles** in a single message — Angle A through F, plus Reuse,
-Simplification, Efficiency, Altitude, and Conventions. Each surfaces up to
-**8 candidate findings**. Do NOT let one angle's conclusions suppress
-another's — if two angles flag the same line for different reasons, record
-both.
-
-Run the **recall-biased verify** on each surviving candidate — this is
-recall mode, so a single non-REFUTED vote carries the finding; do not drop a
-candidate on mere uncertainty.
-
-Then run the **sweep for gaps** (`angles.md`): one more finder pass, up to 8
-additional candidates, focused only on defects the first pass tends to miss.
-
-**If no native subagent tool is available:** work through all 11 angles
-yourself in a single pass, dedup and self-check, then still perform the
-sweep-for-gaps pass yourself before reporting. State clearly that this was a
-single-pass review.
-
-Cap at **15 findings**, ranked by severity tier.
+Without a subagent tool, work through every angle yourself in one pass,
+dedup near-duplicates, re-check each candidate against the diff, and still
+run the sweep at xhigh. That pass runs at the skill's `high` effort. Say in
+the assessment that the review was a single pass.
