@@ -374,6 +374,16 @@ def test_review_md_takes_top_level_bullets_and_bare_directories(repo):
     assert out["signals"]["high_stakes"][0]["rule"] == "src/auth"
 
 
+@pytest.mark.parametrize("path", ["billing/pay.py", "app/billing/pay.py"])
+def test_a_bare_directory_name_matches_in_any_directory(repo, path):
+    repo.on_main(
+        lambda: (repo.root / "REVIEW.md").write_text("## High-stakes paths\n\n- `billing`\n")
+    )
+    repo.write(path, 3)
+    repo.commit()
+    assert repo.score()["floor"] == "high"
+
+
 @pytest.mark.parametrize("path", ["secrets/key.py", "app/secrets/key.py", "secrets/a/b/key.py"])
 def test_double_star_matches_zero_or_more_dirs(repo, path):
     repo.on_main(
@@ -459,6 +469,13 @@ def test_path_target_is_a_prefix_of_whole_names(repo):
     repo.commit()
     assert repo.score("--path", "src")["signals"]["lines"] == 5
     assert repo.score("--path", "src/feature.py")["signals"]["lines"] == 5
+
+
+def test_a_symlink_path_names_itself(repo):
+    repo.write("src/feature.py", 5)
+    (repo.root / "link").symlink_to("src")
+    repo.commit()
+    assert repo.score("--path", str(repo.root / "link"))["path"] == "link"
 
 
 def test_path_through_a_symlink_resolves(repo, tmp_path):
