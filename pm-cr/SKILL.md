@@ -31,8 +31,8 @@ level.
 python3 -I ${CLAUDE_SKILL_DIR}/scripts/scope.py --target='<target>'
 ```
 
-Put the target in single quotes, and leave `--target` out when there is
-none. Outside Claude Code, resolve `scripts/` relative to this file. The
+Put the target in single quotes, stop with an error if it contains one,
+and leave `--target` out when there is none. Outside Claude Code, resolve `scripts/` relative to this file. The
 script prints JSON. On any `status` other than `ok`, report its `message`
 and stop. Otherwise:
 
