@@ -8,9 +8,6 @@ Every level shares `../SKILL.md`'s Phase 1 (gather the diff) before any of
 this runs. Medium and above then build the **Reviewer brief** (`angles.md`)
 and finish with the **Scope check** (`angles.md`) before reporting.
 
-The level here is review depth. It is separate from the model's reasoning
-effort, which the skill's frontmatter sets to `high`.
-
 ## Subagent settings
 
 Use fresh, read-only subagents for finders, verifiers, and the sweep. On

@@ -5,10 +5,6 @@ Higher review levels use more of these angles per phase; all levels share the
 same angle *text* — only which ones run, and how many candidates each may
 surface, changes per level.
 
-A level in a heading, such as "xhigh and max levels only", is the review
-level that Phase 0 parsed from the arguments. It is not the model's
-reasoning effort.
-
 ## Reviewer brief (medium and above)
 
 Build one brief before any finder runs, and hand the same brief to every
