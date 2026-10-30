@@ -31,9 +31,11 @@ MEDIUM_MAX_FILES = 10
 MEDIUM_MAX_TOP_DIRS = 3
 LIST_LIMIT = 20
 
-INSTRUCTION_FILES = {"claude.md", "claude.local.md", "agents.md", "review.md"}
+INSTRUCTION_FILES = {"CLAUDE.md", "CLAUDE.local.md", "AGENTS.md", "REVIEW.md"}
 
-TEST_DIRS = {"test", "tests", "__tests__", "e2e"}
+TEST_DIRS = {"test", "tests", "__tests__", "spec", "e2e", "cypress"}
+# Manifests and deploy files under these are fixtures, not high-stakes.
+FIXTURE_DIRS = TEST_DIRS | {"fixtures", "testdata"}
 TEST_NAMES = ("test_*", "*_test.*", "*.test.*", "*_spec.*", "*.spec.*", "conftest.py", "tests.py")
 # CamelCase names (FooTest.java, FooTests.cs) need case-sensitive matching,
 # or "latest.py" would look like a test.
@@ -96,7 +98,22 @@ NON_CODE_SUFFIXES = {
     ".csv",
     ".svg",
 }
-NON_CODE_NAMES = ("license*", "readme*", "notice*", "authors*", "changelog*", "codeowners")
+# Matched by the name before its first dot, so license.py is still code.
+NON_CODE_STEMS = {"license", "readme", "notice", "authors", "changelog", "copying", "codeowners"}
+# Build and deploy config that tests cannot cover either.
+NON_CODE_NAMES = {
+    "dockerfile",
+    "containerfile",
+    "jenkinsfile",
+    "gemfile",
+    "pipfile",
+    "procfile",
+    "go.mod",
+    "go.sum",
+    "build.gradle",
+    "build.gradle.kts",
+}
+NON_CODE_CONFIG_SUFFIXES = {".tf", ".tfvars", ".dockerfile"}
 
 # Matched against the lowercased path. A pattern without "/" matches the file
 # name in any directory. A pattern with "/" matches the whole repo-relative
@@ -154,14 +171,11 @@ REVIEW_HEADING = re.compile(r"^(#+)\s+high-stakes paths\s*$", re.IGNORECASE)
 
 
 def git(repo, *args, check=True, env=None):
-    result = subprocess.run(
-        ["git", "-C", repo, *args],
-        check=False,
-        capture_output=True,
-        encoding="utf-8",
-        errors="surrogateescape",
-        env=env,
-    )
+    # Decode by hand: text mode would turn a carriage return inside a -z path
+    # into a newline.
+    result = subprocess.run(["git", "-C", repo, *args], check=False, capture_output=True, env=env)
+    result.stdout = result.stdout.decode("utf-8", "surrogateescape")
+    result.stderr = result.stderr.decode("utf-8", "replace")
     if check and result.returncode != 0:
         reason = result.stderr.strip() or f"exit status {result.returncode}"
         raise RuntimeError(f"git {' '.join(args)}: {reason}")
@@ -172,21 +186,31 @@ def matches(path, name, pattern):
     return fnmatch.fnmatchcase(path if "/" in pattern else name, pattern)
 
 
-def is_test(path):
-    p = PurePosixPath(path)
-    if any(part.lower() in TEST_DIRS for part in p.parts[:-1]):
-        return True
-    name = p.name
-    if any(fnmatch.fnmatchcase(name, n) for n in TEST_NAMES_CASED):
-        return True
-    return any(fnmatch.fnmatchcase(name.lower(), n) for n in TEST_NAMES)
+def in_dirs(path, dirs):
+    return any(part.lower() in dirs for part in PurePosixPath(path).parts[:-1])
 
 
 def is_code(path):
     name = PurePosixPath(path).name.lower()
-    if name.startswith(".") or any(fnmatch.fnmatchcase(name, n) for n in NON_CODE_NAMES):
+    suffix = PurePosixPath(name).suffix
+    if name.startswith(".") or name in NON_CODE_NAMES or suffix in NON_CODE_CONFIG_SUFFIXES:
         return False
-    return PurePosixPath(name).suffix not in NON_CODE_SUFFIXES
+    if name.split(".")[0] in NON_CODE_STEMS and suffix in NON_CODE_SUFFIXES | {""}:
+        return False
+    return suffix not in NON_CODE_SUFFIXES
+
+
+def is_test(path):
+    """A code file in a test directory or with a test name. A spec document
+    such as openapi.spec.yaml is not a test."""
+    if not is_code(path):
+        return False
+    name = PurePosixPath(path).name
+    return (
+        in_dirs(path, TEST_DIRS)
+        or any(fnmatch.fnmatchcase(name, n) for n in TEST_NAMES_CASED)
+        or any(fnmatch.fnmatchcase(name.lower(), n) for n in TEST_NAMES)
+    )
 
 
 def excluded_reason(path):
@@ -222,7 +246,7 @@ def high_stakes_match(paths, review_patterns):
         for glob in review_patterns:
             if any(matches(path, name, g) for g in expand_glob(glob)):
                 return {"path": path, "rule": glob, "source": "REVIEW.md"}
-        if is_test(path):
+        if in_dirs(path, FIXTURE_DIRS) or is_test(path):
             continue
         lower = path.lower()
         if excluded_reason(path) == "lockfile":
@@ -273,7 +297,14 @@ def review_md_patterns(repo, base):
 
 
 def numstat(repo, *rev_args, pathspec, env=None):
-    out = git(repo, "diff", "--numstat", "-z", "-M", *rev_args, "--", *pathspec, env=env)
+    # Read attributes from an empty tree, so that a change cannot hide its own
+    # lines behind a .gitattributes "-diff" rule (git 2.40 and later).
+    empty = git(repo, "hash-object", "-t", "tree", os.devnull).stdout.strip()
+    args = ("diff", "--numstat", "-z", "-M", *rev_args, "--", *pathspec)
+    neutral = ("-c", f"core.attributesFile={os.devnull}", f"--attr-source={empty}")
+    out = git(repo, *neutral, *args, check=False, env=env)
+    if out.returncode != 0:
+        out = git(repo, *args, env=env)
     tokens = out.stdout.split("\0")
     changes, i = [], 0
     while i < len(tokens) and tokens[i]:
@@ -289,6 +320,7 @@ def numstat(repo, *rev_args, pathspec, env=None):
             {
                 "path": path,
                 "old_path": old,
+                "binary": binary,
                 "added": 0 if binary else int(added),
                 "deleted": 0 if binary else int(deleted),
             }
@@ -316,7 +348,7 @@ def changes(repo, merge_base, head, pathspec):
 
 def base_has_tests(repo, base):
     listing = git(repo, "ls-tree", "-r", "-z", "--name-only", base).stdout
-    return any(is_test(p) for p in listing.split("\0") if p)
+    return any(is_test(p) and not excluded_reason(p) for p in listing.split("\0") if p)
 
 
 def capped(items):
@@ -335,7 +367,7 @@ def gather(repo, base, head=None, path=None):
     whole = changes(repo, merge_base, head, []) if path else scoped
 
     review_patterns = review_md_patterns(repo, base)
-    lines = files = code_lines = 0
+    lines = files = code_lines = excluded_lines = binaries = 0
     top_dirs = set()
     excluded, instruction_files, high_stakes = [], [], []
     for c in scoped:
@@ -343,13 +375,15 @@ def gather(repo, base, head=None, path=None):
         hit = high_stakes_match(paths, review_patterns)
         if hit:
             high_stakes.append(hit)
-        if any(PurePosixPath(p).name.lower() in INSTRUCTION_FILES for p in paths):
+        if any(PurePosixPath(p).name in INSTRUCTION_FILES for p in paths):
             instruction_files.append(c["path"])
+        n = c["added"] + c["deleted"]
         reason = excluded_reason(c["path"])
         if reason:
             excluded.append({"path": c["path"], "reason": reason})
+            excluded_lines += n
             continue
-        n = c["added"] + c["deleted"]
+        binaries += c["binary"]
         if c["old_path"] and n == 0:
             continue
         files += 1
@@ -381,7 +415,12 @@ def gather(repo, base, head=None, path=None):
 
     facts = [f"size {size}: {lines} lines in {files} files across {len(top_dirs)} top-level dirs"]
     if excluded:
-        facts.append(f"not counted in size: {len(excluded)} lockfile, generated, or vendored files")
+        facts.append(
+            f"not counted in size: {excluded_lines} lines in {len(excluded)} lockfile, "
+            "generated, minified, or vendored files"
+        )
+    if binaries:
+        facts.append(f"binary: {binaries} files with no line counts")
     if untested:
         facts.append(f"untested: {code_lines} code lines changed and no test file changed")
     elif test_files:

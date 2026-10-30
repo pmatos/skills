@@ -173,6 +173,51 @@ def test_docs_config_and_dotfiles_are_not_code(tested_repo):
     assert tested_repo.score()["signals"]["code_lines"] == 0
 
 
+@pytest.mark.parametrize(
+    ("path", "code"),
+    [
+        ("src/authors.py", True),
+        ("app/license_check.py", True),
+        ("LICENSE", False),
+        ("README.md", False),
+        ("Dockerfile", False),
+        ("go.mod", False),
+        ("infra/main.tf", False),
+    ],
+)
+def test_code_classification(tested_repo, path, code):
+    tested_repo.write(path, 10)
+    tested_repo.commit()
+    assert (tested_repo.score()["signals"]["code_lines"] > 0) is code
+
+
+def test_spec_documents_are_not_tests(tested_repo):
+    tested_repo.write("src/feature.py", 30)
+    tested_repo.write("api/openapi.spec.yaml", 30)
+    tested_repo.commit()
+    assert tested_repo.score()["signals"]["untested"] is True
+
+
+def test_rspec_spec_dir_is_tests(repo):
+    repo.on_main(lambda: repo.write("spec/spec_helper.rb", 5))
+    repo.write("src/feature.py", 30)
+    repo.commit()
+    assert repo.score()["signals"]["untested"] is True
+
+
+def test_vendored_tests_do_not_count_as_repo_tests(repo):
+    repo.on_main(lambda: repo.write("vendor/lib/tests/test_lib.py", 5))
+    repo.write("src/feature.py", 30)
+    repo.commit()
+    assert repo.score()["signals"]["base_has_tests"] is False
+
+
+def test_a_lowercase_review_page_is_not_an_instruction_file(repo):
+    repo.write("reviews/review.md", 3)
+    repo.commit()
+    assert repo.score()["floor"] == "low"
+
+
 def test_extensionless_script_is_code(tested_repo):
     tested_repo.write("bin/deploy", 30)
     tested_repo.commit()
@@ -353,13 +398,42 @@ def test_path_through_a_symlink_resolves(repo, tmp_path):
     assert out["path"] == "src"
 
 
-def test_unreadable_untracked_file_does_not_crash(repo):
+@pytest.mark.skipif(os.geteuid() == 0, reason="root can read any file")
+def test_unreadable_untracked_file_is_skipped(repo):
     repo.write("src/secret.py", 5)
     (repo.root / "src/secret.py").chmod(0)
     try:
-        repo.score()
+        assert repo.score()["signals"]["files"] == 0
     finally:
         (repo.root / "src/secret.py").chmod(0o644)
+
+
+def test_gitattributes_cannot_hide_lines(repo):
+    (repo.root / ".gitattributes").write_text("*.py -diff\n")
+    repo.write("src/big.py", 300)
+    repo.commit()
+    assert repo.score()["signals"]["lines"] >= 300
+
+
+def test_binary_files_are_reported(repo):
+    (repo.root / "lib.so").write_bytes(b"\0ELF" * 100)
+    repo.commit()
+    assert "binary: 1 files with no line counts" in repo.score()["facts"]
+
+
+def test_excluded_lines_are_reported(repo):
+    repo.write("dist/index.js", 5000)
+    repo.commit()
+    out = repo.score()
+    assert out["signals"]["lines"] == 0
+    assert any("5000 lines" in fact for fact in out["facts"])
+
+
+def test_carriage_return_in_a_name_survives(repo):
+    repo.write("src/x\ry.py", 30)
+    out = repo.score()
+    assert out["signals"]["files"] == 1
+    assert out["signals"]["lines"] == 30
 
 
 def test_pure_rename_counts_no_lines_or_files(repo):
