@@ -7,15 +7,13 @@ model: opus
 effort: high
 allowed-tools:
   - Bash(git rev-parse *)
-  - Bash(git symbolic-ref *)
-  - Bash(git remote *)
-  - Bash(git fetch *)
   - Bash(git merge-base *)
-  - Bash(git diff *)
-  - Bash(git log *)
-  - Bash(git show *)
-  - Bash(git blame *)
-  - Bash(git -c core.quotePath=false *)
+  - Bash(git symbolic-ref refs/remotes/*)
+  - Bash(git remote)
+  - Bash(git remote -v)
+  - Bash(git remote get-url *)
+  - Bash(git -c core.quotePath=false ls-files *)
+  - Bash(git -c core.quotePath=false status *)
   - Bash(gh pr view *)
   - Bash(gh repo view *)
   - Bash(readlink *)
@@ -366,8 +364,15 @@ bugbug review agent and from the Claude Code Code Review service:
   change, and a short overall assessment after the findings.
 - Declarative wording with no hedges. Uncertainty lives in `verdict`.
 - The skill runs on the latest Opus (`model: opus`) at `high` reasoning
-  effort, and `max` differs from `xhigh` by running its finders at `max`
-  reasoning effort.
+  effort. The frontmatter overrides the session's model and effort for the
+  skill's turn, even when the session runs a newer model or a higher
+  effort. With a subagent tool, `max` differs from `xhigh` by running its
+  finders at `max` reasoning effort. Without one, the whole review runs at
+  `high`, so the two levels match.
+- `allowed-tools` pre-approves only commands that are harmless in every
+  form. `git diff`, `log`, `show`, `blame`, and `fetch` are left to Claude
+  Code's own read-only check and permission prompt, because some of their
+  flags write files or run commands, and the skill reads untrusted text.
 - No `context: fork`. A forked skill starts without this conversation, so
   it loses level persistence and the user's own account of the change. In
   the background it also loses `ReportFindings`, and its `--fix` edits fall

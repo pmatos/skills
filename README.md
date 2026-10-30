@@ -176,7 +176,7 @@ What it does:
 - **low**: a single hunk-only read pass, no subagents, capped at 4 findings.
 - **medium**: 8 parallel finder angles (3 correctness + Reuse/Simplification/Efficiency/Altitude/Conventions), up to 6 candidates each, then a 3-state verify pass (CONFIRMED/PLAUSIBLE/REFUTED) — capped at 8 findings, tuned for precision.
 - **high**: the same 8 angles, but a recall-biased verify pass ("PLAUSIBLE by default") — capped at 10 findings, tuned for recall.
-- **xhigh/max**: 11 parallel finder angles (adds a language-pitfall, a wrapper/proxy-correctness and a trust-boundary angle), up to 8 candidates each, recall-biased verify, plus a final gap-sweep pass — capped at 15 findings. `max` runs its finders at `max` reasoning effort.
+- **xhigh/max**: 11 parallel finder angles (adds a language-pitfall, a wrapper/proxy-correctness and a trust-boundary angle), up to 8 candidates each, recall-biased verify, plus a final gap-sweep pass — capped at 15 findings. With a subagent tool, `max` runs its finders at `max` reasoning effort.
 - Ranks findings security, then correctness, then performance, then cleanup. Findings are worded as plain statements with a fix and no hedges. A shared "never report" list drops praise, restatements of the change, "check that…" requests and bare requests for more tests.
 - At medium and above, may add one `scope` finding that suggests splitting a large or mixed change, and ends every review with a short overall assessment.
 - **ultra**: no local equivalent to the built-in command's cloud multi-agent review, so it falls back to a local max-effort run instead.
