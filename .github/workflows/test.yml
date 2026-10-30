@@ -22,7 +22,7 @@ concurrency:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     env:
       # The 4 smoke tests shell out to the real CLIs; they stay opt-in.
       REVIEW_OFFLINE_SMOKE: ""

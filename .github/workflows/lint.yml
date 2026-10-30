@@ -16,7 +16,7 @@ concurrency:
 
 jobs:
   lint:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     env:
       SHFMT_VERSION: v3.10.0
       ACTIONLINT_VERSION: v1.7.7
