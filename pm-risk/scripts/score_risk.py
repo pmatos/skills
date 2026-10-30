@@ -34,8 +34,9 @@ LIST_LIMIT = 20
 INSTRUCTION_FILES = {"CLAUDE.md", "CLAUDE.local.md", "AGENTS.md", "REVIEW.md"}
 
 TEST_DIRS = {"test", "tests", "__tests__", "spec", "e2e", "cypress"}
-# Manifests and deploy files under these are fixtures, not high-stakes.
-FIXTURE_DIRS = TEST_DIRS | {"fixtures", "testdata"}
+# Manifests and deploy files under these are fixtures, not high-stakes. e2e/
+# and cypress/ are often real workspace packages, so they are not here.
+FIXTURE_DIRS = {"test", "tests", "__tests__", "fixtures", "testdata"}
 TEST_NAMES = ("test_*", "*_test.*", "*.test.*", "*_spec.*", "*.spec.*", "conftest.py", "tests.py")
 # CamelCase names (FooTest.java, FooTests.cs) need case-sensitive matching,
 # or "latest.py" would look like a test.
@@ -117,10 +118,11 @@ NON_CODE_CONFIG_SUFFIXES = {".tf", ".tfvars", ".dockerfile"}
 
 # Matched against the lowercased path. A pattern without "/" matches the file
 # name in any directory. A pattern with "/" matches the whole repo-relative
-# path, and "*" also matches "/". Lockfiles and third-party directories are
-# high-stakes too. Test paths never are.
-HIGH_STAKES = (
-    # CI and automation run with repository secrets.
+# path, and "*" also matches "/".
+#
+# Automation runs with repository secrets or on contributors' machines, so it
+# is high-stakes wherever it sits, even under a test directory.
+AUTOMATION = (
     ".github/workflows/*",
     ".github/actions/*",
     ".github/scripts/*",
@@ -133,6 +135,15 @@ HIGH_STAKES = (
     "jenkinsfile",
     "azure-pipelines.yml",
     ".pre-commit-config.yaml",
+    ".husky/*",
+    ".claude/*",
+    ".mcp.json",
+    ".gitmodules",
+    "codeowners",
+)
+# Lockfiles and third-party directories are high-stakes too. Under a fixture
+# directory, none of these are.
+HIGH_STAKES = (
     # Dependency manifests decide which third-party code runs.
     "package.json",
     "cargo.toml",
@@ -141,6 +152,8 @@ HIGH_STAKES = (
     "setup.cfg",
     "requirements*.txt",
     "requirements/*.txt",
+    "*/requirements/*.txt",
+    ".npmrc",
     "pipfile",
     "go.mod",
     "gemfile",
@@ -240,37 +253,59 @@ def expand_glob(glob):
     return [glob]
 
 
-def high_stakes_match(paths, review_patterns):
+def automation_rule(path):
+    lower = path.lower()
+    name = PurePosixPath(lower).name
+    return next((p for p in AUTOMATION if matches(lower, name, p)), None)
+
+
+def counts_as_test(path):
+    return is_test(path) and not excluded_reason(path) and not automation_rule(path)
+
+
+def built_in_rule(path):
+    rule = automation_rule(path)
+    if rule or in_dirs(path, FIXTURE_DIRS):
+        return rule
+    lower = path.lower()
+    if excluded_reason(path) == "lockfile":
+        return "lockfile"
+    if THIRD_PARTY_DIRS.intersection(lower.split("/")[:-1]):
+        return "third-party directory"
+    name = PurePosixPath(lower).name
+    return next((p for p in HIGH_STAKES if matches(lower, name, p)), None)
+
+
+def high_stakes_match(paths, review_globs):
     for path in paths:
         name = PurePosixPath(path).name
-        for glob in review_patterns:
-            if any(matches(path, name, g) for g in expand_glob(glob)):
-                return {"path": path, "rule": glob, "source": "REVIEW.md"}
-        if in_dirs(path, FIXTURE_DIRS) or is_test(path):
-            continue
-        lower = path.lower()
-        if excluded_reason(path) == "lockfile":
-            return {"path": path, "rule": "lockfile", "source": "built-in"}
-        if THIRD_PARTY_DIRS.intersection(lower.split("/")[:-1]):
-            return {"path": path, "rule": "third-party directory", "source": "built-in"}
-        for pattern in HIGH_STAKES:
-            if matches(lower, name.lower(), pattern):
-                return {"path": path, "rule": pattern, "source": "built-in"}
+        for shown, globs in review_globs:
+            if any(matches(path, name, g) for g in globs):
+                return {"path": path, "rule": shown, "source": "REVIEW.md"}
+        rule = built_in_rule(path)
+        if rule:
+            return {"path": path, "rule": rule, "source": "built-in"}
     return None
 
 
-def normalize_glob(glob):
-    glob = glob.strip()
+def review_glob(entry):
+    """Return the entry as shown and the globs it expands to. An entry with no
+    wildcard also covers a directory of that name."""
+    glob = entry.strip()
     for prefix in ("./", "/"):
         glob = glob.removeprefix(prefix)
     if glob.endswith("/"):
         glob += "*"
-    return glob
+    globs = expand_glob(glob)
+    if not any(c in glob for c in "*?["):
+        globs += expand_glob(f"{glob}/*")
+    return glob, globs
 
 
 def review_md_patterns(repo, base):
     """Return the globs listed under a "High-stakes paths" heading in the
-    base's root REVIEW.md: the first backticked span of each bullet."""
+    base's root REVIEW.md: the first backticked span of each top-level
+    bullet, as review_glob() pairs."""
     shown = git(repo, "show", f"{base}:REVIEW.md", check=False)
     if shown.returncode != 0:
         return []
@@ -289,22 +324,23 @@ def review_md_patterns(repo, base):
                 continue
             if depth is not None and len(heading.group(1)) <= depth:
                 depth = None
-        if depth is not None and re.match(r"^\s*[-*+]\s", line):
+        if depth is not None and re.match(r"^[-*+]\s", line):
             span = re.search(r"`([^`]+)`", line)
             if span:
-                patterns.append(normalize_glob(span.group(1)))
+                patterns.append(review_glob(span.group(1)))
     return patterns
 
 
-def numstat(repo, *rev_args, pathspec, env=None):
+def numstat(repo, *rev_args, env=None, notes):
     # Read attributes from an empty tree, so that a change cannot hide its own
     # lines behind a .gitattributes "-diff" rule (git 2.40 and later).
     empty = git(repo, "hash-object", "-t", "tree", os.devnull).stdout.strip()
-    args = ("diff", "--numstat", "-z", "-M", *rev_args, "--", *pathspec)
+    args = ("diff", "--numstat", "-z", "-M", *rev_args)
     neutral = ("-c", f"core.attributesFile={os.devnull}", f"--attr-source={empty}")
     out = git(repo, *neutral, *args, check=False, env=env)
     if out.returncode != 0:
         out = git(repo, *args, env=env)
+        notes.append("attributes not neutralized (git before 2.40): .gitattributes can hide lines")
     tokens = out.stdout.split("\0")
     changes, i = [], 0
     while i < len(tokens) and tokens[i]:
@@ -328,27 +364,46 @@ def numstat(repo, *rev_args, pathspec, env=None):
     return changes
 
 
-def changes(repo, merge_base, head, pathspec):
+def git_path(repo, name):
+    path = git(repo, "rev-parse", "--git-path", name).stdout.strip()
+    return path if os.path.isabs(path) else os.path.join(repo, path)
+
+
+def changes(repo, merge_base, head, notes):
     if head:
-        return numstat(repo, merge_base, head, pathspec=pathspec)
+        return numstat(repo, merge_base, head, notes=notes)
     # Stage the working tree into a scratch index, so that untracked files,
     # renames, binaries, and symlinks are diffed exactly as a commit would be.
     # Copying the real index first keeps git's stat cache, so only changed
-    # files are hashed.
+    # files are hashed. New blobs go to a scratch object directory, and the
+    # real one is read as an alternate, so the repository is left untouched.
     with tempfile.TemporaryDirectory() as tmp:
         index = os.path.join(tmp, "index")
-        real = git(repo, "rev-parse", "--git-path", "index").stdout.strip()
-        real = real if os.path.isabs(real) else os.path.join(repo, real)
+        real = git_path(repo, "index")
         if os.path.exists(real):
             shutil.copyfile(real, index)
-        env = {**os.environ, "GIT_INDEX_FILE": index}
-        git(repo, "add", "-A", "--ignore-errors", "--", *(pathspec or [":/"]), check=False, env=env)
-        return numstat(repo, "--cached", merge_base, pathspec=pathspec, env=env)
+        objects = os.path.join(tmp, "objects")
+        os.mkdir(objects)
+        env = {
+            **os.environ,
+            "GIT_INDEX_FILE": index,
+            "GIT_OBJECT_DIRECTORY": objects,
+            "GIT_ALTERNATE_OBJECT_DIRECTORIES": git_path(repo, "objects"),
+        }
+        added = git(repo, "add", "-A", "--ignore-errors", "--", ":/", check=False, env=env)
+        if added.returncode != 0:
+            why = next((ln for ln in added.stderr.splitlines() if ln.strip()), "git add failed")
+            notes.append(f"not counted: some working-tree files could not be read ({why})")
+        return numstat(repo, "--cached", merge_base, env=env, notes=notes)
+
+
+def under(path, prefix):
+    return prefix == "." or path == prefix or path.startswith(prefix + "/")
 
 
 def base_has_tests(repo, base):
     listing = git(repo, "ls-tree", "-r", "-z", "--name-only", base).stdout
-    return any(is_test(p) and not excluded_reason(p) for p in listing.split("\0") if p)
+    return any(counts_as_test(p) for p in listing.split("\0") if p)
 
 
 def capped(items):
@@ -361,10 +416,15 @@ def gather(repo, base, head=None, path=None):
         reason = mb.stderr.strip() or "no merge base (shallow clone? run git fetch --unshallow)"
         raise RuntimeError(f"git merge-base {base} {head or 'HEAD'}: {reason}")
     merge_base = mb.stdout.strip()
-    scoped = changes(repo, merge_base, head, [path] if path else [])
+    notes = []
     # Tests for a path target usually live outside it, so look for test
     # changes across the whole change.
-    whole = changes(repo, merge_base, head, []) if path else scoped
+    whole = changes(repo, merge_base, head, notes)
+    scoped = [
+        c
+        for c in whole
+        if not path or any(p and under(p, path) for p in (c["path"], c["old_path"]))
+    ]
 
     review_patterns = review_md_patterns(repo, base)
     lines = files = code_lines = excluded_lines = binaries = 0
@@ -375,8 +435,9 @@ def gather(repo, base, head=None, path=None):
         hit = high_stakes_match(paths, review_patterns)
         if hit:
             high_stakes.append(hit)
-        if any(PurePosixPath(p).name in INSTRUCTION_FILES for p in paths):
-            instruction_files.append(c["path"])
+        instruction = [p for p in paths if PurePosixPath(p).name in INSTRUCTION_FILES]
+        if instruction:
+            instruction_files.append(instruction[0])
         n = c["added"] + c["deleted"]
         reason = excluded_reason(c["path"])
         if reason:
@@ -397,7 +458,7 @@ def gather(repo, base, head=None, path=None):
         1
         for c in whole
         if (c["added"] or c["old_path"])
-        and any(is_test(p) for p in (c["path"], c["old_path"]) if p)
+        and any(counts_as_test(p) for p in (c["path"], c["old_path"]) if p)
     )
 
     if lines <= LOW_MAX_LINES and files <= LOW_MAX_FILES:
@@ -421,6 +482,7 @@ def gather(repo, base, head=None, path=None):
         )
     if binaries:
         facts.append(f"binary: {binaries} files with no line counts")
+    facts += notes
     if untested:
         facts.append(f"untested: {code_lines} code lines changed and no test file changed")
     elif test_files:
@@ -445,8 +507,6 @@ def gather(repo, base, head=None, path=None):
         "floor": floor,
         "floor_reason": floor_reason,
         "facts": facts,
-        "base": base,
-        "head": head,
         "merge_base": merge_base,
         "path": path,
         "signals": {
@@ -463,14 +523,7 @@ def gather(repo, base, head=None, path=None):
             "high_stakes_total": hs_total,
             "excluded": shown_ex,
             "excluded_total": ex_total,
-            "review_md_patterns": review_patterns,
-        },
-        "thresholds": {
-            "low_max_lines": LOW_MAX_LINES,
-            "low_max_files": LOW_MAX_FILES,
-            "medium_max_lines": MEDIUM_MAX_LINES,
-            "medium_max_files": MEDIUM_MAX_FILES,
-            "medium_max_top_dirs": MEDIUM_MAX_TOP_DIRS,
+            "review_md_patterns": [shown for shown, _ in review_patterns],
         },
     }
 
