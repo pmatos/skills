@@ -1,27 +1,24 @@
-# Risk rules
+# Facts and floor
 
-`../scripts/score_risk.py` applies these rules in order. Its thresholds and
-path lists are constants at the top of the script, and its JSON output
-carries the raw signals and thresholds behind every score.
+`../scripts/score_risk.py` gathers these facts from git metadata and file
+paths. Its thresholds and path lists are constants at the top of the script.
 
-1. **Size.** Count changed lines (added plus deleted), changed files, and
-   top-level directories. Lockfiles, minified files, source maps, generated
-   code, and vendored directories don't count, and a pure rename counts no
-   lines. A small change is `low`, a mid-sized one is `medium`, and anything
-   larger is `high`. Size alone never reaches `critical`.
-2. **Untested code.** When code changes, no test file changes, and the base
-   has tests, raise one level, to at most `high`. Docs, config, and dotfiles
-   never count as code.
-3. **High-stakes paths.** When the change touches one, raise two levels. The
-   built-in list covers CI and automation, dependency manifests, lockfiles,
-   vendored third-party code, deploy config, and schema migrations.
-4. **Instruction files.** When the change edits a `CLAUDE.md`,
-   `CLAUDE.local.md`, `AGENTS.md`, or `REVIEW.md`, the risk is at least
-   `medium`.
+- **Size**: changed lines (added plus deleted), changed files, and top-level
+  directories, rated low, medium, or high. Lockfiles, minified, generated, and
+  vendored files don't count, and neither does a pure rename.
+- **Tests**: whether code changed while no test file did, in a repo whose
+  base has tests. Docs, config, and dotfiles never count as code, and a
+  deleted test is not coverage.
+- **High-stakes paths**: CI and automation, dependency manifests, lockfiles,
+  vendored third-party code, deploy config, and schema migrations, plus the
+  repo's own list. Paths under tests never count.
+- **Review instructions**: edits to `CLAUDE.md`, `CLAUDE.local.md`,
+  `AGENTS.md`, or `REVIEW.md`.
 
-Size is the strongest signal on purpose: larger changes ship more defects.
-A behavior-preserving refactor still scores by its size, so a refactor that
-keeps scoring `high` is a cue to split it.
+Only two facts set the floor, because they are risky whatever the code says:
+a high-stakes path means at least high, and an edit to review instructions
+means at least medium. Size and tests are evidence for the Impact and
+Verification judgments, so a contained, tested refactor can still be low.
 
 ## Repo-specific high-stakes paths
 
@@ -31,17 +28,16 @@ heading, with one glob per bullet in backticks:
 ```markdown
 ## High-stakes paths
 
-- `src/auth/*`
-- `billing/`
+- `src/auth/`
+- `**/billing/**/*.py`
 ```
 
-A glob without `/` matches a file name in any directory, `*` also matches
-`/`, and a trailing `/` covers the whole directory. The script reads
-`REVIEW.md` from the base, never from the change, so a change cannot lower
-its own risk by editing the list.
+A glob without `/` matches a file name in any directory, and `*` also
+matches `/`. A trailing `/` covers the whole directory, and `**/` also
+matches no directory. The script reads `REVIEW.md` from the base, never from
+the change, so a change cannot lower its own floor by editing the list.
 
-## Reproducibility
+## What is reproducible
 
-The same change and base always get the same risk. Without `--head`, the
-script scores the working tree against the merge base, including untracked
-files. With `--head`, it scores only the committed range.
+The same change and base always get the same facts and floor. The judgment
+reads the code, so it can vary between runs, but never below the floor.

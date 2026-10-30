@@ -23,8 +23,8 @@ allowed-tools:
 
 Review the current diff, or a PR number/branch/path target, for correctness
 bugs and reuse/simplification/efficiency/altitude/conventions cleanups. The
-`pm-risk` skill scores the change's merge risk, which sets the review depth,
-so the same change always gets the same depth. Small, low-stakes changes get a short
+`pm-risk` skill rates the change's merge risk, which sets the review depth.
+Small, low-stakes changes get a short
 precision pass. Large or high-stakes changes get a broad fan-out that may
 include less-certain findings. This is a bug hunt *and* a cleanup pass,
 unlike `pm-simplify` (cleanup only) — run that instead if you only want the
@@ -279,15 +279,14 @@ could not read as not reviewed in the report.
 Invoke the `pm-risk` skill with `--base '<base>'`, plus `--path '<path>'`
 for a path target. `<base>` is what Phase 1 diffed against: the record's
 `oid`, its `local_ref` after a failed fetch, the local branch from rule 1c,
-or `HEAD~1` from Step 4. Without `--head`, pm-risk scores the working tree
+or `HEAD~1` from Step 4. Without `--head`, pm-risk uses the working tree
 against the merge base, untracked files included, which is the scope that
-Phase 1 resolved.
+Phase 1 resolved. It judges from the diff and PR text already loaded.
 
 Map the merge risk to the depth: `low`, `medium`, and `high` keep their
-names, and `critical` becomes `xhigh`. State `Depth: <depth>` in one line.
-Never pick or adjust the depth by hand, so that the agent that wrote a
-change cannot talk its own review down. If pm-risk is not installed or
-fails, review at `high` and say why.
+names, and `critical` becomes `xhigh`. State `Depth: <depth>` in one line,
+and never adjust it by hand. If pm-risk is not installed or fails, review at
+`high` and say why.
 
 ## Phase 3 — Run the review at the scored depth
 
@@ -358,8 +357,8 @@ bugbug review agent and from the Claude Code Code Review service:
 - An optional `scope` finding that suggests splitting a large or mixed
   change, and a short overall assessment after the findings.
 - Declarative wording with no hedges. Uncertainty lives in `verdict`.
-- No level argument. The `pm-risk` skill scores the change's merge risk,
-  which sets the depth, so the same change always gets the same depth. The old `max` level differed from `xhigh`
+- No level argument. The `pm-risk` skill rates the change's merge risk,
+  which sets the depth. The old `max` level differed from `xhigh`
   only in finder effort, so the two are merged into `xhigh`.
 - The skill runs on the latest Opus (`model: opus`) at `high` reasoning
   effort. The frontmatter overrides the session's model and effort for the
