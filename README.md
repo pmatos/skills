@@ -171,10 +171,14 @@ Reviews the current diff, or a PR number/branch/path target, for correctness bug
 
 What it does:
 - Gathers the diff under review (`git diff <base>...HEAD` against the resolved default branch — `origin/HEAD` symref, then `gh repo view --json defaultBranchRef`, then a local `main`/`master`, with `HEAD~1` only as a disclosed last resort — plus any uncommitted working-tree changes and any untracked, non-ignored files), or reviews an explicit PR/branch/path argument (a PR or branch target must be checked out — the review is refused with a `gh pr checkout` hint rather than silently diffing the current branch).
+- Runs on the latest Opus (`model: opus`) at `high` reasoning effort, set in the skill's frontmatter. The review level below is a separate setting for review depth.
+- At medium and above, first builds a reviewer brief that every finder and verifier receives. The brief holds the author's stated intent (from the PR title and body and the commit subjects) and the rules in `CLAUDE.md`, `AGENTS.md` and `REVIEW.md`. When the diff edits one of those files, the base version applies.
 - **low**: a single hunk-only read pass, no subagents, capped at 4 findings.
 - **medium**: 8 parallel finder angles (3 correctness + Reuse/Simplification/Efficiency/Altitude/Conventions), up to 6 candidates each, then a 3-state verify pass (CONFIRMED/PLAUSIBLE/REFUTED) — capped at 8 findings, tuned for precision.
 - **high**: the same 8 angles, but a recall-biased verify pass ("PLAUSIBLE by default") — capped at 10 findings, tuned for recall.
-- **xhigh/max**: 10 parallel finder angles (adds a language-pitfall and a wrapper/proxy-correctness angle), up to 8 candidates each, recall-biased verify, plus a final gap-sweep pass — capped at 15 findings.
+- **xhigh/max**: 11 parallel finder angles (adds a language-pitfall, a wrapper/proxy-correctness and a trust-boundary angle), up to 8 candidates each, recall-biased verify, plus a final gap-sweep pass — capped at 15 findings. `max` runs its finders at `max` reasoning effort.
+- Ranks findings security, then correctness, then performance, then cleanup. Findings are worded as plain statements with a fix and no hedges. A shared "never report" list drops praise, restatements of the change, "check that…" requests and bare requests for more tests.
+- At medium and above, may add one `scope` finding that suggests splitting a large or mixed change, and ends every review with a short overall assessment.
 - **ultra**: no local equivalent to the built-in command's cloud multi-agent review, so it falls back to a local max-effort run instead.
 - Falls back to a single inline pass through all angles for a level when no native subagent tool is available, instead of fanning out.
 - `--fix` applies the reported findings to the working tree directly, skipping anything that would change behavior or fall outside the diff. `--comment` posts findings as inline PR comments (GitHub MCP tool, falling back to `gh api`). `--post`/`--no-post` only apply to `ultra` and are otherwise ignored with a note.

@@ -3,25 +3,26 @@
 ## Reporting findings
 
 If the `ReportFindings` tool is available in this session, call it once with
-the findings ranked most-severe first, respecting the cap for the effort
-level in use. Each entry carries:
+the findings ranked by severity tier (`angles.md`), respecting the cap for
+the effort level in use. Each entry carries:
 
 - `file`, `line`
-- `summary` — one-sentence statement of the defect
+- `summary` — one sentence: the defect stated as fact, then the fix (see
+  **Writing a finding**)
 - `short_summary` — the claim compressed to ≤60 characters, no rationale or
   consequence clause
 - `failure_scenario` — concrete inputs/state → wrong output/crash (or, for
   cleanup/altitude/conventions findings, the concrete cost per `angles.md`)
 - `category` — a short kebab-case slug for the angle that produced it
-  (`correctness`, `simplification`, `efficiency`, `reuse`, `altitude`,
-  `conventions`, or a more specific slug like `test-coverage` when one fits
-  better)
+  (`security`, `correctness`, `performance`, `simplification`, `efficiency`,
+  `reuse`, `altitude`, `conventions`, `scope`, or a more specific slug when
+  one fits better)
 - `verdict` — `CONFIRMED` or `PLAUSIBLE`, when a verify pass produced one
 
-If more findings survive than the level's cap allows, keep the most severe
-and drop the rest. If nothing survives, call it with an empty array. Do not
-also print the findings as text, and do not create or publish an artifact of
-the review — the tool call is the report.
+If more findings survive than the level's cap allows, cut from the lowest
+tier. If nothing survives, call it with an empty array. Do not also print
+the findings as text, and do not create or publish an artifact of the
+review — the tool call is the report.
 
 If `ReportFindings` is not available, output the same findings as a JSON
 array of objects with `file`, `line`, `summary`, `failure_scenario` (the
@@ -32,6 +33,30 @@ At **low** effort specifically, if neither a structured-output context nor
 `ReportFindings` applies (e.g. a plain terminal session), output one line per
 finding instead: `path/to/file.ext:123 — what's wrong and the concrete
 failure`. Output `(none)` if nothing qualifies.
+
+### Writing a finding
+
+State the defect as fact, then give the fix with a directive verb such as
+Fix, Remove, Change, Add, Return, or Guard. Keep it short and specific.
+Never hedge: no "maybe", "might want to", "consider", "possibly", "could
+be", or "you may want to". A PLAUSIBLE finding carries its uncertainty in
+`verdict` and in the trigger that `failure_scenario` names, not in the
+wording.
+
+```text
+Bad:  Consider checking whether user could be null here.
+Good: user.id throws on an expired session, because getUser() returns null
+      there (auth.ts:42); return 401 before line 57.
+```
+
+### Assessment
+
+After the findings, print a one-to-three-sentence assessment: your overall
+take on the change, such as its main risk area or whether it looks sound.
+At low effort, one sentence. Do not summarize what the change does, because
+the author already knows. Do not count, list, or repeat the findings,
+because `--comment` can withhold some of them. The assessment is not a
+finding, so printing it does not duplicate the `ReportFindings` call.
 
 ## `--fix`
 
@@ -56,7 +81,9 @@ Apply the findings to the working tree instead of stopping at the report:
 fix each one directly — correctness bugs and cleanup/altitude/conventions
 findings alike. Skip any finding whose fix would change intended behavior,
 require changes well outside the reviewed diff, or that you judge to be a
-false positive — note the skip rather than arguing with it.
+false positive — note the skip rather than arguing with it. Never apply the
+`scope` finding: splitting a change is the author's call, so it is always
+`skipped`.
 
 If findings were reported via `ReportFindings`, call it again with the same
 findings, each carrying an `outcome`: `fixed`, `no_change_needed` (the
@@ -91,6 +118,11 @@ if available. If that tool isn't available in this session, fall back to
 `gh api repos/{owner}/{repo}/pulls/{pr}/comments`. If neither is usable,
 print the findings instead. If the target is not a PR, print the findings to
 the terminal and note that `--comment` was ignored.
+
+After the inline comments, post the assessment once as a general PR comment
+(`gh pr comment <n> --body-file <file>`). Write it about code the PR
+contains: if the risk you would name lives in a withheld dirty file, leave
+that risk out of the posted text.
 
 GitHub only accepts an inline comment on a line that is part of the PR's
 diff hunks (added, removed, or context lines). Angle A findings can land on
