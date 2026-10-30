@@ -170,7 +170,7 @@ npx skills@latest add pmatos/skills/pm-cr
 Reviews the current diff, or a PR number/branch/path target, for correctness bugs and reuse/simplification/efficiency/altitude/conventions cleanups, at a depth set by the change's merge risk.
 
 What it does:
-- Gathers the diff under review (`git diff <base>...HEAD` against the resolved default branch — `origin/HEAD` symref, then `gh repo view --json defaultBranchRef`, then a local `main`/`master`, with `HEAD~1` only as a disclosed last resort — plus any uncommitted working-tree changes and any untracked, non-ignored files), or reviews an explicit PR/branch/path argument (a PR or branch target must be checked out — the review is refused with a `gh pr checkout` hint rather than silently diffing the current branch).
+- Gathers the scope with a bundled script, `scripts/scope.py`. It finds the base (the PR's own base, else the default branch across every remote, else a local `main`/`master`, with `HEAD~1` only as a disclosed last resort) and adds uncommitted and untracked files. A PR or branch target must be checked out, or the review is refused with a `gh pr checkout` hint.
 - Runs on the latest Opus (`model: opus`) at `high` reasoning effort, set in the skill's frontmatter.
 - Takes no level argument. The [`pm-risk`](#pm-risk--merge-risk) skill rates the change's merge risk, which sets the depth (`critical` maps to xhigh). For a quick check while iterating, use the built-in `/code-review low` or `/pm-simplify`.
 - At medium and above, first builds a reviewer brief that every finder and verifier receives. The brief holds the author's stated intent (from the PR title and body and the commit subjects) and the rules in `CLAUDE.md`, `AGENTS.md` and `REVIEW.md`. When the diff edits one of those files, the base version applies.
@@ -183,9 +183,17 @@ What it does:
 - Falls back to a single inline pass through all angles for a depth when no native subagent tool is available, instead of fanning out.
 - `--fix` applies the reported findings to the working tree directly, skipping anything that would change behavior or fall outside the diff. `--comment` posts findings as inline PR comments (GitHub MCP tool, falling back to `gh api`) and the assessment as one general comment.
 
-Trigger phrases: `code review this`, `review this PR`, `review the diff`, `review my changes`, `review with fixes`.
+Differences from the built-in `/code-review`:
+- A reviewer brief, a shared never-report list, a security tier with trust-boundary checks, an optional `scope` finding and a closing assessment, most drawn from Mozilla's bugbug review agent and from the Claude Code Code Review service. Instruction files include `REVIEW.md`, read at the base version when the diff edits them.
+- No level argument, so there is no `ultra` and no `max`. The old `max` differed from `xhigh` only in finder effort.
+- The frontmatter overrides the session's model and effort. Without a subagent tool, the whole review runs at `high`.
+- `allowed-tools` pre-approves only the scope script, whose arguments are fixed. `git diff`, `log`, `show` and `blame` go through Claude Code's own read-only check, and posting to a PR always asks for permission.
+- No `context: fork`, because a fork would lose this conversation and `ReportFindings`, and its `--fix` edits would bypass checkpoints.
+- Not replicated: per-model tuning, persistence of the last level, internal telemetry, and the cloud `ultra` review.
 
-**Requires**: the sibling `pm-risk` skill (`npx skills@latest add pmatos/skills/pm-risk`). Without it, every review runs at high. Install both at user scope to review untrusted PRs, because a project-scoped skill is loaded from the PR's own checkout.
+Trigger phrases: `code review this`, `review this PR`, `review the diff`, `review my changes`, `find bugs in my changes`, `review with fixes`.
+
+**Requires**: Python 3, the [GitHub CLI](https://cli.github.com/) (`gh`) for PR targets, and the sibling `pm-risk` skill (`npx skills@latest add pmatos/skills/pm-risk`). Without pm-risk, every review runs at high. Install both at user scope to review untrusted PRs, because a project-scoped skill is loaded from the PR's own checkout.
 
 ### `/pm-risk` — Merge risk
 

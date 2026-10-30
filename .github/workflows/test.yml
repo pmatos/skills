@@ -4,12 +4,14 @@ on:
   pull_request:
     paths:
       - "review-offline/**"
+      - "pm-cr/**"
       - "pm-risk/**"
       - ".github/workflows/test.yml"
   push:
     branches: [main]
     paths:
       - "review-offline/**"
+      - "pm-cr/**"
       - "pm-risk/**"
       - ".github/workflows/test.yml"
 
@@ -38,4 +40,4 @@ jobs:
         uses: astral-sh/setup-uv@v10.3.0
 
       - name: Test
-        run: uv run --with pytest pytest review-offline/tests pm-risk/tests
+        run: uv run --with pytest pytest review-offline/tests pm-cr/tests pm-risk/tests
