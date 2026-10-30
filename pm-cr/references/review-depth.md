@@ -1,12 +1,53 @@
-# Effort levels
+# Review depth
 
 Full per-level templates. All angle text lives in `angles.md` — this file
 only says which angles run, how many candidates each may surface, whether a
 verify pass runs, and the output cap.
 
-Every level shares `../SKILL.md`'s Phase 1 (gather the diff) before any of
-this runs. Medium and above then build the **Reviewer brief** (`angles.md`)
-and finish with the **Scope check** (`angles.md`) before reporting.
+Every level shares `../SKILL.md`'s Phase 1 (gather the diff) and Phase 2
+(score the depth) before any of this runs. Medium and above then build the
+**Reviewer brief** (`angles.md`) and finish with the **Scope check**
+(`angles.md`) before reporting.
+
+## How the depth is scored
+
+`../scripts/score_depth.py` applies these rules in order. Its thresholds and
+path lists are constants at the top of the script.
+
+1. **Size.** Count changed lines (added plus deleted), changed files, and
+   top-level directories, untracked files included. Lockfiles, minified
+   files, source maps, and vendored code don't count, and a pure rename
+   counts no lines. A small change is `low`, a mid-sized one is `medium`,
+   and anything larger is `high`. Size alone never reaches `xhigh`.
+2. **Untested code.** When code changes, no test changes, and the base has
+   tests, raise one level, to at most `high`. Docs and config files never
+   count as untested code.
+3. **High-stakes paths.** When the change touches one, raise two levels, to
+   at least `high`. The built-in list covers CI and automation, dependency
+   manifests and lockfiles, deploy config, and schema migrations.
+4. **Instruction files.** When the change edits a `CLAUDE.md`,
+   `CLAUDE.local.md`, `AGENTS.md`, or `REVIEW.md`, the level is at least
+   `medium`. The reviewer brief then runs and judges the change by the base
+   version of those files.
+
+A repo adds its own high-stakes paths in its root `REVIEW.md`, one
+backticked glob per bullet under a `High-stakes paths` heading:
+
+```markdown
+## High-stakes paths
+
+- `src/auth/*`
+- `billing/*`
+```
+
+A glob without `/` matches a file name in any directory, and `*` also
+matches `/`. The script reads `REVIEW.md` from the base, never from the
+change, so a change cannot lower its own depth by editing the list. The
+exception is Phase 1's `HEAD~1` fallback, where the base is the author's
+own previous commit.
+
+The same change and base always get the same level, angles, and cap. The
+findings can still differ between runs.
 
 ## Subagent settings
 
@@ -21,10 +62,12 @@ skill. Give every subagent the brief.
 
 ## low — `1 diff pass → no verify → ≤4 findings`
 
-**Turn 1 — read.** One tool call: read the unified diff. Skip test/fixture
-hunks (`test/`, `spec/`, `__tests__/`, `*_test.*`, `*.test.*`, `fixtures/`,
-`testdata/`) — test-file changes are not reviewed at this level. No
-subagents, no full-file reads.
+**Turn 1 — read.** One tool call: read the unified diff. When the diff
+changes anything besides tests, skip test and fixture hunks. Those are files
+under a `test`, `tests`, `spec`, `specs`, `__tests__`, `testdata`, or
+`fixtures` directory, or named `test_*`, `*_test.*`, `*.test.*`, `*_spec.*`,
+or `*.spec.*`. A diff that changes only tests is read in full. No subagents,
+no full-file reads.
 
 **Turn 2 — findings.** Flag runtime-correctness bugs visible from the hunk
 alone: inverted/wrong condition, off-by-one, null/undefined deref where
@@ -81,18 +124,15 @@ Same angle set and fan-out/fallback mechanics as **medium** (8 angles, up to
 
 Cap at **10 findings**, ranked by severity tier.
 
-## xhigh / max — `11 angles × 8 candidates → recall-biased verify → sweep → ≤15 findings`
+## xhigh — `11 angles × 8 candidates → recall-biased verify → sweep → ≤15 findings`
 
 You are reviewing for **maximum recall**: catch every real bug. At this
 level, catching real bugs matters more than avoiding false positives — a
 missed bug ships. Err on the side of surfacing.
 
-`xhigh` and `max` run the same angles, verify, sweep, and cap. They differ
-only in the reasoning effort of the finders and the sweep: pass
-`effort: "xhigh"` on those Agent calls at `xhigh`, and `effort: "max"` at
-`max`. Verifiers keep the inherited effort, because there is one per
-candidate. Without a subagent tool, the single pass runs at the skill's
-`high` effort, so `xhigh` and `max` match.
+Pass `effort: "xhigh"` on the finder and sweep Agent calls. Verifiers keep
+the inherited effort, because there is one per candidate. Without a subagent
+tool, the single pass runs at the skill's `high` effort.
 
 **If a native subagent tool is available:** launch **11 independent finder
 angles** in a single message — Angle A through F, plus Reuse,
@@ -114,15 +154,3 @@ sweep-for-gaps pass yourself before reporting. State clearly that this was a
 single-pass review.
 
 Cap at **15 findings**, ranked by severity tier.
-
-## ultra — cloud multi-agent review (no local equivalent)
-
-The built-in `/code-review ultra` dispatches a deep multi-agent review in
-Anthropic's cloud (requires `claude.ai` account access) and, for a GitHub PR
-target, offers `--post` to publish the findings to the PR as a single
-comment. This skill has no access to that cloud infrastructure.
-
-If the user requests `ultra`, say so explicitly in your opening line, then
-fall back to a local **max**-effort review — this mirrors the built-in
-command's own documented behavior when cloud access isn't available in the
-current session.
