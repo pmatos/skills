@@ -8,13 +8,19 @@ outside a git work tree.
 
 import argparse
 import json
+import math
 import os
 import re
 import stat
 import subprocess
 import sys
+import time
 
 BINARY_PROBE = 8000
+UNTRACKED_CAP = 200
+# Claude Code's Bash tool gives up at 120s, so every fetch and gh call shares
+# a budget that leaves room to print the result.
+NETWORK_BUDGET = 90
 PR_FIELDS = "url,number,baseRefName,headRefOid,title,body,state"
 # Earlier versions of pm-cr took a review level before the target.
 LEVELS = ("low", "medium", "high", "xhigh", "max", "ultra")
@@ -24,6 +30,7 @@ SCHEME_URL = re.compile(
     r"(?:https?|ssh|git|git\+ssh|ssh\+git)://(?:[^@/]*@)?([^/:]+)(?::\d*)?/(.*)"
 )
 SCP_URL = re.compile(r"(?:[^@/]*@)?([^/:]+):(?!//)(.*)")
+NO_OPEN_PR = "the current branch has no open PR"
 CONTROL = re.compile(r"[\x00-\x1f\x7f]")
 ENV = {
     **os.environ,
@@ -31,18 +38,35 @@ ENV = {
     "GH_PROMPT_DISABLED": "1",
     "GH_NO_UPDATE_NOTIFIER": "1",
 }
+# Set by main; None leaves network calls unbounded.
+network_deadline = None
 
 
-def git(top, *args, check=True):
-    result = subprocess.run(
-        ["git", "-C", top, *args],
-        check=False,
-        capture_output=True,
-        encoding="utf-8",
-        errors="surrogateescape",
-        stdin=subprocess.DEVNULL,
-        env=ENV,
-    )
+def run(argv, network=False, **kwargs):
+    """subprocess.run, giving a network call only what is left of the budget."""
+    timeout = None
+    if network and network_deadline is not None:
+        timeout = network_deadline - time.monotonic()
+        if timeout <= 0:
+            return subprocess.CompletedProcess(
+                argv, 1, "", "timed out: the network budget is spent"
+            )
+    try:
+        return subprocess.run(
+            argv,
+            check=False,
+            capture_output=True,
+            stdin=subprocess.DEVNULL,
+            env=ENV,
+            timeout=timeout,
+            **kwargs,
+        )
+    except subprocess.TimeoutExpired:
+        return subprocess.CompletedProcess(argv, 1, "", f"timed out after {math.ceil(timeout)}s")
+
+
+def git(top, *args, check=True, network=False):
+    result = run(["git", "-C", top, *args], network, encoding="utf-8", errors="surrogateescape")
     if check and result.returncode != 0:
         raise RuntimeError(f"git {' '.join(args)}: {result.stderr.strip()}")
     return result
@@ -50,16 +74,7 @@ def git(top, *args, check=True):
 
 def gh(top, *args):
     try:
-        result = subprocess.run(
-            ["gh", *args],
-            cwd=top,
-            check=False,
-            capture_output=True,
-            encoding="utf-8",
-            errors="replace",
-            stdin=subprocess.DEVNULL,
-            env=ENV,
-        )
+        result = run(["gh", *args], True, cwd=top, encoding="utf-8", errors="replace")
     except OSError as e:
         return None, f"gh could not run ({e.strerror})"
     if result.returncode != 0:
@@ -136,7 +151,7 @@ def pr_view(top, arg):
     if not m or not data.get("baseRefName"):
         return None, None, "gh returned a PR without a usable URL or base branch"
     if arg is None and data.get("state", "OPEN") != "OPEN":
-        return None, None, "the current branch has no open PR"
+        return None, None, NO_OPEN_PR
     host, owner, repo, number = m.groups()
     pr = {
         "url": data["url"],
@@ -188,14 +203,21 @@ def classify(top, token):
 
 
 class Resolver:
-    def __init__(self, top):
+    def __init__(self, top, warnings):
         self.top = top
-        self.warnings = []
+        self.warnings = warnings
         self.unshallowed = None
 
     def fetch(self, *args):
         return git(
-            self.top, "fetch", "--quiet", "--no-tags", "--no-recurse-submodules", *args, check=False
+            self.top,
+            "fetch",
+            "--quiet",
+            "--no-tags",
+            "--no-recurse-submodules",
+            *args,
+            check=False,
+            network=True,
         )
 
     def unshallow(self):
@@ -253,8 +275,13 @@ class Resolver:
 
     def pr_record(self, pr, branch):
         ident = (pr["host"], pr["owner"], pr["repo"])
-        for remote in remotes(self.top):
-            if any(same_repo(ident, i) for i in remote_identities(self.top, remote)):
+        idents = {remote: remote_identities(self.top, remote) for remote in remotes(self.top)}
+        for remote, found in idents.items():
+            if any(same_repo(ident, i) for i in found):
+                return record(self.top, remote, branch)
+        # An SSH Host alias such as `work-gh` never names the PR's host.
+        for remote, found in idents.items():
+            if any(same_repo(ident, (pr["host"], *i[1:])) for i in found):
                 return record(self.top, remote, branch)
         # Built from the PR URL's own host: an Enterprise PR is not on github.com.
         url = f"https://{pr['host']}/{pr['owner']}/{pr['repo']}.git"
@@ -279,16 +306,16 @@ class Resolver:
         return found
 
     def gh_default_branch(self, remote):
-        idents = remote_identities(self.top, remote)
-        if not idents:
-            return None
-        host, owner, repo = idents[0]
-        url = f"https://{host}/{owner}/{repo}"
-        out, _ = gh(self.top, "repo", "view", url, "--json", "defaultBranchRef")
-        try:
-            return json.loads(out or "{}")["defaultBranchRef"]["name"] or None
-        except (ValueError, KeyError, TypeError):
-            return None
+        urls = [f"https://{h}/{o}/{r}" for h, o, r in remote_identities(self.top, remote)]
+        for url in dict.fromkeys(urls):
+            out, _ = gh(self.top, "repo", "view", url, "--json", "defaultBranchRef")
+            try:
+                branch = json.loads(out or "{}")["defaultBranchRef"]["name"]
+            except (ValueError, KeyError, TypeError):
+                branch = None
+            if branch:
+                return branch
+        return None
 
     def default_base(self):
         """Rules 1b and Step 2: the candidate whose merge base is nearest HEAD."""
@@ -327,7 +354,12 @@ class Resolver:
             if has_ref(self.top, f"refs/heads/{name}"):
                 merge_base, why = self.merge_base(f"refs/heads/{name}")
                 if merge_base:
-                    return name, merge_base
+                    return {
+                        "base": name,
+                        "merge_base": merge_base,
+                        "stale": False,
+                        "label": f"local {name}",
+                    }
                 self.warnings.append(f"skipped local {name}: {why}")
         return None
 
@@ -343,7 +375,9 @@ class Resolver:
             else:
                 self.warnings.append(f"git fetch --deepen=1 failed: {first_line(result.stderr)}")
             parent = rev_parse(self.top, "HEAD~1^{commit}")
-        return parent
+        if parent is None:
+            return None
+        return {"base": "HEAD~1", "merge_base": parent, "stale": False, "label": "HEAD~1"}
 
 
 def inspect(full):
@@ -369,25 +403,24 @@ def inspect(full):
     return "file", None, None
 
 
-def untracked_files(top, path):
-    """List untracked files under path (or the whole repo), split into
-    reviewable entries and skipped ones."""
+def untracked_files(top, spec):
+    """List untracked files under the pathspec, split into reviewable entries
+    and skipped ones, plus how many were left unlisted past the cap."""
     # -z keeps every name intact: the plain listing octal-escapes non-ASCII
     # names and C-quotes ones holding a quote, tab or newline.
-    listing = subprocess.run(
-        ["git", "-C", top, "ls-files", "--others", "--exclude-standard", "-z", "--", ":/"],
-        check=False,
-        capture_output=True,
-        stdin=subprocess.DEVNULL,
-        env=ENV,
+    listing = run(
+        ["git", "-C", top, "--literal-pathspecs", "ls-files", "--others", "--exclude-standard"]
+        + ["-z", "--", *spec]
     )
     if listing.returncode != 0:
         raise RuntimeError(f"git ls-files: {listing.stderr.decode('utf-8', 'replace').strip()}")
-    prefix = None if path in (None, ".") else os.fsencode(path)
     top_bytes = os.fsencode(top)
-    files, skipped = [], []
+    files, skipped, unlisted = [], [], 0
     for name in listing.stdout.split(b"\0"):
-        if not name or (prefix and name != prefix and not name.startswith(prefix + b"/")):
+        if not name:
+            continue
+        if len(files) == UNTRACKED_CAP:
+            unlisted += 1
             continue
         try:
             text = name.decode("utf-8")
@@ -403,7 +436,7 @@ def untracked_files(top, path):
             skipped.append({"path": text, "reason": reason})
         else:
             files.append({"path": text, "kind": kind, "target": target})
-    return files, skipped
+    return files, skipped, unlisted
 
 
 def drop_level(top, token):
@@ -412,7 +445,7 @@ def drop_level(top, token):
     words = token.split(maxsplit=1)
     if not words or not any(level.startswith(words[0].lower()) for level in LEVELS):
         return token, None
-    if classify(top, words[0])[0] is not None:
+    if classify(top, token)[0] is not None or classify(top, words[0])[0] is not None:
         return token, None
     rest = words[1] if len(words) > 1 else ""
     return rest, f"ignored `{words[0]}`: pm-cr now sets the review depth from pm-risk"
@@ -420,9 +453,12 @@ def drop_level(top, token):
 
 def resolve(top, token):
     token, dropped = drop_level(top, token)
+    head = rev_parse(top, "HEAD^{commit}")
     out = {
         "status": "ok",
         "message": "",
+        "top": top,
+        "head": head,
         "target": {"kind": "none", "value": None},
         "base": None,
         "merge_base": None,
@@ -430,7 +466,7 @@ def resolve(top, token):
         "path": None,
         "untracked": [],
         "skipped": [],
-        "warnings": [],
+        "warnings": [dropped] if dropped else [],
     }
 
     def finish(status, message):
@@ -443,14 +479,10 @@ def resolve(top, token):
     if problem:
         return finish("bad-target", problem)
 
-    head = rev_parse(top, "HEAD^{commit}")
     if head is None:
         return finish("no-scope", "The repository has no commits yet, so there is no base.")
 
-    res = Resolver(top)
-    if dropped:
-        res.warnings.append(dropped)
-    out["warnings"] = res.warnings
+    res = Resolver(top, out["warnings"])
     if kind == "pr":
         number = PR_NUMBER.fullmatch(token)
         arg = number.group(1) if number else token
@@ -475,16 +507,26 @@ def resolve(top, token):
         if kind == "ref":
             oid = rev_parse(top, f"{token}^{{commit}}")
             if oid != head:
+                # A relative ref such as HEAD~1 moves once switched to.
                 local = has_ref(top, f"refs/heads/{token}")
-                command = f"git switch {token}" if local else f"git switch --detach {token}"
-                return finish(
-                    "not-checked-out",
+                command = f"git switch {token}" if local else f"git switch --detach {oid}"
+                message = (
                     f"{token} is not checked out here (HEAD is {head[:12]}, {token} is "
-                    f"{oid[:12]}); run `{command}`, then rerun.",
+                    f"{oid[:12]}); run `{command}`, then rerun"
                 )
-        pr, base_branch, _ = pr_view(top, None)
+                if os.path.lexists(token):
+                    message += f"; to review the path instead, pass ./{token}"
+                return finish("not-checked-out", message + ".")
+        pr, base_branch, err = pr_view(top, None)
+        # gh cannot look a PR up from a detached HEAD, which is no failure.
+        if err not in (None, NO_OPEN_PR) and not err.startswith("no pull requests found"):
+            if git(top, "symbolic-ref", "-q", "HEAD", check=False).returncode == 0:
+                res.warnings.append(
+                    f"could not check for an open PR ({err}); using the default branch"
+                )
         out["pr"] = pr
 
+    last_commit = False
     if pr:
         rec = res.pr_record(pr, base_branch)
         why = res.settle(rec)
@@ -496,32 +538,28 @@ def resolve(top, token):
                 f"Could not use {rec['label']}, the base of PR #{pr['number']}: {why}; "
                 "check network access, then rerun.",
             )
-        label = rec["label"]
     else:
-        rec = res.default_base()
-        if rec:
-            label = rec["label"]
-        elif local := res.local_head():
-            rec = {"base": local[0], "merge_base": local[1], "stale": False}
-            label = f"local {local[0]}"
-        elif parent := res.last_commit():
-            res.warnings.append("scope narrowed to the last commit: no base branch was found")
-            rec = {"base": "HEAD~1", "merge_base": parent, "stale": False}
-            label = "HEAD~1"
-        else:
+        rec = res.default_base() or res.local_head()
+        if rec is None:
+            rec = res.last_commit()
+            last_commit = rec is not None
+        if rec is None:
             # Never the empty tree: it would put every existing file in scope.
             return finish(
                 "no-scope",
                 "No base branch was found and HEAD has no parent commit, "
                 "so no scope could be resolved.",
             )
+    label = rec["label"]
     if rec["stale"]:
         res.warnings.append(f"base may be stale (fetch failed, using {rec['base']})")
         label += " (local copy)"
     out["base"], out["merge_base"] = rec["base"], rec["merge_base"]
 
-    out["untracked"], out["skipped"] = untracked_files(top, path)
     spec = [path] if path else []
+    out["untracked"], out["skipped"], unlisted = untracked_files(top, spec)
+    if unlisted:
+        res.warnings.append(f"{unlisted} more untracked files were not listed")
     changed = git(
         top, "--literal-pathspecs", "diff", "--name-only", "-z", rec["merge_base"], "--", *spec
     ).stdout
@@ -532,9 +570,9 @@ def resolve(top, token):
             f"Nothing to review: no changes{where} since the merge base with {label}, "
             "and no untracked files.",
         )
-    subject = f"PR #{pr['number']}" if pr else "this branch"
-    if label == "HEAD~1":
+    if last_commit:
         return finish("ok", f"Reviewing only the last commit{where}: no base branch was found.")
+    subject = f"PR #{pr['number']}" if pr else "this branch"
     return finish(
         "ok",
         f"Reviewing {subject}{where} from {rec['merge_base'][:12]}, its merge base with {label}.",
@@ -542,9 +580,11 @@ def resolve(top, token):
 
 
 def main():
+    global network_deadline
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--target", default="", help="a PR number or URL, a ref, or a path")
     args = parser.parse_args()
+    network_deadline = time.monotonic() + NETWORK_BUDGET
     try:
         top = git(os.getcwd(), "rev-parse", "--show-toplevel").stdout.strip()
         result = resolve(top, args.target)
