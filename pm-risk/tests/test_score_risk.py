@@ -244,6 +244,13 @@ def test_workflow_change_has_a_high_floor(repo):
         "action.yml",
         "Pipfile",
         "requirements/base.txt",
+        "services/api/requirements/base.txt",
+        ".npmrc",
+        ".claude/settings.json",
+        ".mcp.json",
+        ".gitmodules",
+        ".github/CODEOWNERS",
+        ".husky/pre-commit",
     ],
 )
 def test_deploy_and_dependency_spellings_are_high_stakes(repo, path):
@@ -256,6 +263,25 @@ def test_manifests_under_tests_are_not_high_stakes(repo):
     repo.write("tests/fixtures/package.json", 3)
     repo.commit()
     assert repo.score()["floor"] == "low"
+
+
+@pytest.mark.parametrize(
+    "path", [".github/actions/test/action.yml", ".github/scripts/run_test.sh", "e2e/package.json"]
+)
+def test_automation_and_real_packages_are_never_fixtures(repo, path):
+    repo.write(path, 3)
+    repo.commit()
+    out = repo.score()
+    assert out["floor"] == "high"
+    assert out["signals"]["test_files"] == 0
+
+
+@pytest.mark.parametrize("path", ["vendor/x/tests/test_x.py", ".github/scripts/run_test.sh"])
+def test_vendored_and_ci_files_are_not_test_changes(tested_repo, path):
+    tested_repo.write("src/feature.py", 100)
+    tested_repo.write(path, 5)
+    tested_repo.commit()
+    assert tested_repo.score()["signals"]["untested"] is True
 
 
 def test_lockfile_is_excluded_from_size_but_high_stakes(repo):
@@ -298,6 +324,16 @@ def test_instruction_file_edit_has_a_medium_floor(repo):
     assert repo.score()["floor"] == "medium"
 
 
+def test_renaming_an_instruction_file_names_it(repo):
+    repo.on_main(lambda: repo.write("CLAUDE.md", 3))
+    (repo.root / "docs").mkdir(exist_ok=True)
+    repo.git("mv", "CLAUDE.md", "docs/notes.md")
+    repo.commit()
+    out = repo.score()
+    assert out["signals"]["instruction_files"] == ["CLAUDE.md"]
+    assert out["floor_reason"] == "edits CLAUDE.md"
+
+
 def test_review_md_paths_come_from_the_base(repo):
     def rules():
         (repo.root / "REVIEW.md").write_text(
@@ -323,6 +359,19 @@ def test_review_md_paths_come_from_the_base(repo):
     hit = {"path": "src/auth/login.py", "rule": "src/auth/*", "source": "REVIEW.md"}
     assert hit in out["signals"]["high_stakes"]
     assert out["floor"] == "high"
+
+
+def test_review_md_takes_top_level_bullets_and_bare_directories(repo):
+    repo.on_main(
+        lambda: (repo.root / "REVIEW.md").write_text(
+            "## High-stakes paths\n\n- `src/auth`\n  - owned by `security-team`\n"
+        )
+    )
+    repo.write("src/auth/login.py", 3)
+    repo.commit()
+    out = repo.score()
+    assert out["signals"]["review_md_patterns"] == ["src/auth"]
+    assert out["signals"]["high_stakes"][0]["rule"] == "src/auth"
 
 
 @pytest.mark.parametrize("path", ["secrets/key.py", "app/secrets/key.py", "secrets/a/b/key.py"])
@@ -370,6 +419,21 @@ def test_scoring_leaves_the_real_index_alone(repo):
     assert repo.git("status", "--porcelain") == "?? src/new.py\n"
 
 
+def test_scoring_writes_no_objects(repo):
+    repo.write("src/new.py", 5000)
+    repo.write("src/app.py", 20)
+    before = repo.git("count-objects")
+    repo.score()
+    assert repo.git("count-objects") == before
+
+
+def test_a_shared_clone_can_be_scored(repo, tmp_path):
+    clone = Repo(tmp_path / "clone")
+    repo.git("clone", "-q", "--shared", "-b", "main", str(repo.root), str(clone.root))
+    clone.write("src/new.py", 7)
+    assert clone.score()["signals"]["lines"] == 7
+
+
 def test_head_scores_a_branch_without_checking_it_out(repo):
     repo.write(".github/workflows/ci.yml", 3)
     repo.commit()
@@ -389,6 +453,14 @@ def test_path_target_narrows_the_scope(repo):
     assert out["signals"]["high_stakes"] == []
 
 
+def test_path_target_is_a_prefix_of_whole_names(repo):
+    repo.write("src/feature.py", 5)
+    repo.write("src2/other.py", 9)
+    repo.commit()
+    assert repo.score("--path", "src")["signals"]["lines"] == 5
+    assert repo.score("--path", "src/feature.py")["signals"]["lines"] == 5
+
+
 def test_path_through_a_symlink_resolves(repo, tmp_path):
     alias = tmp_path / "alias"
     alias.symlink_to(repo.root)
@@ -403,7 +475,9 @@ def test_unreadable_untracked_file_is_skipped(repo):
     repo.write("src/secret.py", 5)
     (repo.root / "src/secret.py").chmod(0)
     try:
-        assert repo.score()["signals"]["files"] == 0
+        out = repo.score()
+        assert out["signals"]["files"] == 0
+        assert any(fact.startswith("not counted:") for fact in out["facts"])
     finally:
         (repo.root / "src/secret.py").chmod(0o644)
 
