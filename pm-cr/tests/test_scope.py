@@ -1,8 +1,10 @@
+import importlib.util
 import json
 import os
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -28,6 +30,7 @@ PR_URL = "https://github.com/acme/widget/pull/7"
 FAKE_GH = """
 import json
 import sys
+import time
 from pathlib import Path
 
 here = Path(__file__).resolve().parent
@@ -41,8 +44,11 @@ for arg in args:
     key.append(arg)
 reply = json.loads((here / "gh.json").read_text()).get(" ".join(key))
 if reply is None:
-    sys.stderr.write("no pull requests found for branch\\n")
+    reply = 'no pull requests found for branch "feature"'
+if isinstance(reply, str):
+    sys.stderr.write(reply + "\\n")
     sys.exit(1)
+time.sleep(reply.pop("sleep", 0))
 print(json.dumps(reply))
 """
 
@@ -189,6 +195,16 @@ class World:
 @pytest.fixture
 def world(tmp_path):
     return World(tmp_path)
+
+
+@pytest.fixture
+def scope(world, monkeypatch):
+    """The script as a module, running git and gh in the world's environment."""
+    spec = importlib.util.spec_from_file_location("scope", SCRIPT)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    monkeypatch.setattr(module, "ENV", world.env)
+    return module
 
 
 def published(world):
@@ -375,8 +391,9 @@ def test_depth_one_without_a_parent_deepens_to_the_last_commit(world):
     assert out["status"] == "ok"
     assert out["base"] == "HEAD~1"
     assert out["merge_base"] == parent
+    assert out["message"].startswith("Reviewing only the last commit")
     assert any("--deepen=1" in w for w in out["warnings"])
-    assert any("scope narrowed to the last commit" in w for w in out["warnings"])
+    assert not any("scope narrowed" in w for w in out["warnings"])
 
 
 def test_depth_one_that_cannot_deepen_reports_no_scope(world):
@@ -496,16 +513,32 @@ def test_ref_target_that_is_checked_out(world):
 
 
 @pytest.mark.parametrize(
-    ("ref", "command"), [("main", "git switch main"), ("v1", "git switch --detach v1")]
+    ("ref", "command"),
+    [("main", "git switch main"), ("v1", "git switch --detach {}"), ("HEAD~1", None)],
 )
 def test_ref_target_not_checked_out(world, ref, command):
     _, _, work, _ = published(world)
     work.git("tag", "v1", "main")
+    # A relative ref moves once switched to, so only its oid converges.
+    command = (command or "git switch --detach {}").format(work.rev(ref))
 
     out = work.scope(ref)
 
     assert out["status"] == "not-checked-out"
     assert f"`{command}`" in out["message"]
+    assert "./" not in out["message"]
+
+
+def test_ref_that_is_also_a_path_names_the_path_form(world):
+    _, _, work, _ = published(world)
+    (work.root / "main").mkdir()
+    (work.root / "main/new.py").write_text("x = 1\n")
+
+    out = work.scope("main")
+
+    assert out["status"] == "not-checked-out"
+    assert out["message"].endswith("; to review the path instead, pass ./main.")
+    assert work.scope("./main")["path"] == "main"
 
 
 @pytest.mark.parametrize("target", ["high", "XH", "med feature"])
@@ -519,6 +552,28 @@ def test_leftover_level_is_dropped(world, target):
     assert any("pm-risk" in w for w in out["warnings"])
 
 
+def test_a_path_whose_first_word_is_a_level_is_kept(world):
+    _, _, work, _ = published(world)
+    (work.root / "max docs").mkdir()
+    (work.root / "max docs/new.md").write_text("# new\n")
+
+    out = work.scope("max docs")
+
+    assert out["status"] == "ok"
+    assert out["path"] == "max docs"
+    assert out["warnings"] == []
+
+
+def test_a_dropped_level_is_reported_on_a_bad_target(world):
+    _, _, work, _ = published(world)
+
+    out = work.scope("high nonexistent")
+
+    assert out["status"] == "bad-target"
+    assert out["target"]["value"] == "nonexistent"
+    assert any("ignored `high`" in w for w in out["warnings"])
+
+
 def test_merged_pr_of_the_current_branch_is_ignored(world):
     _, _, work, m1 = published(world)
     world.gh_reply("pr view", {**pr_reply(work.head()), "state": "MERGED"})
@@ -528,6 +583,31 @@ def test_merged_pr_of_the_current_branch_is_ignored(world):
     assert out["status"] == "ok"
     assert out["pr"] is None
     assert out["merge_base"] == m1
+    assert out["warnings"] == []
+
+
+def test_failed_open_pr_lookup_is_a_warning(world):
+    _, _, work, m1 = published(world)
+    world.gh_reply("pr view", "HTTP 502: Bad Gateway")
+
+    out = work.scope()
+
+    assert out["status"] == "ok"
+    assert out["merge_base"] == m1
+    assert out["warnings"] == [
+        "could not check for an open PR (HTTP 502: Bad Gateway); using the default branch"
+    ]
+
+
+def test_detached_head_skips_the_open_pr_warning(world):
+    _, _, work, m1 = published(world)
+    work.git("switch", "-q", "--detach")
+    world.gh_reply("pr view", "could not determine current branch: not on any branch")
+
+    out = work.scope()
+
+    assert out["status"] == "ok"
+    assert out["warnings"] == []
 
 
 def test_bad_target(world):
@@ -615,6 +695,36 @@ def test_pr_base_matches_a_remote_in_any_url_form(world, url):
     assert out["merge_base"] == m1
 
 
+def test_pr_base_matches_a_remote_behind_an_ssh_alias(world):
+    bare, _, work, m1 = published(world)
+    work.publish_as("git@work-gh:acme/widget.git", bare)
+    world.gh_reply("pr view", pr_reply(work.head()))
+
+    out = work.scope()
+
+    assert out["status"] == "ok"
+    assert out["merge_base"] == m1
+    assert out["warnings"] == []
+
+
+def test_default_branch_lookup_tries_every_remote_url(world):
+    _, _, work, m1 = published(world)
+    alias = "git@work-gh:acme/widget.git"
+    work.git("remote", "set-url", "origin", alias)
+    work.alias(alias, "ssh://git@github.com/acme/widget.git")
+    work.git("remote", "set-head", "origin", "-d")
+    world.env["GIT_SSH_COMMAND"] = "false"
+    world.gh_reply("repo view " + GH_REPO, {"defaultBranchRef": {"name": "main"}})
+
+    out = work.scope()
+
+    assert out["status"] == "ok"
+    assert out["base"] == "origin/main"
+    assert out["merge_base"] == m1
+    repo_views = [c[2] for c in world.gh_calls() if c[:2] == ["repo", "view"]]
+    assert repo_views == ["https://work-gh/acme/widget", GH_REPO]
+
+
 def test_equal_merge_bases_either_serves(world):
     bare, _, work, m1 = published(world)
     work.git("remote", "add", "mirror", str(bare))
@@ -670,6 +780,71 @@ def test_local_head_when_every_candidate_is_dropped(world):
     assert out["base"] == "main"
     assert out["merge_base"] == m1
     assert any(w.startswith("skipped origin/main: git fetch") for w in out["warnings"])
+
+
+def test_a_hung_fetch_times_out_to_the_local_ref(world, scope, monkeypatch):
+    _, _, work, m1 = published(world)
+    work.git("config", "remote.origin.uploadpack", "sh -c 'sleep 5'")
+    monkeypatch.setattr(scope, "network_deadline", time.monotonic() + 1)
+
+    started = time.monotonic()
+    out = scope.resolve(work.git("rev-parse", "--show-toplevel"), "")
+
+    assert time.monotonic() - started < 4
+    assert out["status"] == "ok"
+    assert out["base"] == "origin/main"
+    assert out["merge_base"] == m1
+    assert "base may be stale (fetch failed, using origin/main)" in out["warnings"]
+
+
+def test_a_hung_gh_call_times_out(world, scope, monkeypatch):
+    world.gh_reply("repo view", {"sleep": 5})
+    monkeypatch.setattr(scope, "network_deadline", time.monotonic() + 1)
+
+    started = time.monotonic()
+    out, err = scope.gh(str(world.root), "repo", "view")
+
+    assert time.monotonic() - started < 4
+    assert out is None
+    assert err == "timed out after 1s"
+
+
+def test_a_spent_network_budget_runs_nothing(world, scope, monkeypatch):
+    _, _, work, _ = published(world)
+    monkeypatch.setattr(scope, "network_deadline", time.monotonic() - 1)
+
+    out, err = scope.gh(str(work.root), "repo", "view")
+    fetch = scope.git(str(work.root), "fetch", "origin", check=False, network=True)
+
+    assert out is None
+    assert err.startswith("timed out")
+    assert world.gh_calls() == []
+    assert fetch.returncode == 1
+    assert fetch.stderr.startswith("timed out")
+
+
+# Output
+
+
+def test_top_and_head_are_reported(world):
+    _, _, work, _ = published(world)
+    top = work.git("rev-parse", "--show-toplevel")
+
+    ok = work.scope()
+    bad = work.scope("no-such-thing")
+
+    assert (ok["top"], ok["head"]) == (top, work.head())
+    assert (bad["status"], bad["top"], bad["head"]) == ("bad-target", top, work.head())
+
+
+def test_head_is_null_without_commits(world):
+    repo = world.repo("empty")
+
+    out = repo.scope()
+
+    assert out["status"] == "no-scope"
+    assert out["top"] == repo.git("rev-parse", "--show-toplevel")
+    assert out["head"] is None
 
 
 # Scope
@@ -755,6 +930,30 @@ def test_untracked_symlink_binary_and_awkward_names(world, tmp_path):
         {"path": "blob.bin", "reason": "binary"},
         {"path": "line\nbreak.py", "reason": "name holds a control character"},
     ]
+
+
+def test_untracked_listing_is_capped(world):
+    _, _, work, _ = published(world)
+    for i in range(205):
+        (work.root / f"new{i:03}.txt").write_text("x\n")
+
+    out = work.scope()
+
+    assert len(out["untracked"]) == 200
+    assert out["untracked"][-1]["path"] == "new199.txt"
+    assert "5 more untracked files were not listed" in out["warnings"]
+
+
+def test_untracked_path_is_matched_literally(world):
+    _, _, work, _ = published(world)
+    for name in ("a*", "ab"):
+        (work.root / name).mkdir()
+        (work.root / name / "new.py").write_text("x = 1\n")
+
+    out = work.scope("a*")
+
+    assert out["path"] == "a*"
+    assert [u["path"] for u in out["untracked"]] == ["a*/new.py"]
 
 
 def test_binary_probe_reads_only_the_head(world):
