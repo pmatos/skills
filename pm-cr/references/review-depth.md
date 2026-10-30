@@ -71,14 +71,14 @@ single-pass review, not the full fan-out.
 
 Cap at **8 findings**, ranked by severity tier (`angles.md`).
 
-## high — `8 angles × 6 candidates → recall-biased verify → ≤10 findings`
+## high — `9 angles × 6 candidates → recall-biased verify → ≤10 findings`
 
 You are reviewing for **recall**: catch every real bug a careful reviewer
 would catch in one sitting. At this level, catching real bugs matters more
 than avoiding false positives — err on the side of surfacing.
 
-Same angle set and fan-out/fallback mechanics as **medium** (8 angles, up to
-6 candidates each), but verify uses the **recall-biased verify**
+Medium's angle set plus Angle F (9 angles, up to 6 candidates each), with
+the same fan-out/fallback mechanics, but verify uses the **recall-biased verify**
 (`angles.md`, "PLAUSIBLE by default") instead of the 3-state verify.
 
 Cap at **10 findings**, ranked by severity tier.

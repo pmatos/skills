@@ -2,9 +2,9 @@
 
 ## Reporting findings
 
-If the `ReportFindings` tool is available in this session, call it once with
-the findings ranked by severity tier (`angles.md`), respecting the cap for
-the review depth. Each entry carries:
+If the `ReportFindings` tool is available in this session, call it once,
+with `level` set to the review depth and with the findings ranked by
+severity tier (`angles.md`), respecting the depth's cap. Each entry carries:
 
 - `file`, `line`
 - `summary` — one sentence: the defect stated as fact, then the fix (see
@@ -53,7 +53,8 @@ Good: user.id throws on an expired session, because getUser() returns null
 ### Assessment
 
 After the findings, print a one-to-three-sentence assessment, except in
-the bare JSON array mode above: your overall
+the bare JSON array mode above. Open it with the `Depth:` line from Phase 2,
+then give your overall
 take on the change, such as its main risk area or whether it looks sound.
 At the low depth, one sentence. Do not summarize what the change does, because
 the author already knows. Do not count, list, or repeat the findings,

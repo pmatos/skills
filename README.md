@@ -176,8 +176,8 @@ What it does:
 - At medium and above, first builds a reviewer brief that every finder and verifier receives. The brief holds the author's stated intent (from the PR title and body and the commit subjects) and the rules in `CLAUDE.md`, `AGENTS.md` and `REVIEW.md`. When the diff edits one of those files, the base version applies.
 - **low**: a single hunk-only read pass, no subagents, capped at 4 findings.
 - **medium**: 8 parallel finder angles (3 correctness + Reuse/Simplification/Efficiency/Altitude/Conventions), up to 6 candidates each, then a 3-state verify pass (CONFIRMED/PLAUSIBLE/REFUTED) — capped at 8 findings, tuned for precision.
-- **high**: the same 8 angles, but a recall-biased verify pass ("PLAUSIBLE by default") — capped at 10 findings, tuned for recall.
-- **xhigh**: 11 parallel finder angles (adds a language-pitfall, a wrapper/proxy-correctness and a trust-boundary angle), up to 8 candidates each, recall-biased verify, plus a final gap-sweep pass — capped at 15 findings. With a subagent tool, finders and the sweep run at `xhigh` reasoning effort.
+- **high**: the same 8 angles plus the trust-boundary angle, with a recall-biased verify pass ("PLAUSIBLE by default") — capped at 10 findings, tuned for recall.
+- **xhigh**: 11 parallel finder angles (adds a language-pitfall and a wrapper/proxy-correctness angle), up to 8 candidates each, recall-biased verify, plus a final gap-sweep pass — capped at 15 findings. With a subagent tool, finders and the sweep run at `xhigh` reasoning effort.
 - Ranks findings security, then correctness, then performance, then cleanup. Findings are worded as plain statements with a fix and no hedges. A shared "never report" list drops praise, restatements of the change, "check that…" requests and bare requests for more tests.
 - At medium and above, may add one `scope` finding that suggests splitting a large or mixed change, and ends every review with a short overall assessment.
 - Falls back to a single inline pass through all angles for a depth when no native subagent tool is available, instead of fanning out.
