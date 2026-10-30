@@ -49,9 +49,10 @@ report its `message` and stop. Otherwise:
 Invoke the `pm-risk` skill with `--base '<base>'`, plus
 `--path '<top>/<path>'` for a path target. Map its merge risk to the
 depth: `low`, `medium`, and `high` keep their names, and `critical` becomes
-`xhigh`. State `Depth: <depth>` in one line, and never adjust it by hand.
-If pm-risk is not installed or gives no rating, review at `high` and say
-why.
+`xhigh`. State `Depth: <depth> (merge risk <risk>)` in one line, adding
+the floor reason when the floor raised the risk, and never adjust it by
+hand. If pm-risk is not installed or gives no rating, review at `high`
+and say why.
 
 ## Phase 3 — Review
 
@@ -76,16 +77,17 @@ has:
 Never hedge with words such as "maybe" or "consider": a PLAUSIBLE
 finding carries its uncertainty in `verdict` and its trigger.
 
-If the `ReportFindings` tool is available, call it once with the findings,
-or with an empty array, and do not also print them. Otherwise, if the
-caller asked for JSON, make the final message nothing but a JSON array of
-the findings. Otherwise print one line per finding, `path:line
+If the `ReportFindings` tool is available, call it once with `level` set
+to the depth and with the findings, or an empty array, and do not also
+print them. Otherwise, if the caller asked for JSON, make the final
+message nothing but a JSON array of the findings. Otherwise print one line per finding, `path:line
 [verdict] — the defect and the concrete failure`, with no `[verdict]` when
 no verify ran, or `(none)`. Never publish an artifact of the review.
 
-Then, except in JSON mode, give the assessment: your overall take on the
-change in one to three sentences, or one at the low depth, such as its
-main risk area or that it looks sound. Do not summarize the change or
+Then, except in JSON mode, give the assessment. Open it with the
+`Depth:` line, then give your overall take on the change in one to three
+sentences, or one at the low depth, such as its main risk area or that it
+looks sound. Do not summarize the change or
 count the findings. State every disclosure here: the scope's `message`
 and `warnings`, files not reviewed, edited review instructions, and a
 single-pass review.

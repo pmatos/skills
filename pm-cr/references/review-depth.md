@@ -4,7 +4,7 @@
 |---|---|---|---|---|---|
 | low | none, one hunk-only pass | — | none | no | 4 |
 | medium | A, B, C, Reuse, Simplification, Efficiency, Altitude, Conventions | 6 | 3-state | no | 8 |
-| high | the same 8 | 6 | recall-biased | no | 10 |
+| high | the same 8, plus F | 6 | recall-biased | no | 10 |
 | xhigh | A–F, plus the same 5 cleanup angles | 8 | recall-biased | yes | 15 |
 
 Medium and above build the **Reviewer brief** first and run the **Scope
