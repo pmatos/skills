@@ -1,7 +1,7 @@
 ---
 name: pm-cr
-description: This skill should be used when the user asks to "code review this", "review this PR", "review the diff", "review my changes", "review at high effort", "review with fixes", or wants the changed code reviewed for correctness bugs and reuse/simplification/efficiency/altitude/conventions cleanups at a given effort level (low/medium/high/xhigh/max/ultra), optionally applying fixes (--fix) or posting inline PR comments (--comment). Also triggered by the /pm-cr command.
-argument-hint: "[low|medium|high|xhigh|max|ultra] [--fix] [--comment] [<pr#>|<branch>|<path>]"
+description: This skill should be used when the user asks to "code review this", "review this PR", "review the diff", "review my changes", "review with fixes", or wants the changed code reviewed for correctness bugs and reuse/simplification/efficiency/altitude/conventions cleanups at a depth scored from the change's risk, optionally applying fixes (--fix) or posting inline PR comments (--comment). Also triggered by the /pm-cr command.
+argument-hint: "[--fix] [--comment] [<pr#>|<branch>|<path>]"
 user-invocable: true
 model: opus
 effort: high
@@ -22,11 +22,13 @@ allowed-tools:
 # Code Review
 
 Review the current diff, or a PR number/branch/path target, for correctness
-bugs and reuse/simplification/efficiency/altitude/conventions cleanups at a
-given effort level. Low and medium favor fewer, high-confidence findings;
-high through max favor broader coverage and may include less-certain
-findings. This is a bug hunt *and* a cleanup pass, unlike `pm-simplify`
-(cleanup only) — run that instead if you only want the quality pass.
+bugs and reuse/simplification/efficiency/altitude/conventions cleanups. The
+`pm-risk` skill rates the change's merge risk, which sets the review depth.
+Small, low-stakes changes get a short
+precision pass. Large or high-stakes changes get a broad fan-out that may
+include less-certain findings. This is a bug hunt *and* a cleanup pass,
+unlike `pm-simplify` (cleanup only) — run that instead if you only want the
+quality pass.
 
 ## Task
 
@@ -36,30 +38,17 @@ $ARGUMENTS
 
 From the task arguments above, extract:
 
-- **Flags**: `--fix`, `--comment`, `--post`, `--no-post` (order-independent,
-  can appear anywhere in the arguments).
-- **Effort level**: if the first remaining token case-insensitively matches
-  (or is an unambiguous prefix of) `low`, `medium`, `high`, `xhigh`, `max`,
-  or `ultra`, treat it as the explicit level and consume it. Otherwise no
-  explicit level was given — resolve it per **Effort persistence** in
-  `references/output-and-flags.md`.
+- **Flags**: `--fix` and `--comment` (order-independent, can appear
+  anywhere in the arguments).
 - **Target**: whatever tokens remain (a PR number, branch name, or file
   path). Empty if none.
 
-A token that isn't consumed as a flag or as a valid effort level is never
-discarded — it stays part of the Target. Common branch names (`main`,
-`develop`, `staging`, `master`) are targets, not efforts. If no level was
-consumed and the first remaining token is a near-miss for one (short,
-alphabetic, no path separators, no digits), note in one line that you're
-reading it as the target rather than an effort level, list the valid levels,
-then resolve the level per **Effort persistence** in
-`references/output-and-flags.md`.
-
-A token consumed as a level is never also a target: `/pm-cr high` reviews
-the current diff, not a branch named `high` — type the level first to reach
-one (`/pm-cr medium high`). If a level (or an unambiguous prefix of one) was
-consumed, the Target is empty, and Phase 1 finds that token names an
-existing ref or path, add one line saying so alongside the level line.
+There is no depth argument, because Phase 2 scores the depth. Earlier
+versions took a level first. A leading `low`, `medium`, `high`, `xhigh`,
+`max`, or `ultra`, or a prefix of one, is a leftover habit when both `git
+rev-parse --verify -q <token>` and `test -e <token>` fail. Drop it, and say
+in one line that the depth is now scored from the change. Do the
+same for `--post` and `--no-post`, which only applied to `ultra`.
 
 ## Phase 1 — Gather the diff
 
@@ -97,7 +86,7 @@ Take the first rule that produces a record.
 **1a. The PR's own base — wins outright.** Run `gh pr view --json
 url,baseRefName,headRefOid,title,body` for the current branch, or for the PR
 parsed as the target in Phase 0 (`headRefOid` serves the checkout check
-above, and `title`/`body` feed the reviewer brief in Phase 2).
+above, and `title`/`body` feed the reviewer brief in Phase 3).
 `baseRefName` is only a branch name, so take the base *repository* from
 `url`, which is always `https://<host>/<owner>/<repo>/pull/<n>` in the base
 repo, never in the fork. Parse `(host, owner, repo)` from it and keep the
@@ -285,9 +274,24 @@ could not read as not reviewed in the report.
 | `--depth 1`, HEAD has no parent | 1d | none | deepen, retry, else report no scope |
 | `--depth 1` clone of the branch, fetch OK but no merge base | Step 3 retry | same record | `git fetch --unshallow`, retry `<oid>...HEAD` |
 
-## Phase 2 — Run the review at the resolved level
+## Phase 2 — Score the depth
 
-Look up the resolved effort level in `references/effort-levels.md` and
+Invoke the `pm-risk` skill with `--base '<base>'`, plus `--path '<path>'`
+for a path target. `<base>` is what Phase 1 diffed against: the record's
+`oid`, its `local_ref` after a failed fetch, the local branch from rule 1c,
+or `HEAD~1` from Step 4. Without `--head`, pm-risk uses the working tree
+against the merge base, untracked files included, which is the scope that
+Phase 1 resolved. It judges from the diff and PR text already loaded.
+
+Map the merge risk to the depth: `low`, `medium`, and `high` keep their
+names, and `critical` becomes `xhigh`. State `Depth: <depth> (merge risk
+<risk>)` in one line, adding the floor reason when the floor raised the
+risk, and never adjust it by hand. If pm-risk is not installed or fails,
+review at `high` and say why.
+
+## Phase 3 — Run the review at the scored depth
+
+Look up the level in `references/review-depth.md` and
 follow that level's procedure exactly — it specifies which finder angles to
 run (defined in `references/angles.md`), how many candidates each may
 surface, which verify pass (if any) to run, whether a gap-sweep phase
@@ -298,19 +302,17 @@ brief** first and run the **Scope check** last, both in `angles.md`.
 |-------|--------|-------------------|--------|-------|-----|
 | low | hunk-visible only, no angle fan-out | — | none | no | 4 |
 | medium | 8 (A, B, C + Reuse, Simplification, Efficiency, Altitude, Conventions) | 6 | 3-state | no | 8 |
-| high | same 8 | 6 | recall-biased | no | 10 |
-| xhigh / max | 11 (A–F + Reuse, Simplification, Efficiency, Altitude, Conventions) | 8 | recall-biased | yes | 15 |
-| ultra | no local equivalent — falls back to max, see `effort-levels.md` | | | | |
+| high | 9 (the same 8 + F) | 6 | recall-biased | no | 10 |
+| xhigh | 11 (A–F + Reuse, Simplification, Efficiency, Altitude, Conventions) | 8 | recall-biased | yes | 15 |
 
 The scope finding never counts toward the cap.
 
-## Phase 3 — Report (and apply flags)
+## Phase 4 — Report (and apply flags)
 
 Report findings per the output contract in `references/output-and-flags.md`.
 If `--comment` was passed, post the findings per that file's `--comment`
 section before applying any fix. If `--fix` was passed, apply the fixes per
-its `--fix` section. If `--post` or `--no-post` was
-passed, handle it per that file's section (it only matters for `ultra`).
+its `--fix` section.
 
 ## Constraints
 
@@ -339,12 +341,10 @@ skill can't reach:
 - Per-model prompt/routing tuning (the built-in command runs different
   wording and finder budgets for specific model families).
 - Diff-size-adaptive subagent fleet sizing.
-- Cross-session persistence of the last-used effort level (this skill's
-  persistence is conversation-scoped only — see `output-and-flags.md`).
 - Internal telemetry/UI hooks and automatic chaining into other built-in
   commands after the review completes.
-- The `ultra` cloud multi-agent review itself (no cloud access from a
-  portable skill) — falls back to `max` locally instead.
+- The `ultra` cloud multi-agent review (no cloud access from a portable
+  skill).
 
 Deliberate divergences from `/code-review`, most drawn from Mozilla's
 bugbug review agent and from the Claude Code Code Review service:
@@ -354,21 +354,23 @@ bugbug review agent and from the Claude Code Code Review service:
 - Instruction files include `REVIEW.md`, which local `/code-review` does not
   read. A diff that edits an instruction file is judged by the base version.
 - A security tier above correctness, trust-boundary checks in Angle A, and a
-  dedicated Angle F at xhigh/max.
+  dedicated Angle F from high up.
 - An optional `scope` finding that suggests splitting a large or mixed
   change, and a short overall assessment after the findings.
 - Declarative wording with no hedges. Uncertainty lives in `verdict`.
+- No level argument. The `pm-risk` skill rates the change's merge risk,
+  which sets the depth. The old `max` level differed from `xhigh`
+  only in finder effort, so the two are merged into `xhigh`.
 - The skill runs on the latest Opus (`model: opus`) at `high` reasoning
   effort. The frontmatter overrides the session's model and effort for the
   skill's turn, even when the session runs a newer model or a higher
-  effort. With a subagent tool, `max` differs from `xhigh` by running its
-  finders at `max` reasoning effort. Without one, the whole review runs at
-  `high`, so the two levels match.
+  effort. With a subagent tool, xhigh finders run at `xhigh` reasoning
+  effort. Without one, the whole review runs at `high`.
 - `allowed-tools` pre-approves only commands that are harmless in every
   form. `git diff`, `log`, `show`, `blame`, and `fetch` are left to Claude
   Code's own read-only check and permission prompt, because some of their
   flags write files or run commands, and the skill reads untrusted text.
 - No `context: fork`. A forked skill starts without this conversation, so
-  it loses level persistence and the user's own account of the change. In
+  it loses the user's own account of the change. In
   the background it also loses `ReportFindings`, and its `--fix` edits fall
   outside checkpoints.

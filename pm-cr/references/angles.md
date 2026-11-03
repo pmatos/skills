@@ -1,6 +1,6 @@
 # Angle bank
 
-Shared finder angles, referenced by `../SKILL.md` and `effort-levels.md`.
+Shared finder angles, referenced by `../SKILL.md` and `review-depth.md`.
 Higher review levels use more of these angles per phase; all levels share the
 same angle *text* — only which ones run, and how many candidates each may
 surface, changes per level.
@@ -129,14 +129,14 @@ check whether the change breaks any call site: a new precondition, a changed
 return shape, a new exception, a timing/ordering dependency. Also check callees:
 does a parallel change in the same diff make a call unsafe?
 
-### Angle D — language-pitfall specialist (xhigh/max only)
+### Angle D — language-pitfall specialist (xhigh only)
 
 Scan for the classic pitfalls of the diff's language/framework — for example:
 JS falsy-zero, `==` coercion, closure-captured loop var; Python mutable default
 args, late-binding closures; Go nil-map write, range-var capture; SQL injection;
 timezone/DST drift; float equality. Flag any instance the diff introduces.
 
-### Angle E — wrapper/proxy correctness (xhigh/max only)
+### Angle E — wrapper/proxy correctness (xhigh only)
 
 When the diff adds or modifies a type that wraps another (cache, proxy,
 decorator, adapter): check that every method routes to the wrapped instance and
@@ -145,7 +145,7 @@ not back through a registry/session/global — e.g. a caching provider holding a
 `delegate.get(...)` will re-enter the cache or recurse. Also check that the
 wrapper forwards all the methods the callers actually use.
 
-### Angle F — trust-boundary tracer (xhigh/max only)
+### Angle F — trust-boundary tracer (high and xhigh)
 
 List every place where the diff lets outside input in: request handlers, CLI
 arguments, environment variables, files read, IPC, deserialized payloads,
@@ -258,7 +258,7 @@ of:
 
 Keep candidates where the vote is CONFIRMED or PLAUSIBLE. Drop REFUTED.
 
-## Verify — recall-biased (high, xhigh, and max levels)
+## Verify — recall-biased (high and xhigh levels)
 
 Same mechanics as the 3-state verify above, **Never report** filter
 included, but biased toward keeping:
@@ -277,7 +277,7 @@ quoted instruction-file rule backs.
 
 Keep CONFIRMED and PLAUSIBLE. Drop REFUTED.
 
-## Sweep for gaps (xhigh and max levels only)
+## Sweep for gaps (xhigh level only)
 
 Run one more finder pass — a fresh reviewer who has the brief and the
 verified/deduplicated list. Re-read the diff and enclosing functions looking

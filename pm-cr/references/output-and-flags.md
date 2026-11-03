@@ -2,9 +2,9 @@
 
 ## Reporting findings
 
-If the `ReportFindings` tool is available in this session, call it once with
-the findings ranked by severity tier (`angles.md`), respecting the cap for
-the effort level in use. Each entry carries:
+If the `ReportFindings` tool is available in this session, call it once,
+with `level` set to the review depth and with the findings ranked by
+severity tier (`angles.md`), respecting the depth's cap. Each entry carries:
 
 - `file`, `line`
 - `summary` — one sentence: the defect stated as fact, then the fix (see
@@ -30,7 +30,7 @@ array of objects with `file`, `line`, `summary`, `failure_scenario`,
 final message nothing but the array, because a caller may parse it as JSON,
 so skip the assessment there.
 
-At **low** effort specifically, if neither a structured-output context nor
+At the **low** depth specifically, if neither a structured-output context nor
 `ReportFindings` applies (e.g. a plain terminal session), output one line per
 finding instead: `path/to/file.ext:123 — what's wrong and the concrete
 failure`. Output `(none)` if nothing qualifies.
@@ -53,9 +53,10 @@ Good: user.id throws on an expired session, because getUser() returns null
 ### Assessment
 
 After the findings, print a one-to-three-sentence assessment, except in
-the bare JSON array mode above: your overall
+the bare JSON array mode above. Open it with the `Depth:` line from Phase 2,
+then give your overall
 take on the change, such as its main risk area or whether it looks sound.
-At low effort, one sentence. Do not summarize what the change does, because
+At the low depth, one sentence. Do not summarize what the change does, because
 the author already knows. Do not count, list, or repeat the findings,
 because `--comment` can withhold some of them. The assessment is not a
 finding, so printing it does not duplicate the `ReportFindings` call. Put
@@ -140,24 +141,3 @@ diff hunks (added, removed, or context lines). Angle A findings can land on
 lines outside every hunk; for those, don't retry the inline call — post the
 finding as a file-level or general PR comment, or include it in the printed
 findings, and say which.
-
-## `--post` / `--no-post`
-
-These only apply to the cloud `ultra` review (posting its findings to the PR
-as a single comment from the user's GitHub account) and have no meaning for
-a local review. If `--post` is typed alongside a local (non-`ultra`) run,
-note in one short line that it was ignored, and that `--comment` is the flag
-that posts local findings as inline PR comments.
-
-## Effort persistence
-
-If no level is given as an argument, reuse whatever level was last used for
-`/pm-cr` earlier in this same conversation; default to `medium` on the first
-invocation. Say which level you're using and why (explicit / reused /
-defaulted) in one short line.
-
-The built-in `/code-review` command persists the last-used level across
-sessions via Claude Code's internal storage. A portable skill has no
-equivalent storage to hook into, so this skill's persistence is
-conversation-scoped only — note this if the user seems to expect
-cross-session memory.

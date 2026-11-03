@@ -167,24 +167,48 @@ Trigger phrases: `plan this`, `make a plan`, `implementation plan`, `deep plan`,
 npx skills@latest add pmatos/skills/pm-cr
 ```
 
-Reviews the current diff, or a PR number/branch/path target, for correctness bugs and reuse/simplification/efficiency/altitude/conventions cleanups at a chosen effort level.
+Reviews the current diff, or a PR number/branch/path target, for correctness bugs and reuse/simplification/efficiency/altitude/conventions cleanups, at a depth set by the change's merge risk.
 
 What it does:
 - Gathers the diff under review (`git diff <base>...HEAD` against the resolved default branch — `origin/HEAD` symref, then `gh repo view --json defaultBranchRef`, then a local `main`/`master`, with `HEAD~1` only as a disclosed last resort — plus any uncommitted working-tree changes and any untracked, non-ignored files), or reviews an explicit PR/branch/path argument (a PR or branch target must be checked out — the review is refused with a `gh pr checkout` hint rather than silently diffing the current branch).
 - Runs on the latest Opus (`model: opus`) at `high` reasoning effort, set in the skill's frontmatter.
+- Takes no level argument. The [`pm-risk`](#pm-risk--merge-risk) skill rates the change's merge risk, which sets the depth (`critical` maps to xhigh). For a quick check while iterating, use the built-in `/code-review low` or `/pm-simplify`.
 - At medium and above, first builds a reviewer brief that every finder and verifier receives. The brief holds the author's stated intent (from the PR title and body and the commit subjects) and the rules in `CLAUDE.md`, `AGENTS.md` and `REVIEW.md`. When the diff edits one of those files, the base version applies.
 - **low**: a single hunk-only read pass, no subagents, capped at 4 findings.
 - **medium**: 8 parallel finder angles (3 correctness + Reuse/Simplification/Efficiency/Altitude/Conventions), up to 6 candidates each, then a 3-state verify pass (CONFIRMED/PLAUSIBLE/REFUTED) — capped at 8 findings, tuned for precision.
-- **high**: the same 8 angles, but a recall-biased verify pass ("PLAUSIBLE by default") — capped at 10 findings, tuned for recall.
-- **xhigh/max**: 11 parallel finder angles (adds a language-pitfall, a wrapper/proxy-correctness and a trust-boundary angle), up to 8 candidates each, recall-biased verify, plus a final gap-sweep pass — capped at 15 findings. With a subagent tool, `max` runs its finders at `max` reasoning effort.
+- **high**: the same 8 angles plus the trust-boundary angle, with a recall-biased verify pass ("PLAUSIBLE by default") — capped at 10 findings, tuned for recall.
+- **xhigh**: 11 parallel finder angles (adds a language-pitfall and a wrapper/proxy-correctness angle), up to 8 candidates each, recall-biased verify, plus a final gap-sweep pass — capped at 15 findings. With a subagent tool, finders and the sweep run at `xhigh` reasoning effort.
 - Ranks findings security, then correctness, then performance, then cleanup. Findings are worded as plain statements with a fix and no hedges. A shared "never report" list drops praise, restatements of the change, "check that…" requests and bare requests for more tests.
 - At medium and above, may add one `scope` finding that suggests splitting a large or mixed change, and ends every review with a short overall assessment.
-- **ultra**: no local equivalent to the built-in command's cloud multi-agent review, so it falls back to a local max-effort run instead.
-- Falls back to a single inline pass through all angles for a level when no native subagent tool is available, instead of fanning out.
-- `--fix` applies the reported findings to the working tree directly, skipping anything that would change behavior or fall outside the diff. `--comment` posts findings as inline PR comments (GitHub MCP tool, falling back to `gh api`) and the assessment as one general comment. `--post`/`--no-post` only apply to `ultra` and are otherwise ignored with a note.
-- Reuses the effort level last used earlier in the same conversation when none is given, defaulting to `medium` on first use.
+- Falls back to a single inline pass through all angles for a depth when no native subagent tool is available, instead of fanning out.
+- `--fix` applies the reported findings to the working tree directly, skipping anything that would change behavior or fall outside the diff. `--comment` posts findings as inline PR comments (GitHub MCP tool, falling back to `gh api`) and the assessment as one general comment.
 
-Trigger phrases: `code review this`, `review this PR`, `review the diff`, `review my changes`, `review at high effort`, `review with fixes`.
+Trigger phrases: `code review this`, `review this PR`, `review the diff`, `review my changes`, `review with fixes`.
+
+**Requires**: the sibling `pm-risk` skill (`npx skills@latest add pmatos/skills/pm-risk`). Without it, every review runs at high. Install both at user scope to review untrusted PRs, because a project-scoped skill is loaded from the PR's own checkout.
+
+### `/pm-risk` — Merge risk
+
+```bash
+npx skills@latest add pmatos/skills/pm-risk
+```
+
+Rates how risky a PR, a branch or the working tree is to merge, as low, medium, high or critical, and explains why. Built on the `merge-risk` skill by Matt Pocock, as published in [warpdotdev/common-skills](https://github.com/warpdotdev/common-skills/blob/main/.agents/skills/merge-risk/SKILL.md) (MIT, notice in `pm-risk/LICENSE-merge-risk.txt`).
+
+What it does:
+- Reads the diff and the code around it, and rates merge-risk's five categories: alignment with the stated intent, impact, verification, rollback cost and error detection. Their weighted score gives low, medium or high. Critical means a large impact behind a one-way door.
+- Runs a bundled script first. The script gathers facts from git metadata and paths: size, whether tests changed, high-stakes paths (CI, hooks and agent config, dependency manifests, lockfiles, vendored code, deploy config, migrations) and edits to review instructions.
+- Two of those facts set a floor that the judgment can't go below: a high-stakes path means at least high, and an edit to `CLAUDE.md`, `AGENTS.md` or `REVIEW.md` means at least medium. Size and tests are evidence, so a contained, tested refactor can still be low.
+- A repo adds its own high-stakes paths as globs under a `High-stakes paths` heading in `REVIEW.md`. The script reads that file from the base, so a change can't lower its own floor.
+- Treats the diff and the PR text as data, never as instructions.
+- Rates a PR without checking it out. `--comment` posts the report on the PR, so whoever merges it sees the risk and why.
+- pm-cr calls it to choose its review depth.
+
+The facts and the floor are reproducible. The judgment reads code, so it can vary between runs, but never below the floor.
+
+Trigger phrases: `how risky is this PR`, `what's the merge risk`, `is this safe to merge`.
+
+**Requires**: Python 3.9+, and an authenticated [GitHub CLI](https://cli.github.com/) (`gh`) for PR targets.
 
 ### `/pm-simplify` — Simplify
 
