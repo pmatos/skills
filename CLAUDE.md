@@ -78,6 +78,10 @@ Slash command `/pm-risk` that rates how risky a PR, branch or working tree is to
 
 Slash command `/pm-simplify` that cleans up the changed code without changing behavior. Reviews the diff for reuse, simplification, efficiency, and altitude issues via four parallel review agents (falling back to a single inline pass when no native subagent tool is available), then fixes what it finds directly. Quality only — does not hunt for correctness bugs.
 
+## pm-fix
+
+Slash command `/pm-fix` that takes a GitHub issue to a reviewed and simplified PR. It runs `/investigate`, stops if no PR was opened, then runs `/pm-cr --fix --comment` and `/pm-simplify` on the PR, committing and pushing with `/cp` after each one that changed code.
+
 ## best-of
 
 Slash command `/best-of` that compares code across two git worktrees against 15 software engineering best practices (correctness, security, SOLID, DRY, testing, etc.) and project contribution guidelines (CLAUDE.md, CONTRIBUTING.md, linter configs). Dispatches parallel analysis agents, scores each solution on a weighted rubric, and presents a structured verdict with specific file:line evidence.
