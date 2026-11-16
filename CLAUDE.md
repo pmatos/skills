@@ -80,7 +80,7 @@ Slash command `/pm-simplify` that cleans up the changed code without changing be
 
 ## pm-fix
 
-Slash command `/pm-fix` that takes a GitHub issue to a reviewed and simplified PR. It runs `/investigate`, stops if no PR was opened, then runs `/pm-cr --fix --comment` and `/pm-simplify` on the PR, committing and pushing with `/cp` after each one that changed code.
+Slash command `/pm-fix` that takes a GitHub issue to a reviewed PR. It runs `/investigate` (or resumes from an open PR for the issue), stops if no PR was opened, then runs `/pm-cr --fix --comment` on the PR, commits and pushes any fixes with `/cp`, and waits for the PR's checks. It skips `/pm-simplify` because pm-cr already covers its cleanup angles.
 
 ## best-of
 
