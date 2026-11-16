@@ -1,0 +1,9 @@
+{
+  "kind": "git-snapshot",
+  "source": "~/dev/modular",
+  "fix": "de18e62d75",
+  "hidden_paths": [
+    "mojo/stdlib/test/collections/test_counter.mojo"
+  ],
+  "setup": "../_modular/setup.sh"
+}

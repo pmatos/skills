@@ -1,0 +1,9 @@
+{
+  "kind": "git-snapshot",
+  "source": "~/dev/modular",
+  "fix": "c9d5048575",
+  "hidden_paths": [
+    "mojo/stdlib/test/python/test_ownership.mojo"
+  ],
+  "setup": "../_modular/setup.sh"
+}
