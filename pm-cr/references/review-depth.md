@@ -2,14 +2,30 @@
 
 | Depth | Finder angles | Candidates each | Verify | Sweep | Cap (bugs, cleanup) |
 |---|---|---|---|---|---|
+| low | none, one hunk-only pass | — | none | no | 4 in total |
 | medium | A, B, C, Conventions, pm-simplify | 6 | 3-state | no | 8 each |
 | high | the same, plus F | 6 | recall-biased | no | 10 each |
 | xhigh | A–F, Conventions, pm-simplify | 8 | recall-biased | yes | 15 each |
 
-Build the **Reviewer brief** first and run the **Scope check** last
-(`angles.md`).
+Medium and above build the **Reviewer brief** first and run the **Scope
+check** last (`angles.md`).
 
-## Procedure
+## low
+
+Use only what Phase 1 loaded, with no subagents, no pm-simplify, and no `REVIEW.md` rules. When the diff changes
+anything besides tests, skip test and fixture hunks (`test/`, `tests/`,
+`spec/`, `__tests__/`, `fixtures/`, `testdata/`, `*_test.*`, `*.test.*`).
+
+Flag only runtime-correctness bugs visible from the hunk alone: an inverted
+condition, an off-by-one, a null deref where adjacent lines show the value
+can be absent, a removed guard, a falsy-zero check, a missing `await`, a
+wrong-variable copy-paste, a swallowed error, or untrusted input reaching a
+shell, SQL, or HTML sink. Also flag a duplicate of a helper visible in the
+diff context, and dead code that the diff leaves behind. Report a finding
+only when you are at least 80% sure, and drop the † items of **Never
+report** unchecked.
+
+## Medium and above
 
 Run every finder, verifier, and sweep as a fresh `Plan` subagent, which has
 no Edit or Write tool but still has Bash, and never as a fork. Pass
