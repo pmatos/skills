@@ -1,0 +1,20 @@
+--- a/shipquote/quote.py
++++ b/shipquote/quote.py
+@@ -18,5 +18,5 @@
+         return Quote(len(parcels), 0)
+     if len(parcels) == 1:
+         return Quote(1, price_shipment(Shipment(parcels[0], destination)))
+-    shipments = consolidate(parcels, order)
++    shipments = consolidate(parcels, destination)
+     return Quote(len(shipments), sum(price_shipment(s) for s in shipments))
+--- a/shipquote/parcels.py
++++ b/shipquote/parcels.py
+@@ -42,6 +42,6 @@
+     return [Parcel(tuple(skus), total) for skus, total in bins]
+ 
+ 
+-def consolidate(parcels: list[Parcel], order: Order) -> list[Shipment]:
++def consolidate(parcels: list[Parcel], destination: Address) -> list[Shipment]:
+     """Group parcels into shipments for the carrier manifest."""
+-    return [Shipment(parcel, order.destination) for parcel in parcels]
++    return [Shipment(parcel, destination) for parcel in parcels]

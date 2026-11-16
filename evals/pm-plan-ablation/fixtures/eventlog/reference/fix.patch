@@ -1,0 +1,27 @@
+diff --git i/eventlog/windows.py w/eventlog/windows.py
+index 114d914..6742283 100644
+--- i/eventlog/windows.py
++++ w/eventlog/windows.py
+@@ -8,9 +8,12 @@ from eventlog.tz import local_midnight
+ class Window:
+     start: datetime
+     end: datetime
++    end_inclusive: bool = True
+ 
+     def contains(self, ts: datetime) -> bool:
+-        return self.start <= ts <= self.end
++        if self.end_inclusive:
++            return self.start <= ts <= self.end
++        return self.start <= ts < self.end
+ 
+     def duration(self) -> timedelta:
+         return self.end - self.start
+@@ -18,7 +21,7 @@ class Window:
+ 
+ def day_window(day: date, tz: timezone) -> Window:
+     start = local_midnight(day, tz)
+-    return Window(start, start + timedelta(days=1))
++    return Window(start, start + timedelta(days=1), end_inclusive=False)
+ 
+ 
+ def day_windows(first: date, last: date, tz: timezone) -> list[Window]:

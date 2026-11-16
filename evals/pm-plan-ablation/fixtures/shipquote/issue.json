@@ -1,0 +1,12 @@
+{
+  "number": 41,
+  "title": "Checkout overcharges shipping to Vancouver on bigger orders",
+  "body": "A customer in Vancouver complained that shipping on a 3-book order was $72.00. Our rate card says West Canada should be a lot cheaper than that, closer to $32.50.\n\nSteps:\n1. Cart: 3 x hardcover (900 g each), subtotal $54.\n2. Shipping address: Canada, postal code `v6b 1a1` (the customer typed it lowercase).\n3. Quote shows $72.00.\n\nWith just one book in the cart the quote looks right ($14.50). Same 3-book cart with the postal code typed as `V6B 1A1` also looks right. Support says they have seen a few of these for other Canadian addresses too, and once an order to `ca` (lowercase country) failed at checkout with an UnsupportedDestination error.\n\nExpected: the quote should not depend on how the customer capitalises or spaces their address.",
+  "labels": [
+    {
+      "name": "bug"
+    }
+  ],
+  "state": "OPEN",
+  "comments": []
+}
