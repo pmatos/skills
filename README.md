@@ -429,22 +429,23 @@ Trigger phrases: `deepen a module`, `find shallow modules`, `run an architecture
 npx skills@latest add pmatos/skills/vibe
 ```
 
-Solves an issue marked `epic` end to end under **ultracode** (multi-agent `Workflow` orchestration; type `/vibe 123 ultracode` to turn it on): triage every child issue against the current default branch, fix the real gaps in small gated PRs, keep the default branch green, report on a schedule, and hand the human only the decisions that are theirs.
+Triages the open children of an issue marked `epic`, fixes the ones that need work in parallel, and merges each fix.
 
 What it does:
-- Resolves the epic (the `epic` label, an `Epic` issue type or an `epic(...)` title) and its open children from the paginated sub-issues API, task lists and `Part of #N` lines, and reads the epic's gate criteria as the definition of done.
-- Runs a **read-only triage wave** per theme (`done` / `partial` / `open` / `needs-ruling`, with evidence; the orchestrator verifies before it closes anything), then fixes the implementable gaps with one issue per agent and one idea per PR, staged with a stop rule so nothing is forced. Each fix agent runs `/investigate` (issue to PR), then Claude Code's `/code-review high --fix --comment`, then waits for green.
-- Runs independent children **in parallel by default**, sized from the host's CPUs, load and memory (`--max-parallel` is a ceiling, default 8; `--serial` forces one), with a bound on READY-but-unmerged PRs. Timing-sensitive work runs in an exclusive **measurement window**: the orchestrator drains the other agents, measures on a quiet machine with merges held, then resumes.
-- Enforces merge discipline: the orchestrator merges one PR at a time, only on green required checks for the final head SHA (the PR's CI is the gate; nothing runs locally), rebases only a PR that has conflicts (handing non-trivial ones back to its agent), waits for the post-merge workflows before the next merge, and **nothing merges onto a red default branch except its fix**.
-- Never moves a gate threshold, exclusion rule, baseline, contract, language semantics or a release step without a human ruling; each question is a short decision memo, recorded in one rulings comment on the epic (with a list of what proceeded without a ruling, and why).
-- Reports from `gh` and CI, never from memory, on a session cron that **starts no work**; completion notices drive the loop so nothing sits idle.
-- Closes with a **read-only close-out audit** of every merged-but-open child. A child can be closed-as-measured under a decision rule you stated; an epic that is not fully met gets a gap list, not a closure.
+- Finds the epic's children from its sub-issues, recursively, and its task list, and reads the epic's gate criteria as the definition of done.
+- Runs a **read-only triage** of every open child against the current default branch: `done`, `partial`, `open` or `needs-ruling`, with evidence. It closes the children that are already done once their evidence is checked, and asks you about the ones that need a ruling.
+- Launches one agent per unblocked child that needs work, each in its own worktree, up to `--max-parallel` (default: the smaller of 8 and half the cores). Each agent runs `/pm-fix`: `/investigate` opens a PR, `/pm-cr --fix --comment` reviews it, and the run waits for CI.
+- Merges the PRs one at a time as they finish, each when every check on its head is green, rebasing with `/rebase-pr` only if it conflicts. It waits for the default branch's CI first, and **nothing merges onto a red default branch**. Children unblocked by a merge get their agents then.
+- Posts a short status report on a schedule (`--report-every`, default 1h). Reports come from `gh` and CI and start no work.
+- Ends with a **read-only close-out audit** against each child's criteria and the epic's gate criteria. A child that misses a criterion closes only under a decision rule you stated; an epic that is not fully met gets a gap list, not a closure. Re-running `/vibe` resumes where it stopped.
 
-Flags: `ultracode`, `--serial`, `--max-parallel N`, `--no-merge`, `--report-every 1h`.
+With `ultracode` in your message, triage and the audit run as multi-agent `Workflow` runs, and each `done` verdict gets a second agent that tries to refute it.
+
+Flags: `ultracode`, `--max-parallel N`, `--report-every 1h`.
 
 Trigger phrases: `vibe an epic`, `vibe #N`, `drive epic #N to done`, `solve the epic`, `work through the epic's sub-issues`.
 
-**Requires**: Claude Code (it relies on the `Workflow`, `CronCreate`, `SendMessage` and `ListAgents` tools; other harnesses are not supported), [`gh`](https://cli.github.com/) with write access, the sibling `investigate` and `rebase-pr` skills (install them too), a git repository whose CI is the merge gate. Multi-agent workflows need the word `ultracode` in your own message; without it the skill continues with `Agent` calls sized to the host.
+**Requires**: Claude Code (it uses the `Agent`, `CronCreate` and, under ultracode, `Workflow` tools), [`gh`](https://cli.github.com/) with write access, and the sibling `pm-fix` (with `investigate`, `pm-cr` and `cp`) and `rebase-pr` skills.
 
 ## License
 
