@@ -18,7 +18,8 @@ sweep. Give each subagent the brief and tell it not to modify anything.
 
 1. Launch every finder angle for the depth in one message. Give each the
    output shape: `file`, `line`, a one-line `summary`, a concrete
-   `failure_scenario`, and a `category`. Then invoke `pm-simplify --report`
+   `failure_scenario`, and a `category`, and tell them that cleanup belongs
+   to pm-simplify. Without waiting for them, invoke `pm-simplify --report`
    through the Skill tool for the cleanup angles. Its list is candidates
    like any finder's, not the end of the review, so keep going. Without
    pm-simplify, say in the assessment that cleanup was not reviewed.
