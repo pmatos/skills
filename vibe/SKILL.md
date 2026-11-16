@@ -21,7 +21,7 @@ question-free run is `pm-deepen`. This skill reports to a person and asks for ru
 ## Bundled resources
 
 - **`investigate` skill** (prerequisite): a fix agent runs `/investigate <N>` to take one
-  issue to an open PR (Step 4). `/code-review` and `/simplify` are Claude Code's own commands,
+  issue to an open PR (Step 4). `/code-review` is Claude Code's own command,
   run on that PR.
 - **`rebase-pr` skill** (prerequisite): only its `scripts/capture-lease.sh` and
   `scripts/safe-force-push.sh` are used (Step 5); its own quality-gate step is not, because
@@ -44,7 +44,7 @@ question-free run is `pm-deepen`. This skill reports to a person and asks for ru
   Without it, independent children run in parallel (Step 4).
 - `--max-parallel N`: ceiling on concurrent triage and fix agents (default 8); Step 4 sizes
   the actual count from the host.
-- `--no-merge`: every PR stops at "review and simplify fixes pushed, required checks green on
+- `--no-merge`: every PR stops at "review fixes pushed, required checks green on
   its final head" and is reported; nothing is merged and no brief says to merge.
   Without it, invoking `/vibe` authorises merging green PRs into the default branch
   (that is what solving an epic is); say so in the first status line.
@@ -224,7 +224,7 @@ single status comment per partial child from the returned evidence, reusing its 
      numbers in hand.
      The continued agent acts on the numbers: it writes the measurements document, applies
      the no-regression and stop rules (a regression is not forced: comment the numbers and
-     stop, or close its own PR), re-runs review and simplify if code changed, pushes the measurements document, waits for
+     stop, or close its own PR), re-runs the review if code changed, pushes the measurements document, waits for
      the required checks on the new final head (any push restarts them), and returns that SHA.
 
   Requests live in the run config, each with a state (pending, done or memo) and a window count, so a
@@ -242,9 +242,9 @@ single status comment per partial child from the returned evidence, reusing its 
   stages say `Part of #N`. The orchestrator closes every other child after verification
   (Step 9): an agent's "done" is a claim (rules table).
 - Each fix agent runs one pipeline per issue in its own worktree: `/investigate <N>` (issue
-  to open PR), `/code-review high --fix --comment`, `/simplify`, then waits for the required
+  to open PR), `/code-review high --fix --comment`, then waits for the required
   checks. Nothing is run locally to prove green: the PR's CI is the gate. Agents stop at
-  **ready**: review and simplify fixes pushed, required checks green on the final head. A
+  **ready**: review fixes pushed, required checks green on the final head. A
   result with a non-empty `needsMeasurement` is ready in that sense but not mergeable until
   the numbers are in; one returned before any PR exists has `pr` 0 and an empty `sha`, and
   there is nothing to verify only if it carries `needsRuling` or `needsMeasurement`; any
@@ -253,7 +253,7 @@ single status comment per partial child from the returned evidence, reusing its 
   (Step 5). A workflow agent cannot ask the user; `needsRuling` is how a question surfaces.
   `Agent`-tool subagents return prose, not a schema: ask for those fields in a fixed block at
   the end of the final report, parse it, and verify from `git` and `gh` anyway.
-- Review and simplify use Claude Code's own commands, run from the agent's worktree on the
+- The review uses Claude Code's own command, run from the agent's worktree on the
   PR branch. A command's output is one step, not the end of the agent's turn: the agent
   commits and pushes what it applied and keeps going.
 - Foreign PRs (not created by the run): evaluate with the evaluate-a-foreign-PR brief (its

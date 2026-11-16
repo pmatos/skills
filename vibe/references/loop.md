@@ -161,10 +161,10 @@ the timer remaining, else about 5 minutes) and re-check, rather than polling or 
 
 The gate is the PR's own CI; nothing is run locally to prove green. Derive the expected
 required workflows and checks from the repo's CI workflows and contributor docs. After the
-last push (the `/investigate` PR, then the review and simplify fixes), wait for every
+last push (the `/investigate` PR, then the review fixes), wait for every
 required check to complete successfully on the **final head SHA**. A missing, queued or
 running required check is not green; advisory checks are recorded separately. Any push
-restarts the checks, so finish review and simplify before waiting.
+restarts the checks, so finish the review before waiting.
 
 1. Checks CI runs only *after* merge: say so in the PR and propose a PR-time job; the
    orchestrator watches them on the merge commit before the next merge.
@@ -248,7 +248,7 @@ the revert command. When in doubt, ask.
 - A transcript with no write for an hour, no pending check and no PR comment is stalled:
   relaunch the workflow with `resumeFromRunId` after narrowing the prompt (only the longest
   unchanged prefix of calls is cached), or `TaskStop` it.
-- Agents that end right after a review or simplify output are common: resume a named agent
+- Agents that end right after a review output are common: resume a named agent
   with a message saying the task is not done and listing the remaining steps; if it ends
   again, replace it with narrower agents (one step each, structured result). Workflow agents
   cannot be messaged: narrow the prompt and relaunch with `resumeFromRunId`.

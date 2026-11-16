@@ -25,7 +25,7 @@ Rules that never bend:
 - Closing keywords (close, fix, resolve) next to an issue number close it on merge, even
   negated: your PR body says "Part of #<E>" for the epic, never a closing keyword, and
   "Fixes #N" for issue #N only when this PR completes it (the final stage), else "Part of #N".
-- Do not merge. Stop at READY: review and simplify fixes pushed, required checks green on
+- Do not merge. Stop at READY: review fixes pushed, required checks green on
   the final head SHA.
 
 Waiting: Agent-tool subagents wait in the FOREGROUND, in blocking calls (`timeout 600 gh pr checks <pr> --watch`, or an until loop on a log and an exit-code
@@ -36,7 +36,7 @@ use supported run_in_background wakeups with durable logs and exit-code files; t
 exception applies only when dispatched as a Workflow stage, not via the Agent tool. Leave durable state: push branches,
 comment on the PR or issue as you go.
 Do not end your turn until the task is complete or you hit a real blocker; the output of a
-review or simplify step is one step, keep going.
+review step is one step, keep going.
 ```
 
 ## Per-issue fix brief
@@ -54,8 +54,7 @@ Pipeline (sequential, in your own worktree; each command's output is one step, k
    design), open no PR and report it in needsRuling.
 2. Run /code-review high --fix --comment on the PR. Commit the applied fixes (explicit
    paths) and push.
-3. Run /simplify. Commit and push what it applied.
-4. Wait for the required checks on the FINAL head SHA; if one fails, fix, push and wait
+3. Wait for the required checks on the FINAL head SHA; if one fails, fix, push and wait
    again. Run nothing locally to prove green. Then return READY.
 
 Staging (large issues): each stage its own PR, ready before the next starts. Stop after any
@@ -136,7 +135,7 @@ rebase-pr's scripts only:
 <REBASE_PR>/scripts/capture-lease.sh <remote> <branch> before the rebase, and
 <REBASE_PR>/scripts/safe-force-push.sh <remote> <branch> <captured-sha> to publish (an
 explicit-SHA --force-with-lease; never plain --force). Resolve the conflicts keeping both
-sides' intent, then run /code-review high --fix --comment and /simplify as before, and wait
+sides' intent, then run /code-review high --fix --comment as before, and wait
 for the required checks on the new final head. Return READY with that SHA. If resolving
 needs a contract or semantics change, stop and report it in needsRuling. If either script
 exits nonzero, stop and report its exit code and output; do not retry or force.
