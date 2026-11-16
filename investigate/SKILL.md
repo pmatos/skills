@@ -40,7 +40,7 @@ relative to this SKILL.md. The examples below abbreviate the prefix as
 - **`references/issue-number-resolution.md`** — Phase 1 rules, edge cases, and
   the two invariants the resolver enforces.
 - **`references/scoped-instructions.md`** — Phase 3.2 precedence and merge rules,
-  and why the walk is deferred until the plan's paths are known.
+  and why the walk is deferred until the target paths are known.
 - **`references/git-safety.md`** — how the guard and push resolve the same
   remote and the repo's default branch, and why.
 
@@ -128,7 +128,7 @@ the *baseline* check set. Prefer a project's own canonical command sequence (fro
 Repos with per-package or nested instructions (e.g. `frontend/AGENTS.md`) apply
 extra or overriding rules to the files beneath them, so the top-level baseline
 alone can miss the checks and commit rules that actually govern a change. This
-step needs to know which files you will touch, so it runs **after Phase 4's plan
+step needs to know which files you will touch, so it runs **after Phase 4
 settles the target paths** (see 4A.4 / 4B.3), not now.
 
 Once those paths are known, collect the instruction files along their ancestors:
@@ -172,17 +172,13 @@ then exit documenting the blocker.
 **4A.3 Locate.** Use `grep`/`rg` for error strings, function names, and log
 messages from the repro, then read the suspects.
 
-**4A.4 Plan the fix.** Write a concise numbered plan, each step citing `file:line`
-targets and the change to make. Convert the plan to a task list with
-**TaskCreate** before executing — one task per reviewable unit.
-Once the target paths are settled, run Phase 3.2 (`scripts/collect-instructions.sh`)
-over them and fold the merged, closest-wins check set into the plan. List the
-test file path(s) alongside the production targets so 3.2 covers both.
+**4A.4 Scope the fix.** Settle which files the fix touches, test files
+included. If the scope calls for it, write an implementation plan first. Then run
+Phase 3.2 (`scripts/collect-instructions.sh`) over those paths and use the
+merged, closest-wins check set for validation.
 
 **4A.5 Fix (best effort).** Apply the changes under the test-first policy
-below, starting from the 4A.2 test. Mark each task `in_progress`
-when starting it and `completed` the moment it is done — do not batch updates. On
-hitting a wall (mismatched assumptions, scope explosion, blocked by another bug),
+below, starting from the 4A.2 test. On hitting a wall (mismatched assumptions, scope explosion, blocked by another bug),
 surface it: interactive — ask how to proceed; non-interactive — comment on the
 issue, leave the partial branch, exit. **Do not** open a half-finished PR.
 
@@ -202,8 +198,7 @@ model, API shape, UX, where the feature lives):
 
 - Interactive: stress-test the design with the user. Use `/grill-with-docs` (or
   the simpler `/grill-me`) if available; otherwise list the open questions and
-  resolve each via AskUserQuestion before writing code. Update the plan with the
-  answers.
+  resolve each via AskUserQuestion before writing code.
 - Non-interactive: if the design is ambiguous, fail with exactly this message
   (substitute the issue number):
   ```
@@ -213,13 +208,13 @@ model, API shape, UX, where the feature lives):
 If the request is concrete enough that no design choices remain open (e.g. "add a
 `--quiet` flag that suppresses progress output"), proceed without a design pass.
 
-**4B.3 Plan.** As in 4A.4 — concise `file:line` step list, including test file
-paths, converted to a TaskCreate task list before execution.
+**4B.3 Scope.** As in 4A.4: settle the target files, test files included, and
+write an implementation plan if the scope calls for it.
 
 **4B.4 Implement (best effort).** Follow the repo norms from 4B.1. Build testable
 behaviour under the test-first policy below, one failing test per behaviour.
-Mark tasks `in_progress`/`completed` as work progresses. Same blocker rules as 4A.5 — surface (interactive) or comment and
-exit (non-interactive); no half-finished PRs.
+Same blocker rules as 4A.5 — surface (interactive) or comment and exit
+(non-interactive); no half-finished PRs.
 
 **4B.5 Validate.** As in 4A.6 — run the merged check set (Phase 3.1 baseline plus
 3.2 scoped) in order; loop until green.
@@ -243,7 +238,8 @@ failing test, confirm it fails, then write the implementation.
   test until it fails.
 - **Non-interactive runs do not re-confirm seams.** `/tdd` asks the user to
   confirm the seams under test. With no user, the seam is the one the 4A.2
-  reproducer or the 4A.4/4B.3 plan already identified; treat it as pre-agreed.
+  reproducer or the 4A.4/4B.3 scoping already identified; treat it as
+  pre-agreed.
 
 **When test-first does not fit.** Skip it, and record the reason in the PR body
 (the test-plan line in Phase 6), when any of these hold:
