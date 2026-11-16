@@ -1,0 +1,12 @@
+{
+  "body": "### Bug description\n\n**Actual behavior**\n\nSIMD floating-point `__hash__` hashes the raw bit pattern, so `-0.0` and `0.0` hash differently even though they compare equal. A `Dict` therefore holds two entries whose keys are `==`:\n\n```mojo\ndef main() raises:\n    var d: Dict[Float64, String] = {}\n    d[Float64(0.0)] = \"zero\"\n    d[Float64(-0.0)] = \"negzero\"\n    print(Float64(0.0) == Float64(-0.0), len(d))\n```\n\n```text\nTrue 2\n```\n\n`True 1` is correct: the second assignment should have replaced the first entry's value.\n\n**Expected behavior**\n\nEqual keys hash equally, so `len(d)` is 1 and the stored value is `negzero`. The `Hashable` docstring states the contract that equal values must have equal hashes, and IEEE 754 defines `-0.0 == 0.0` as true, which Mojo implements correctly — the two are only inconsistent with each other.\n\n### Steps to reproduce\n\nSave the snippet above as `repro.mojo` and run `mojo run repro.mojo`.\n\nThe fix is the one CPython uses: normalize `-0.0` to `0.0` before hashing, so the sign of zero does not reach the bit pattern being hashed. This affects every float dtype, not just `Float64`.\n\nWorth noting that the consequence is not limited to a surprising `len()`. Once a `Dict` contains two keys that compare equal, lookups return whichever one hashes to the probed slot, so a caller can write `d[x]` and read back a value they never stored under the key they used.\n\n### System information\n\nReproduces at the current head of `main` built from source — `mojo --version` reports `Mojo 1.1.0.dev0` — on macOS (Apple Silicon). Platform-independent.\n",
+  "comments": [],
+  "labels": [
+    {
+      "name": "bug"
+    }
+  ],
+  "number": 202,
+  "state": "OPEN",
+  "title": "[BUG] hash(-0.0) != hash(0.0) for SIMD floats, so a Dict can hold two keys that compare equal"
+}

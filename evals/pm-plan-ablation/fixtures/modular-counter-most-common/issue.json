@@ -1,0 +1,12 @@
+{
+  "body": "### Bug description\n\n**Actual behavior**\n\n`Counter.most_common(n)` aborts the process when `n` exceeds the number of unique elements, with an internal `List` message that mentions neither `Counter` nor `most_common`:\n\n```text\nABORT: <...>/std/collections/list.mojo:<line>: You are calling List.shrink with a new_size bigger than the current size. ...\n```\n\n**Expected behavior**\n\nThe (at most `n`) most common elements. The docstring puts no bound on `n`, and Python's `collections.Counter.most_common` clamps, e.g. `Counter([1, 1, 2]).most_common(5)` returns `[(1, 2), (2, 1)]`.\n\n### Steps to reproduce\n\n```mojo\nfrom std.collections import Counter\n\ndef main() raises:\n    _ = Counter[Int](1, 1, 2).most_common(5)\n```\n\nSave as `counter_bug.mojo` and run `mojo counter_bug.mojo`.\n\nRoot cause: in `mojo/stdlib/std/collections/counter.mojo`, `most_common` calls `items.shrink(Int(n))` unconditionally, and `List.shrink` aborts when the new size exceeds the current length. Negative `n` also misbehaves (Python returns an empty list).\n\n### System information\n\nReproduces at the current head of `main` (built from source) on macOS (Apple Silicon). The bug is platform-independent.\n\nCC: @bgreni\n",
+  "comments": [],
+  "labels": [
+    {
+      "name": "bug"
+    }
+  ],
+  "number": 204,
+  "state": "OPEN",
+  "title": "[BUG] Counter.most_common(n) aborts when n exceeds the number of unique elements"
+}

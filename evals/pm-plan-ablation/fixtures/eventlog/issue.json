@@ -1,0 +1,10 @@
+{
+  "number": 87,
+  "title": "Daily activity report total is higher than the number of events",
+  "body": "Finance noticed that the monthly sum of the daily activity report (`daily_counts`) does not match the raw event count for the same period. For March it was 1,412 in the report vs 1,377 events in the store.\n\nIt seems to get worse on days when the nightly batch job runs; that job writes a burst of `batch.done` events at exactly 00:00:00 UTC. Days where the job was paused look fine.\n\nExpected: every event in the reporting range is counted on exactly one day, so the daily numbers add up to the number of events.\n\nPlease make sure the retention sweep keeps working as documented, ops relies on it.",
+  "labels": [{"name": "bug"}],
+  "state": "OPEN",
+  "comments": [
+    {"author": {"login": "ops-lead"}, "body": "We also run this report with the Lisbon offset in summer (UTC+1), if that matters."}
+  ]
+}

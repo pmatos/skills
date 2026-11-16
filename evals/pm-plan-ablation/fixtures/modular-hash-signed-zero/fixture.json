@@ -1,0 +1,10 @@
+{
+  "kind": "git-snapshot",
+  "source": "~/dev/modular",
+  "fix": "63390d96cf",
+  "hidden_paths": [
+    "mojo/stdlib/test/hashlib/test_hash.mojo",
+    "mojo/stdlib/test/collections/test_dict.mojo"
+  ],
+  "setup": "../_modular/setup.sh"
+}

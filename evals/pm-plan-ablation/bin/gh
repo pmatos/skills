@@ -1,0 +1,54 @@
+#!/usr/bin/env bash
+# Offline stand-in for gh. Serves one fixture issue and logs every write.
+# Env: EVAL_ISSUE_JSON (issue file), EVAL_GH_LOG (append-only call log).
+set -u
+
+log="${EVAL_GH_LOG:?EVAL_GH_LOG not set}"
+issue_json="${EVAL_ISSUE_JSON:?EVAL_ISSUE_JSON not set}"
+printf '%s\n' "$(jq -cn --args '$ARGS.positional' -- "$@")" >>"$log"
+
+issue_number="$(jq -r .number "$issue_json")"
+
+jq_filter() {
+  local filter=""
+  while (($#)); do
+    case "$1" in
+      -q | --jq)
+        filter="$2"
+        shift
+        ;;
+      --jq=*) filter="${1#--jq=}" ;;
+    esac
+    shift
+  done
+  printf '%s' "$filter"
+}
+
+case "${1-} ${2-}" in
+  "issue view")
+    n="${3#\#}"
+    if [[ "$n" != "$issue_number" ]]; then
+      echo "GraphQL: Could not resolve to an issue or pull request with the number of $n. (repository.issue)" >&2
+      exit 1
+    fi
+    f="$(jq_filter "$@")"
+    if [[ -n "$f" ]]; then jq -r "$f" "$issue_json"; else jq . "$issue_json"; fi
+    ;;
+  "issue comment")
+    echo "https://github.com/eval/fixture/issues/$issue_number#issuecomment-1"
+    ;;
+  "pr create")
+    echo "https://github.com/eval/fixture/pull/1"
+    ;;
+  "pr view" | "pr list")
+    echo "no pull requests found" >&2
+    exit 1
+    ;;
+  "auth status")
+    echo "github.com: logged in to github.com as eval-bot (fake)"
+    ;;
+  *)
+    echo "gh (eval stand-in): '$*' is not available offline" >&2
+    exit 1
+    ;;
+esac

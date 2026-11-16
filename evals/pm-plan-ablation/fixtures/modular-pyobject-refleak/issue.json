@@ -1,0 +1,12 @@
+{
+  "body": "### Bug description\n\n**Actual behavior**\n\nEvery positional argument passed to a Python call through `PythonObject` leaks exactly one CPython reference. Any Mojo loop calling into numpy/pandas/anything Python grows memory without bound:\n\n```mojo\nfrom std.python import Python\n\ndef main() raises:\n    var sys = Python.import_module(\"sys\")\n    var id_fn = Python.import_module(\"builtins\").id\n    var obj = Python.evaluate(\"object()\")\n    var before = Int(py=sys.getrefcount(obj))\n    for _ in range(10):\n        _ = id_fn(obj)\n    var after = Int(py=sys.getrefcount(obj))\n    print(\"before:\", before, \"after:\", after)\n```\n\nprints `before: 3 after: 14` — one leaked reference per call (the `getrefcount` call itself passes `obj` positionally, accounting for the eleventh). Keyword arguments are unaffected.\n\nThe same accounting error leaks references in `__setitem__` (both keys and the value), `__setattr__` (the value), and Python set literals built from Mojo values.\n\n**Expected behavior**\n\n`after` equals `before`: calls borrow their positional arguments, so the refcount must return to its prior value once each call completes.\n\n### Steps to reproduce\n\nSave the snippet above as `pyleak_bug.mojo` and run `mojo pyleak_bug.mojo`.\n\nRoot cause: in `mojo/stdlib/std/python/python_object.mojo`, `__call__` and `__setitem__` build argument tuples with `cpy.Py_NewRef(args[i].steal_data())`. `steal_data()` on a borrowed argument already yields an owned reference (via an increfing copy), and `Py_NewRef` adds a second; `PyTuple_SetItem` steals only one. Additionally, `PyObject_SetItem`, `PyObject_SetAttrString`, and `PySet_Add` do not steal references, yet are handed owned references that are never released.\n\n### System information\n\nReproduces at the current head of `main` (built from source) on macOS (Apple Silicon) with CPython 3.12. The bug is platform-independent.\n\nCC: @bgreni\n",
+  "comments": [],
+  "labels": [
+    {
+      "name": "bug"
+    }
+  ],
+  "number": 203,
+  "state": "OPEN",
+  "title": "[BUG] PythonObject calls leak one CPython reference per positional argument"
+}
