@@ -182,7 +182,7 @@ What it does:
 - Ranks findings security, then correctness, then performance, then cleanup. The cap applies to bugs and to cleanup separately, so a cleanup finding never pushes out a bug. Findings are worded as plain statements with a fix and no hedges. A shared "never report" list drops praise, restatements of the change, "check that…" requests and bare requests for more tests.
 - At medium and above, may add one `scope` finding that suggests splitting a large or mixed change, and ends every review with a short overall assessment.
 - Falls back to a single inline pass through all angles for a depth when no native subagent tool is available, instead of fanning out.
-- `--fix` applies the reported findings to the working tree directly, skipping anything that would change behavior or fall outside the diff. `--comment` posts findings as inline PR comments (GitHub MCP tool, falling back to `gh api`) and the assessment as one general comment.
+- `--fix` applies the reported findings to the working tree directly, skipping anything that would change behavior or fall outside the diff. `--comment` posts findings as inline PR comments (GitHub MCP tool, falling back to `gh api`), pm-risk's report as one comment, and the assessment as another.
 
 Differences from the built-in `/code-review`:
 - A reviewer brief, a shared never-report list, a security tier with trust-boundary checks, an optional `scope` finding and a closing assessment, most drawn from Mozilla's bugbug review agent and from the Claude Code Code Review service. Instruction files include `REVIEW.md`, read at the base version when the diff edits them.

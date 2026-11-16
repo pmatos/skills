@@ -21,7 +21,9 @@ trigger from its `failure_scenario`. GitHub accepts inline comments only on
 lines inside the PR's diff hunks, so a finding on any other line goes into
 the general comment.
 
-Then post one general comment with the assessment, the `scope` finding if
+Then post pm-risk's report from Phase 2, if there is one, as its own
+comment, the same way as the general comment below. Then post one general
+comment with the assessment, the `scope` finding if
 there is one, and the findings that could not go inline. Write it with the
 Write tool to a file from `mktemp`, outside the working tree, then run `gh
 pr comment <url> --body-file <file>`. Never use a heredoc. Leave out any risk that lives
