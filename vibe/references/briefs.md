@@ -63,7 +63,7 @@ stage where the next cannot be had without a regression; comment the measurement
 One stage per agent call under a Workflow (see the notes below); an Agent-tool agent
 may run several stages in sequence.
 
-Measuring: never run a timing-sensitive check yourself. Finish steps 1-4 first, then comment
+Measuring: never run a timing-sensitive check yourself. Finish steps 1-3 first, then comment
 the request on the PR, starting "vibe: measurement request" (what to measure, the protocol,
 the control set), and return READY with needsMeasurement carrying the same text; `checks`
 is the state at that sha, and the PR is not mergeable until the numbers are in. If you
