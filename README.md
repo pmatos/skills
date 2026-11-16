@@ -234,6 +234,23 @@ What it does:
 
 Trigger phrases: `simplify this`, `simplify the diff`, `clean up this code`, `clean up the changed code`, `reuse pass`, `simplification pass`, `efficiency pass`, `altitude pass`.
 
+### `/pm-fix` — Fix, Review and Simplify an Issue
+
+```bash
+npx skills@latest add pmatos/skills/pm-fix
+```
+
+Takes a GitHub issue to a reviewed and simplified PR in one run.
+
+What it does:
+- Runs `/investigate` to fix the issue and open a PR. Stops if no PR is opened.
+- Runs `/pm-cr --fix --comment` on the PR, then commits and pushes the review fixes with `/cp`.
+- Runs `/pm-simplify` on the PR, then commits and pushes its changes with `/cp`.
+
+Trigger phrases: `fix issue #N and review it`, `investigate, review and simplify`.
+
+**Requires**: the `investigate`, `pm-cr`, `pm-simplify` and `cp` skills, and [GitHub CLI](https://cli.github.com/) (`gh`) authenticated.
+
 ### `/best-of` — Code Comparison
 
 ```bash
