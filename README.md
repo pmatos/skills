@@ -167,19 +167,19 @@ Trigger phrases: `plan this`, `make a plan`, `implementation plan`, `deep plan`,
 npx skills@latest add pmatos/skills/pm-cr
 ```
 
-Reviews the current diff, or a PR number/branch/path target, for correctness bugs and reuse/simplification/efficiency/altitude/conventions cleanups, at a depth set by the change's merge risk.
+Reviews the current diff, or a PR number/branch/path target, for correctness bugs, conventions and cleanups, at a depth set by the change's merge risk. The cleanup angles come from pm-simplify.
 
 What it does:
 - Gathers the scope with a bundled script, `scripts/scope.py`. It finds the base (the PR's own base, else the default branch across every remote, else a local `main`/`master`, with `HEAD~1` only as a disclosed last resort) and adds uncommitted and untracked files. A PR or branch target must be checked out, or the review is refused with a `gh pr checkout` hint.
 - Runs on the latest Opus (`model: opus`) at `high` reasoning effort, set in the skill's frontmatter.
-- Takes no level argument. The [`pm-risk`](#pm-risk--merge-risk) skill rates the change's merge risk, which sets the depth (`critical` maps to xhigh). For a quick check while iterating, use the built-in `/code-review low` or `/pm-simplify`.
-- At medium and above, first builds a reviewer brief that every finder and verifier receives. The brief holds the author's stated intent (from the PR title and body and the commit subjects) and the rules in `CLAUDE.md`, `AGENTS.md` and `REVIEW.md`. When the diff edits one of those files, the base version applies.
-- **low**: a single hunk-only read pass, no subagents, capped at 4 findings.
-- **medium**: 8 parallel finder angles (3 correctness + Reuse/Simplification/Efficiency/Altitude/Conventions), up to 6 candidates each, then a 3-state verify pass (CONFIRMED/PLAUSIBLE/REFUTED) — capped at 8 findings, tuned for precision.
-- **high**: the same 8 angles plus the trust-boundary angle, with a recall-biased verify pass ("PLAUSIBLE by default") — capped at 10 findings, tuned for recall.
-- **xhigh**: 11 parallel finder angles (adds a language-pitfall and a wrapper/proxy-correctness angle), up to 8 candidates each, recall-biased verify, plus a final gap-sweep pass — capped at 15 findings. With a subagent tool, finders and the sweep run at `xhigh` reasoning effort.
-- Ranks findings security, then correctness, then performance, then cleanup. Findings are worded as plain statements with a fix and no hedges. A shared "never report" list drops praise, restatements of the change, "check that…" requests and bare requests for more tests.
-- At medium and above, may add one `scope` finding that suggests splitting a large or mixed change, and ends every review with a short overall assessment.
+- Takes no level argument. The [`pm-risk`](#pm-risk--merge-risk) skill rates the change's merge risk, which sets the depth: low and medium risk review at medium, and `critical` maps to xhigh. For a quick check while iterating, use the built-in `/code-review low`.
+- First builds a reviewer brief that every finder and verifier receives. The brief holds the author's stated intent (from the PR title and body and the commit subjects) and the rules in `CLAUDE.md`, `AGENTS.md` and `REVIEW.md`. When the diff edits one of those files, the base version applies.
+- Every depth runs `pm-simplify --report` for the Reuse, Simplification, Efficiency and Altitude angles. In that mode pm-simplify only reports, and pm-cr verifies its findings like any other.
+- **medium**: 4 parallel finder angles (3 correctness + Conventions) plus pm-simplify, up to 6 candidates each, then a 3-state verify pass (CONFIRMED/PLAUSIBLE/REFUTED) — capped at 8 findings, tuned for precision.
+- **high**: the same angles plus the trust-boundary angle, with a recall-biased verify pass ("PLAUSIBLE by default") — capped at 10 findings, tuned for recall.
+- **xhigh**: 7 parallel finder angles (adds a language-pitfall and a wrapper/proxy-correctness angle) plus pm-simplify, up to 8 candidates each, recall-biased verify, plus a final gap-sweep pass — capped at 15 findings. With a subagent tool, finders and the sweep run at `xhigh` reasoning effort.
+- Ranks findings security, then correctness, then performance, then cleanup. The cap applies to bugs and to cleanup separately, so a cleanup finding never pushes out a bug. Findings are worded as plain statements with a fix and no hedges. A shared "never report" list drops praise, restatements of the change, "check that…" requests and bare requests for more tests.
+- May add one `scope` finding that suggests splitting a large or mixed change, and ends every review with a short overall assessment.
 - Falls back to a single inline pass through all angles for a depth when no native subagent tool is available, instead of fanning out.
 - `--fix` applies the reported findings to the working tree directly, skipping anything that would change behavior or fall outside the diff. `--comment` posts findings as inline PR comments (GitHub MCP tool, falling back to `gh api`) and the assessment as one general comment.
 
@@ -193,7 +193,7 @@ Differences from the built-in `/code-review`:
 
 Trigger phrases: `code review this`, `review this PR`, `review the diff`, `review my changes`, `find bugs in my changes`, `review with fixes`.
 
-**Requires**: Python 3.9+, the [GitHub CLI](https://cli.github.com/) (`gh`) for PR targets, and the sibling `pm-risk` skill (`npx skills@latest add pmatos/skills/pm-risk`). Without pm-risk, every review runs at high. Install both at user scope to review untrusted PRs, because a project-scoped skill is loaded from the PR's own checkout.
+**Requires**: Python 3.9+, the [GitHub CLI](https://cli.github.com/) (`gh`) for PR targets, and the sibling `pm-risk` and `pm-simplify` skills (`npx skills@latest add pmatos/skills/pm-risk` and `npx skills@latest add pmatos/skills/pm-simplify`). Without pm-risk, every review runs at high. Without pm-simplify, the review skips cleanup and says so. Install both at user scope to review untrusted PRs, because a project-scoped skill is loaded from the PR's own checkout.
 
 ### `/pm-risk` — Merge risk
 
@@ -230,6 +230,7 @@ What it does:
 - Gathers the diff under review — the PR's base branch (or the remote's default branch) three-dot-diffed against `HEAD`, plus uncommitted working-tree changes and any untracked files (nothing gets staged) — or reviews an explicit PR/branch/path argument.
 - If a native subagent tool (the `Agent`/`Task` tool) is available, launches four parallel review agents — one per angle: **Reuse** (re-implemented functionality that already exists in the codebase), **Simplification** (redundant state, copy-paste, deep nesting, dead code), **Efficiency** (redundant computation/I/O, sequential independent work, closures that leak large captured scopes), and **Altitude** (special cases bolted onto shared infrastructure instead of a deeper fix).
 - Without a native subagent tool, works through all four angles inline in a single pass instead, and says so in its summary.
+- `--report` is for pm-cr: it reviews pm-cr's diff with read-only agents and returns the findings without editing anything.
 - Dedups overlapping findings and fixes each directly, skipping anything that would change behavior, reach outside the diff, or looks like a false positive — noting the skip rather than arguing with it.
 
 Trigger phrases: `simplify this`, `simplify the diff`, `clean up this code`, `clean up the changed code`, `reuse pass`, `simplification pass`, `efficiency pass`, `altitude pass`.

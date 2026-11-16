@@ -93,39 +93,7 @@ check that sibling endpoints have and this one lacks, a secret or token
 written to logs, errors, or telemetry, and a widened permission, CORS rule,
 or allowlist. In the finding, name the source, the path, and the sink.
 
-## Cleanup, altitude, and conventions angles
-
-### Reuse
-
-Flag new code that re-implements something the codebase already has — Grep
-shared/utility modules and files adjacent to the change, and name the existing
-helper to call instead.
-
-### Simplification
-
-Flag unnecessary complexity the diff adds: redundant or derivable state,
-copy-paste with slight variation, deep nesting, dead code left behind. Name
-the simpler form that does the same job.
-
-### Efficiency
-
-Flag wasted work the diff introduces: redundant computation or repeated I/O,
-independent operations run sequentially, blocking work added to startup or
-hot paths. Also flag long-lived objects built from closures or captured
-environments — they keep the entire enclosing scope alive for the object's
-lifetime (a memory leak when that scope holds large values); prefer a
-class/struct that copies only the fields it needs. Name the cheaper
-alternative. Use the `performance` category for a leak or for waste on a
-hot or startup path, and `efficiency` otherwise.
-
-### Altitude
-
-Check that each change is implemented at the right depth, not as a fragile
-bandaid. Special cases layered on shared infrastructure are a sign the fix
-isn't deep enough — prefer generalizing the underlying mechanism over adding
-special cases.
-
-### Conventions (CLAUDE.md / AGENTS.md / REVIEW.md)
+## Conventions angle
 
 Check the diff for clear violations of the rules in the brief's instruction
 files. Also check every `REVIEW.md` "always check" rule against the diff. Only flag a
