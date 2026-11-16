@@ -1,7 +1,7 @@
 ---
 name: pm-risk
 description: This skill should be used when the user asks "how risky is this PR", "what's the merge risk", "is this safe to merge", or wants a low/medium/high/critical merge-risk assessment of a PR, a branch, or the working tree, with the reasons behind it. Also triggered by the /pm-risk command.
-argument-hint: "[--comment] [<pr#>|<branch>] | --base <rev> [--head <rev>] [--path <path>]"
+argument-hint: "[--comment] [<pr#>|<branch>] | --base <rev> [--head <rev>] [--path <path>] [--comment --pr <url>]"
 metadata:
   credits: "Adapted from merge-risk by Matt Pocock (warpdotdev/common-skills, MIT). See LICENSE-merge-risk.txt."
 allowed-tools:
@@ -51,7 +51,7 @@ Score ⚠️ as 3, 👀 as 2, and ✅ as 1. Weight Impact and Verification by 2,
 
 ## 4. Report
 
-With `--base` given, print only the `Merge risk` line. Otherwise print:
+With `--base` given and no `--comment`, print only the `Merge risk` line. Otherwise print:
 
 ```text
 **Merge risk: <risk>**
@@ -60,4 +60,4 @@ With `--base` given, print only the `Merge risk` line. Otherwise print:
 - <each gap that raises the risk, with links to files as needed>
 ```
 
-List every category. When the floor raised the risk, end with `**Floor:** <floor>, because the change <floor_reason>`. With `--comment` and a PR target, also post the report: write it with the Write tool to a file from `mktemp`, run `gh pr comment <url> --body-file <file>`, and delete the file. Without a PR target, say that `--comment` was ignored. Details: `references/rules.md`.
+List every category. When the floor raised the risk, end with `**Floor:** <floor>, because the change <floor_reason>`. With `--comment` and a PR target, or `--pr <url>` next to `--base`, also post the report to that PR: write it with the Write tool to a file from `mktemp`, run `gh pr comment <url> --body-file <file>`, and delete the file. Without a PR target, say that `--comment` was ignored. Details: `references/rules.md`.

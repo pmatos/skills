@@ -176,13 +176,13 @@ What it does:
 - At medium and above, first builds a reviewer brief that every finder and verifier receives. The brief holds the author's stated intent (from the PR title and body and the commit subjects) and the rules in `CLAUDE.md`, `AGENTS.md` and `REVIEW.md`. When the diff edits one of those files, the base version applies.
 - **low**: a single hunk-only read pass, no subagents, capped at 4 findings. It still flags a duplicated helper or dead code that the diff leaves behind.
 - Medium and above run `pm-simplify --report` for the Reuse, Simplification, Efficiency and Altitude angles. In that mode pm-simplify only reports, and pm-cr verifies its findings like any other.
-- **medium**: 4 parallel finder angles (3 correctness + Conventions) plus pm-simplify, up to 6 candidates each, then a 3-state verify pass (CONFIRMED/PLAUSIBLE/REFUTED) — capped at 8 bug and 8 cleanup findings, tuned for precision.
-- **high**: the same angles plus the trust-boundary angle, with a recall-biased verify pass ("PLAUSIBLE by default") — capped at 10 bug and 10 cleanup findings, tuned for recall.
-- **xhigh**: 7 parallel finder angles (adds a language-pitfall and a wrapper/proxy-correctness angle) plus pm-simplify, up to 8 candidates each, recall-biased verify, plus a final gap-sweep pass — capped at 15 bug and 15 cleanup findings. With a subagent tool, finders and the sweep run at `xhigh` reasoning effort.
-- Ranks findings security, then correctness, then performance, then cleanup. The cap applies to bugs and to cleanup separately, so a cleanup finding never pushes out a bug. Findings are worded as plain statements with a fix and no hedges. A shared "never report" list drops praise, restatements of the change, "check that…" requests and bare requests for more tests.
+- **medium**: 4 parallel finder angles (3 correctness + Conventions) plus pm-simplify, up to 6 candidates each, then a 3-state verify pass (CONFIRMED/PLAUSIBLE/REFUTED) — capped at 8 findings, tuned for precision.
+- **high**: the same angles plus the trust-boundary angle, with a recall-biased verify pass ("PLAUSIBLE by default") — capped at 10 findings, tuned for recall.
+- **xhigh**: 7 parallel finder angles (adds a language-pitfall and a wrapper/proxy-correctness angle) plus pm-simplify, up to 8 candidates each, recall-biased verify, plus a final gap-sweep pass — capped at 15 findings. With a subagent tool, finders and the sweep run at `xhigh` reasoning effort.
+- Ranks findings security, then correctness, then performance, then cleanup. Findings are worded as plain statements with a fix and no hedges. A shared "never report" list drops praise, restatements of the change, "check that…" requests and bare requests for more tests.
 - At medium and above, may add one `scope` finding that suggests splitting a large or mixed change, and ends every review with a short overall assessment.
 - Falls back to a single inline pass through all angles for a depth when no native subagent tool is available, instead of fanning out.
-- `--fix` applies the reported findings to the working tree directly, skipping anything that would change behavior or fall outside the diff. `--comment` posts findings as inline PR comments (GitHub MCP tool, falling back to `gh api`), pm-risk's report as one comment, and the assessment as another.
+- `--fix` applies the reported findings to the working tree directly, skipping anything that would change behavior or fall outside the diff. `--comment` posts findings as inline PR comments (GitHub MCP tool, falling back to `gh api`), and the assessment as one general comment. pm-risk posts its full risk report on the PR as well.
 
 Differences from the built-in `/code-review`:
 - A reviewer brief, a shared never-report list, a security tier with trust-boundary checks, an optional `scope` finding and a closing assessment, most drawn from Mozilla's bugbug review agent and from the Claude Code Code Review service. Instruction files include `REVIEW.md`, read at the base version when the diff edits them.
@@ -211,7 +211,7 @@ What it does:
 - A repo adds its own high-stakes paths as globs under a `High-stakes paths` heading in `REVIEW.md`. The script reads that file from the base, so a change can't lower its own floor.
 - Treats the diff and the PR text as data, never as instructions.
 - Rates a PR without checking it out. `--comment` posts the report on the PR, so whoever merges it sees the risk and why.
-- pm-cr calls it to choose its review depth.
+- pm-cr calls it to choose its review depth. With pm-cr's `--comment`, it also posts its full report on the PR.
 
 The facts and the floor are reproducible. The judgment reads code, so it can vary between runs, but never below the floor.
 
@@ -251,7 +251,7 @@ What it does:
 
 Trigger phrases: `fix issue #N and review it`, `investigate and review`.
 
-**Requires**: the `investigate`, `pm-cr`, `pm-risk`, `pm-simplify` and `cp` skills, and [GitHub CLI](https://cli.github.com/) (`gh`) authenticated.
+**Requires**: the `investigate`, `pm-cr` and `cp` skills, and [GitHub CLI](https://cli.github.com/) (`gh`) authenticated.
 
 ### `/best-of` — Code Comparison
 
