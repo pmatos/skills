@@ -22,15 +22,17 @@ $ARGUMENTS
 diff and built a reviewer brief in this conversation. It is a flag, not a
 target. With it:
 
-- Skip Phase 0 and review the caller's diff.
-- Run each angle as a fresh `Plan` subagent on the model that the caller
-  uses for its finders, or in one pass without a subagent tool. Give it the
+- If this conversation holds no caller brief, stop and say so. Otherwise
+  skip Phase 0 and review the caller's diff.
+- Run each angle as a fresh `Plan` subagent with the model, effort, and
+  per-angle candidate limit that the caller uses for its finders, or in one
+  pass without a subagent tool. Give it the
   caller's brief in place of the diff, and tell it not to modify anything.
 - Skip Phase 2 and change nothing. Merge findings that share a mechanism
   into one, and return each with `file`, `line`, `summary`,
   `failure_scenario` (the concrete cost), and `category`: the angle's name
   in lower case, or `performance` for a leak or for waste on a hot or
-  startup path.
+  startup path. Say if the angles ran in one pass.
 - Then hand control back to the caller, whose run continues.
 
 ## Phase 0 — Gather the diff
