@@ -170,13 +170,11 @@ Non-interactive: comment on the issue describing what was tried and what failed,
 then exit documenting the blocker.
 
 **4A.3 Locate.** Use `grep`/`rg` for error strings, function names, and log
-messages from the repro, then read the suspects. For non-trivial bugs (multiple
-files, subtle root cause), delegate to `/pm-plan` with a focused prompt
-describing the bug, the repro, and the symptom.
+messages from the repro, then read the suspects.
 
 **4A.4 Plan the fix.** Write a concise numbered plan, each step citing `file:line`
-targets and the change to make (or use the `/pm-plan` output). Convert the plan to
-a task list with **TaskCreate** before executing — one task per reviewable unit.
+targets and the change to make. Convert the plan to a task list with
+**TaskCreate** before executing — one task per reviewable unit.
 Once the target paths are settled, run Phase 3.2 (`scripts/collect-instructions.sh`)
 over them and fold the merged, closest-wins check set into the plan. List the
 test file path(s) alongside the production targets so 3.2 covers both.
@@ -197,9 +195,7 @@ then proceed to Phase 5.
 
 **4B.1 Explore.** Map the parts of the codebase the feature touches. Read the
 relevant modules, study existing patterns (naming, layering, error handling, test
-style), and note the conventions to mirror. For non-trivial features (multiple
-modules, new abstractions, data-model changes), delegate to `/pm-plan` and treat
-its output as the master plan.
+style), and note the conventions to mirror.
 
 **4B.2 Resolve design questions.** For any genuinely ambiguous decision (data
 model, API shape, UX, where the feature lives):
@@ -213,15 +209,12 @@ model, API shape, UX, where the feature lives):
   ```
   investigate: feature request #<N> is ambiguous and cannot be designed non-interactively. Provide more details or run interactively.
   ```
-  `/pm-plan` answers its own questions headlessly, so a guess on one of these
-  decisions recorded in its `## Assumptions` section counts as ambiguous.
 
 If the request is concrete enough that no design choices remain open (e.g. "add a
 `--quiet` flag that suppresses progress output"), proceed without a design pass.
 
 **4B.3 Plan.** As in 4A.4 — concise `file:line` step list, including test file
-paths, converted to a TaskCreate task list before execution (or the `/pm-plan`
-output).
+paths, converted to a TaskCreate task list before execution.
 
 **4B.4 Implement (best effort).** Follow the repo norms from 4B.1. Build testable
 behaviour under the test-first policy below, one failing test per behaviour.
@@ -392,8 +385,6 @@ the PR number). Return the PR URL to the user.
 Use if available in the active session; otherwise fall back to the per-step
 alternative:
 
-- **`/pm-plan`** — deep, multi-phase planning for non-trivial bugs or features.
-  Fallback: write the plan directly with TaskCreate.
 - **`/grill-with-docs`** (or `/grill-me`) — interactive design stress-test for
   ambiguous feature decisions. Fallback: a short AskUserQuestion-driven design
   pass before implementation.
