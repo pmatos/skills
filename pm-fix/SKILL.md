@@ -12,15 +12,18 @@ Skill tool, in order, without stopping between steps.
 
 ## Steps
 
-1. Run `/investigate $ARGUMENTS`. If it ends without opening a PR, report why
-   and stop. Otherwise note the PR number.
+1. If an open PR already closes this issue, check it out with `gh pr checkout
+   <PR>` and go to step 2.
+   Otherwise run `/investigate $ARGUMENTS`. If it ends without opening a PR,
+   report why and stop. Otherwise note the PR number.
 2. Run `/pm-cr --fix --comment <PR>`.
 3. If pm-cr applied fixes, re-run the checks that investigate ran. Then run
    `/cp` with a commit message that says the commit applies review fixes.
 4. Run `/pm-simplify <PR>`.
 5. If pm-simplify changed code, re-run those checks and run `/cp` again.
-6. Report the PR URL, what pm-cr found and fixed or skipped, and what
-   pm-simplify changed.
+6. Wait for the PR's checks with `gh pr checks <PR> --watch`.
+7. Report the PR URL, the state of its checks, what pm-cr found and fixed or
+   skipped, and what pm-simplify changed.
 
 A failed step stops the run. Report the step that failed and leave the branch
 as it is.

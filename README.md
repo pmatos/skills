@@ -243,9 +243,10 @@ npx skills@latest add pmatos/skills/pm-fix
 Takes a GitHub issue to a reviewed and simplified PR in one run.
 
 What it does:
-- Runs `/investigate` to fix the issue and open a PR. Stops if no PR is opened.
+- Runs `/investigate` to fix the issue and open a PR. Stops if no PR is opened. If a PR for the issue is already open, it starts from that PR instead.
 - Runs `/pm-cr --fix --comment` on the PR, then commits and pushes the review fixes with `/cp`.
 - Runs `/pm-simplify` on the PR, then commits and pushes its changes with `/cp`.
+- Waits for the PR's checks and reports their state.
 
 Trigger phrases: `fix issue #N and review it`, `investigate, review and simplify`.
 
