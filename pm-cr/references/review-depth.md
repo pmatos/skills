@@ -3,16 +3,16 @@
 | Depth | Finder angles | Candidates each | Verify | Sweep | Cap |
 |---|---|---|---|---|---|
 | low | none, one hunk-only pass | — | none | no | 4 |
-| medium | A, B, C, Reuse, Simplification, Efficiency, Altitude, Conventions | 6 | 3-state | no | 8 |
-| high | the same 8, plus F | 6 | recall-biased | no | 10 |
-| xhigh | A–F, plus the same 5 cleanup angles | 8 | recall-biased | yes | 15 |
+| medium | A, B, C, Conventions, pm-simplify | 6 | 3-state | no | 8 |
+| high | the same, plus F | 6 | recall-biased | no | 10 |
+| xhigh | A–F, Conventions, pm-simplify | 8 | recall-biased | yes | 15 |
 
 Medium and above build the **Reviewer brief** first and run the **Scope
 check** last (`angles.md`).
 
 ## low
 
-Use only what Phase 1 loaded, with no subagents and no `REVIEW.md` rules. When the diff changes
+Use only what Phase 1 loaded, with no subagents, no pm-simplify, and no `REVIEW.md` rules. When the diff changes
 anything besides tests, skip test and fixture hunks (`test/`, `tests/`,
 `spec/`, `__tests__/`, `fixtures/`, `testdata/`, `*_test.*`, `*.test.*`).
 
@@ -34,7 +34,14 @@ sweep. Give each subagent the brief and tell it not to modify anything.
 
 1. Launch every finder angle for the depth in one message. Give each the
    output shape: `file`, `line`, a one-line `summary`, a concrete
-   `failure_scenario`, and a `category`.
+   `failure_scenario`, and a `category`. If the installed pm-simplify's
+   `SKILL.md` has a `## Report mode` section, tell the finders that reuse,
+   simplification, efficiency, and altitude cleanups belong to it. Then,
+   without waiting for them, invoke `pm-simplify --report model=opus
+   limit=<candidates each>` through the Skill tool, adding `effort=xhigh`
+   at xhigh. Its list is candidates like any finder's, not the end of the
+   review, so keep going. Otherwise, say in the assessment that cleanup was
+   not reviewed.
 2. Finders pass every candidate with a nameable failure scenario to verify.
    Two angles that flag one line for different reasons give two
    candidates.
@@ -43,5 +50,5 @@ sweep. Give each subagent the brief and tell it not to modify anything.
    candidates the same way.
 
 Without a subagent tool, work through every angle yourself in one pass,
-dedup near-duplicates, re-check each candidate against the diff, and still
+run `pm-simplify --report` the same way, dedup near-duplicates, re-check each candidate against the diff, and still
 run the sweep at xhigh.

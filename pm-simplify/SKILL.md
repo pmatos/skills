@@ -1,7 +1,7 @@
 ---
 name: pm-simplify
 description: This skill should be used when the user asks to "simplify this", "simplify the diff", "clean up this code", "clean up the changed code", "reuse pass", "simplification pass", "efficiency pass", "altitude pass", or wants the changed code reviewed for reuse, simplification, efficiency, and altitude issues and fixed directly — without hunting for correctness bugs. Also triggered by the /pm-simplify command.
-argument-hint: "[<target>]"
+argument-hint: "[--report] [<target>]"
 user-invocable: true
 ---
 
@@ -15,6 +15,25 @@ bugs; that is a separate, dedicated review.
 ## Task
 
 $ARGUMENTS
+
+## Report mode
+
+`--report` is for a caller, such as pm-cr, that has already gathered the
+diff and built a reviewer brief in this conversation. It is a flag, not a
+target. With it:
+
+- If this conversation holds no caller brief, stop and say so. Otherwise
+  skip Phase 0 and review the caller's diff.
+- Run each angle as a fresh `Plan` subagent with the `model`, `effort`, and
+  per-angle candidate `limit` given after `--report`, or in one pass
+  without a subagent tool. Give it the
+  caller's brief in place of the diff, and tell it not to modify anything.
+- Skip Phase 2 and change nothing. Merge findings that share a mechanism
+  into one, keeping the category of the angle that names the fix. Return
+  each in the caller's finding shape, with `category` set to the angle's
+  name in lower case, or to `performance` for a leak or for waste on a hot
+  or startup path. Say if the angles ran in one pass.
+- Then hand control back to the caller, whose run continues.
 
 ## Phase 0 — Gather the diff
 

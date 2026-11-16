@@ -47,7 +47,9 @@ report its `message` and stop. Otherwise:
 ## Phase 2 — Rate the depth
 
 Invoke the `pm-risk` skill with `--base '<base>'`, plus
-`--path '<top>/<path>'` for a path target. Map its merge risk to the
+`--path '<top>/<path>'` for a path target. With `--comment`, a scope `pr`,
+and no path target, also pass `--comment --pr '<pr url>'`, so that pm-risk posts its
+full report on the PR. Map its merge risk to the
 depth: `low`, `medium`, and `high` keep their names, and `critical` becomes
 `xhigh`. State `Depth: <depth> (merge risk <risk>)` in one line, adding
 the floor reason when the floor raised the risk, and never adjust it by
@@ -89,8 +91,8 @@ Then, except in JSON mode, give the assessment. Open it with the
 sentences, or one at the low depth, such as its main risk area or that it
 looks sound. Do not summarize the change or
 count the findings. State every disclosure here: the scope's `message`
-and `warnings`, files not reviewed, edited review instructions, and a
-single-pass review.
+and `warnings`, files not reviewed, edited review instructions, a
+single-pass review, and cleanup that pm-simplify skipped or ran in one pass.
 
 ## Constraints
 
