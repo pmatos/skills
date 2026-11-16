@@ -76,7 +76,7 @@ Slash command `/pm-risk` that rates how risky a PR, branch or working tree is to
 
 ## pm-simplify
 
-Slash command `/pm-simplify` that cleans up the changed code without changing behavior. Reviews the diff for reuse, simplification, efficiency, and altitude issues via four parallel review agents (falling back to a single inline pass when no native subagent tool is available), then fixes what it finds directly. Quality only — does not hunt for correctness bugs. With `--report`, used by pm-cr, it reviews the caller's diff with read-only agents and returns the findings instead of fixing them.
+Slash command `/pm-simplify` that cleans up the changed code without changing behavior. Reviews the diff for reuse, simplification, efficiency, and altitude issues via four parallel review agents (falling back to a single inline pass when no native subagent tool is available), then fixes what it finds directly. Quality only — does not hunt for correctness bugs. With `--report`, used by pm-cr, it reviews the caller's diff with read-only agents and returns the findings instead of fixing them. The diff-gathering rules live in `references/scope.md`, which only standalone runs read.
 
 ## pm-fix
 
