@@ -30,10 +30,9 @@ target. With it:
   caller's brief in place of the diff, and tell it not to modify anything.
 - Skip Phase 2 and change nothing. Merge findings that share a mechanism
   into one, keeping the category of the angle that names the fix. Return
-  each with `file`, `line`, `summary`,
-  `failure_scenario` (the concrete cost), and `category`: the angle's name
-  in lower case, or `performance` for a leak or for waste on a hot or
-  startup path. Say if the angles ran in one pass.
+  each in the caller's finding shape, with `category` set to the angle's
+  name in lower case, or to `performance` for a leak or for waste on a hot
+  or startup path. Say if the angles ran in one pass.
 - Then hand control back to the caller, whose run continues.
 
 ## Phase 0 — Gather the diff

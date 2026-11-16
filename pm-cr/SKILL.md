@@ -47,8 +47,8 @@ report its `message` and stop. Otherwise:
 ## Phase 2 — Rate the depth
 
 Invoke the `pm-risk` skill with `--base '<base>'`, plus
-`--path '<top>/<path>'` for a path target. With `--comment` and a scope
-`pr`, also pass `--comment --pr '<pr url>'`, so that pm-risk posts its
+`--path '<top>/<path>'` for a path target. With `--comment`, a scope `pr`,
+and no path target, also pass `--comment --pr '<pr url>'`, so that pm-risk posts its
 full report on the PR. Map its merge risk to the
 depth: `low`, `medium`, and `high` keep their names, and `critical` becomes
 `xhigh`. State `Depth: <depth> (merge risk <risk>)` in one line, adding
