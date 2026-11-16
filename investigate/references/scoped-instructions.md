@@ -14,12 +14,12 @@ commands and the generated PR is likely to fail project policy. Phase 3.2 closes
 that gap by consulting every instruction file on the path from each changed file
 up to the repo root.
 
-## Why the walk is deferred until the plan is known
+## Why the walk is deferred until the target paths are known
 
 The set of instruction files that governs a change depends on *which files*
-change, and that is only settled once Phase 4 has produced a plan. So Phase 3.1
+change, and that is only settled once Phase 4 has scoped the work. So Phase 3.1
 still runs first — its baseline informs planning and general context — but the
-ancestor walk runs afterwards, over the plan's target paths (4A.4 / 4B.3), and
+ancestor walk runs afterwards, over the target paths (4A.4 / 4B.3), and
 feeds the merged command set into validation (4A.6 / 4B.5). Running it earlier
 would have nothing concrete to walk.
 
