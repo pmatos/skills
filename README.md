@@ -429,17 +429,23 @@ Trigger phrases: `deepen a module`, `find shallow modules`, `run an architecture
 npx skills@latest add pmatos/skills/vibe
 ```
 
-Fixes the open children of an issue marked `epic` in parallel, and merges each fix.
+Triages the open children of an issue marked `epic`, fixes the ones that need work in parallel, and merges each fix.
 
 What it does:
-- Finds the epic's children from its sub-issues, recursively, and its task list.
-- Launches one agent per unblocked child, each in its own worktree. Each agent runs `/pm-fix`: `/investigate` opens a PR, `/pm-cr --fix --comment` reviews it, and the run waits for CI.
+- Finds the epic's children from its sub-issues, recursively, and its task list, and reads the epic's gate criteria as the definition of done.
+- Runs a **read-only triage** of every open child against the current default branch: `done`, `partial`, `open` or `needs-ruling`, with evidence. It closes the children that are already done once their evidence is checked, and asks you about the ones that need a ruling.
+- Launches one agent per unblocked child that needs work, each in its own worktree, up to `--max-parallel` (default: the smaller of 8 and half the cores). Each agent runs `/pm-fix`: `/investigate` opens a PR, `/pm-cr --fix --comment` reviews it, and the run waits for CI.
 - Merges the PRs one at a time as they finish, each when every check on its head is green, rebasing with `/rebase-pr` only if it conflicts. It waits for the default branch's CI first, and **nothing merges onto a red default branch**. Children unblocked by a merge get their agents then.
-- Closes the epic when every child is closed. Otherwise it reports each remaining child and why. Re-running `/vibe` resumes where it stopped.
+- Posts a short status report on a schedule (`--report-every`, default 1h). Reports come from `gh` and CI and start no work.
+- Ends with a **read-only close-out audit** against each child's criteria and the epic's gate criteria. A child that misses a criterion closes only under a decision rule you stated; an epic that is not fully met gets a gap list, not a closure. Re-running `/vibe` resumes where it stopped.
+
+With `ultracode` in your message, triage and the audit run as multi-agent `Workflow` runs, and each `done` verdict gets a second agent that tries to refute it.
+
+Flags: `ultracode`, `--max-parallel N`, `--report-every 1h`.
 
 Trigger phrases: `vibe an epic`, `vibe #N`, `drive epic #N to done`, `solve the epic`, `work through the epic's sub-issues`.
 
-**Requires**: [`gh`](https://cli.github.com/) with write access, and the sibling `pm-fix` (with `investigate`, `pm-cr` and `cp`) and `rebase-pr` skills.
+**Requires**: Claude Code (it uses the `Agent`, `CronCreate` and, under ultracode, `Workflow` tools), [`gh`](https://cli.github.com/) with write access, and the sibling `pm-fix` (with `investigate`, `pm-cr` and `cp`) and `rebase-pr` skills.
 
 ## License
 
