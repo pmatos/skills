@@ -429,12 +429,12 @@ Trigger phrases: `deepen a module`, `find shallow modules`, `run an architecture
 npx skills@latest add pmatos/skills/vibe
 ```
 
-Fixes the open children of an issue marked `epic`, one at a time, and merges each fix.
+Fixes the open children of an issue marked `epic` in parallel, and merges each fix.
 
 What it does:
-- Finds the epic's children from its sub-issues, recursively, and its task list. A child blocked by an open issue moves to the back of the queue.
-- Runs `/pm-fix` on each child: `/investigate` opens a PR, `/pm-cr --fix --comment` reviews it, and the run waits for CI.
-- Merges the PR when every check on its head is green, rebasing with `/rebase-pr` only if it conflicts. It waits for the default branch's CI first, and **nothing merges onto a red default branch**.
+- Finds the epic's children from its sub-issues, recursively, and its task list.
+- Launches one agent per unblocked child, each in its own worktree. Each agent runs `/pm-fix`: `/investigate` opens a PR, `/pm-cr --fix --comment` reviews it, and the run waits for CI.
+- Merges the PRs one at a time as they finish, each when every check on its head is green, rebasing with `/rebase-pr` only if it conflicts. It waits for the default branch's CI first, and **nothing merges onto a red default branch**. Children unblocked by a merge get their agents then.
 - Closes the epic when every child is closed. Otherwise it reports each remaining child and why. Re-running `/vibe` resumes where it stopped.
 
 Trigger phrases: `vibe an epic`, `vibe #N`, `drive epic #N to done`, `solve the epic`, `work through the epic's sub-issues`.

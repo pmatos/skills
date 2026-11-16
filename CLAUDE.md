@@ -112,4 +112,4 @@ Slash command `/review-offline` that turns a changeset (PR, branch, range, `HEAD
 
 ## vibe
 
-Slash command `/vibe` that drives an issue marked `epic` to closure, one child at a time. For each open child it runs `/pm-fix`, rebases the PR with `/rebase-pr` only if it conflicts, and merges it once every check on its head is green and the default branch's CI is green. Nothing merges onto a red default branch. It closes the epic when every child is closed, and otherwise reports what remains and why. Re-running it resumes.
+Slash command `/vibe` that drives an issue marked `epic` to closure. It launches one agent per unblocked child, each running `/pm-fix` in its own worktree, and merges the PRs one at a time as they finish. It rebases the PR with `/rebase-pr` only if it conflicts, and merges it once every check on its head is green and the default branch's CI is green. Nothing merges onto a red default branch. It closes the epic when every child is closed, and otherwise reports what remains and why. Re-running it resumes.

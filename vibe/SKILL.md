@@ -8,10 +8,11 @@ user-invocable: true
 
 # vibe — Drive an Epic to Done
 
-Fix the open children of an epic one at a time: run `/pm-fix` on a child, merge
-its PR, then move to the next. Invoking `/vibe` authorises merging green PRs
-into the default branch, so say that when you start. Re-running `/vibe` resumes:
-closed children are skipped, and pm-fix picks up a child's open PR.
+Fix the open children of an epic in parallel: every unblocked child gets its
+own agent running `/pm-fix`, and you merge the resulting PRs one at a time.
+Invoking `/vibe` authorises merging green PRs into the default branch, so say
+that when you start. Re-running `/vibe` resumes: closed children are skipped,
+and pm-fix picks up a child's open PR.
 
 ## Steps
 
@@ -34,25 +35,37 @@ closed children are skipped, and pm-fix picks up a child's open PR.
      --jq '.[] | {number,title,state,sub_issues_summary}'
    ```
 
-   Work through the open children in the listed order. Put a child that is
-   blocked by an open issue at the back of the queue.
-3. **For each open child N:**
-   1. Switch to the default branch and pull.
-   2. Run `/pm-fix N`. If it ends without a PR, note why and go to the next
-      child.
-   3. If the PR conflicts with the default branch, run `/rebase-pr <PR>` and
-      wait for its checks again.
-   4. Merge only when every check on the PR's head commit has passed. If a
-      check failed, leave the PR open, note it, and go to the next child.
-   5. Wait for the latest CI runs on the default branch to finish. If one
-      failed, stop and report: nothing merges onto a red default branch.
-   6. Merge with `gh pr merge <PR> --<method> --delete-branch`. Check with
-      `gh pr view` that the PR merged and with `gh issue view` that N is
-      closed. If N is still open, close it with a comment that links the PR.
-4. **Close out.** When every child is closed, close the epic with a comment
+   A child is unblocked when every issue that blocks it is closed
+   (`gh api repos/{owner}/{repo}/issues/<N>/dependencies/blocked_by`).
+3. **Launch a fix agent for every unblocked open child N**, all at once, in one
+   message. First create its worktree from the up-to-date default branch:
+
+   ```bash
+   git fetch origin
+   git worktree add .claude/worktrees/vibe-<N> -B issue-<N> origin/<default>
+   ```
+
+   Give each agent this brief: work only in that worktree; run `/pm-fix N` with
+   the Skill tool; wait for the checks in the foreground and do not end the turn
+   while waiting; reply with the PR number (or why there is none) and the state
+   of its checks.
+4. **Merge each PR as its agent reports, one merge at a time:**
+   1. If there is no PR, or a check failed, leave it and note why.
+   2. If the PR conflicts with the default branch, run `/rebase-pr <PR>` in the
+      child's worktree and wait for its checks again.
+   3. Merge only when every check on the PR's head commit has passed.
+   4. Wait for the latest CI runs on the default branch to finish. If one
+      failed, stop merging and report: nothing merges onto a red default
+      branch.
+   5. Remove the worktree, then merge with
+      `gh pr merge <PR> --<method> --delete-branch`. Check with `gh pr view`
+      that the PR merged and with `gh issue view` that N is closed. If N is
+      still open, close it with a comment that links the PR.
+   6. Launch agents for any children this merge unblocked.
+5. **Close out.** When every child is closed, close the epic with a comment
    that lists the merged PRs. Otherwise leave it open and report each remaining
    child and why: no PR, failing checks, still blocked, or waiting on a
-   decision.
+   decision. Remove the worktrees that are left.
 
 ## Rules
 
