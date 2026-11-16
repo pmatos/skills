@@ -112,4 +112,4 @@ Slash command `/review-offline` that turns a changeset (PR, branch, range, `HEAD
 
 ## vibe
 
-Slash command `/vibe` that drives an issue marked `epic` to closure under ultracode: read-only triage of every child against the current default branch, fix PRs (each agent runs `/investigate`, then `/code-review high --fix --comment`, then waits for CI), orchestrator-owned merges that rebase only on conflict and keep the default branch green, a report-only schedule, and decision memos for the rulings only a human can make. Ends with a read-only close-out audit; children may be closed-as-measured under a rule the user stated, and an epic that is not fully met gets a gap list, not a closure.
+Slash command `/vibe` that drives an issue marked `epic` to closure, one child at a time. For each open child it runs `/pm-fix`, rebases the PR with `/rebase-pr` only if it conflicts, and merges it once every check on its head is green and the default branch's CI is green. Nothing merges onto a red default branch. It closes the epic when every child is closed, and otherwise reports what remains and why. Re-running it resumes.
