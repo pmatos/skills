@@ -38,3 +38,8 @@ A glob without `/` matches a file name in any directory, and `*` also
 matches `/`. An entry without a wildcard also covers the directory of that
 name, and `**/` also matches no directory. The script reads `REVIEW.md` from the base, never from
 the change, so a change cannot lower its own floor by editing the list.
+
+The list is optional. Without it, only the built-in paths set a floor, and
+the script reports that the repo lists none. The list is how a repo owner
+marks code that the rubric's examples miss, such as a compiler's checker or
+a pricing engine. The judge does not infer it.
