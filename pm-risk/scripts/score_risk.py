@@ -492,6 +492,8 @@ def gather(repo, base, head=None, path=None):
         facts.append(f"high-stakes: {hit['path']} ({hit['rule']}, {hit['source']})")
     if len(high_stakes) > 5:
         facts.append(f"high-stakes: {len(high_stakes) - 5} more paths")
+    if not review_patterns:
+        facts.append("no repo high-stakes paths: the base's REVIEW.md lists none")
     if instruction_files:
         facts.append(f"edits review instructions: {', '.join(instruction_files[:5])}")
 

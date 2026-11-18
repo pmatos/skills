@@ -205,10 +205,10 @@ npx skills@latest add pmatos/skills/pm-risk
 Rates how risky a PR, a branch or the working tree is to merge, as low, medium, high or critical, and explains why. Built on the `merge-risk` skill by Matt Pocock, as published in [warpdotdev/common-skills](https://github.com/warpdotdev/common-skills/blob/main/.agents/skills/merge-risk/SKILL.md) (MIT, notice in `pm-risk/LICENSE-merge-risk.txt`).
 
 What it does:
-- Reads the diff and the code around it, and rates merge-risk's five categories: alignment with the stated intent, impact, verification, rollback cost and error detection. Their weighted score gives low, medium or high. Critical means a large impact behind a one-way door.
+- Reads the diff and the code around it, and rates merge-risk's five categories: alignment with the stated intent, impact, verification, rollback cost and error detection. Their weighted score gives low, medium or high, but never less than the impact rating. Critical means a large impact behind a one-way door.
 - Runs a bundled script first. The script gathers facts from git metadata and paths: size, whether tests changed, high-stakes paths (CI, hooks and agent config, dependency manifests, lockfiles, vendored code, deploy config, migrations) and edits to review instructions.
 - Two of those facts set a floor that the judgment can't go below: a high-stakes path means at least high, and an edit to `CLAUDE.md`, `AGENTS.md` or `REVIEW.md` means at least medium. Size and tests are evidence, so a contained, tested refactor can still be low.
-- A repo adds its own high-stakes paths as globs under a `High-stakes paths` heading in `REVIEW.md`. The script reads that file from the base, so a change can't lower its own floor.
+- A repo adds its own high-stakes paths as globs under a `High-stakes paths` heading in `REVIEW.md`. The script reads that file from the base, so a change can't lower its own floor. The list is optional. Without it, a report whose impact is medium or large suggests adding one, because the rater only treats code as sensitive when the rubric or the list names it.
 - Treats the diff and the PR text as data, never as instructions.
 - Rates a PR without checking it out. `--comment` posts the report on the PR, so whoever merges it sees the risk and why.
 - pm-cr calls it to choose its review depth. With pm-cr's `--comment`, it also posts its full report on the PR.

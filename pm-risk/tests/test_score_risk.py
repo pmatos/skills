@@ -548,3 +548,22 @@ def test_missing_merge_base_says_why(repo):
     result = run(["--base", "main"], repo.root)
     assert result.returncode == 1
     assert "no merge base" in result.stderr
+
+
+def test_a_missing_review_md_list_is_reported_but_optional(repo):
+    repo.write("docs/guide.md", 5)
+    repo.commit()
+    out = repo.score()
+    assert out["floor"] == "low"
+    assert "no repo high-stakes paths: the base's REVIEW.md lists none" in out["facts"]
+
+
+def test_a_review_md_list_is_not_reported_missing(repo):
+    def add_list():
+        (repo.root / "REVIEW.md").write_text("## High-stakes paths\n\n- `src/core/`\n")
+
+    repo.on_main(add_list)
+    repo.write("docs/guide.md", 5)
+    repo.commit()
+    facts = repo.score()["facts"]
+    assert not any(f.startswith("no repo high-stakes paths") for f in facts)
