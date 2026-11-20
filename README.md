@@ -447,6 +447,24 @@ Trigger phrases: `vibe an epic`, `vibe #N`, `drive epic #N to done`, `solve the 
 
 **Requires**: Claude Code (it uses the `Agent`, `CronCreate` and, under ultracode, `Workflow` tools), [`gh`](https://cli.github.com/) with write access, and the sibling `pm-fix` (with `investigate`, `pm-cr` and `cp`) and `rebase-pr` skills.
 
+### `/ask-rulings` — Ask the Pending Rulings
+
+```bash
+npx skills@latest add pmatos/skills/ask-rulings
+```
+
+Asks you the direction questions that agents raised and that only you can answer, each with enough background to decide and the agent's recommendation first.
+
+What it does:
+- Gathers the pending questions from GitHub, never from memory: a `vibe: rulings and open decisions` comment on the epic when one exists, issues labelled `human-ready`, open PRs with an unaccepted "needs the human" or "Ledger" section, and unrecorded questions that agents returned in the session.
+- Asks what blocks a merge first, splits a PR's separate points into separate questions, and spells out every guarantee that a PR weakens before you accept it.
+- Asks through `AskUserQuestion`. Each question stands alone, in plain words, with the recommended option first. A timeout never picks an option: unanswered questions stay pending.
+- Records each ruling on GitHub, posts a `vibe: ruling recorded` comment on each affected issue or PR, and removes `human-ready` where nothing is left open. Inside a `/vibe` run it then continues the unblocked work. Outside one it reports and stops.
+
+Trigger phrases: `ask about the pending rulings`, `ask the pending questions`, `what needs my ruling`.
+
+**Requires**: Claude Code (it uses `AskUserQuestion`) and [`gh`](https://cli.github.com/) with write access.
+
 ## License
 
 MIT
