@@ -453,13 +453,13 @@ Trigger phrases: `vibe an epic`, `vibe #N`, `drive epic #N to done`, `solve the 
 npx skills@latest add pmatos/skills/ask-rulings
 ```
 
-Asks you the direction questions that agents raised and that only you can answer, each with enough background to decide and the agent's recommendation first.
+Asks you the open questions that block further progress and that only you can answer, each with enough background to decide and a recommendation first.
 
 What it does:
-- Gathers the pending questions from GitHub, never from memory: a `vibe: rulings and open decisions` comment on the epic when one exists, issues labelled `human-ready`, open PRs with an unaccepted "needs the human" or "Ledger" section, and unrecorded questions that agents returned in the session.
-- Asks what blocks a merge first, splits a PR's separate points into separate questions, and spells out every guarantee that a PR weakens before you accept it.
+- Gathers the pending questions from durable sources, never from memory alone: unanswered questions from the session, any record of open questions on GitHub (a comment, a label, a PR section waiting on acceptance), and the issues or PRs you pass.
+- Asks what blocks a merge first, splits a change's separate points into separate questions, and spells out every guarantee that a change weakens before you accept it.
 - Asks through `AskUserQuestion`. Each question stands alone, in plain words, with the recommended option first. A timeout never picks an option: unanswered questions stay pending.
-- Records each ruling on GitHub, posts a `vibe: ruling recorded` comment on each affected issue or PR, and removes `human-ready` where nothing is left open. Inside a `/vibe` run it then continues the unblocked work. Outside one it reports and stops.
+- Records each ruling where its question lives, comments on each affected issue or PR, and then resumes the unblocked work within what the session was already allowed to do.
 
 Trigger phrases: `ask about the pending rulings`, `ask the pending questions`, `what needs my ruling`.
 
