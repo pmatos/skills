@@ -447,6 +447,24 @@ Trigger phrases: `vibe an epic`, `vibe #N`, `drive epic #N to done`, `solve the 
 
 **Requires**: Claude Code (it uses the `Agent`, `CronCreate` and, under ultracode, `Workflow` tools), [`gh`](https://cli.github.com/) with write access, and the sibling `pm-fix` (with `investigate`, `pm-cr` and `cp`) and `rebase-pr` skills.
 
+### `/ask-rulings` — Ask the Pending Rulings
+
+```bash
+npx skills@latest add pmatos/skills/ask-rulings
+```
+
+Asks you the open questions that block further progress and that only you can answer, each with enough background to decide and a recommendation first.
+
+What it does:
+- Gathers the pending questions from durable sources, never from memory alone: unanswered questions from the session, any record of open questions on GitHub (a comment, a label, a PR section waiting on acceptance), and the issues or PRs you pass.
+- Asks what blocks a merge first, splits a change's separate points into separate questions, and spells out every guarantee that a change weakens before you accept it.
+- Asks through `AskUserQuestion`. Each question stands alone, in plain words, with the recommended option first. A timeout never picks an option: unanswered questions stay pending.
+- Records each ruling where its question lives, comments on each affected issue or PR, and then resumes the unblocked work within what the session was already allowed to do.
+
+Trigger phrases: `ask about the pending rulings`, `ask the pending questions`, `what needs my ruling`.
+
+**Requires**: Claude Code (it uses `AskUserQuestion`) and [`gh`](https://cli.github.com/) with write access.
+
 ## License
 
 MIT
