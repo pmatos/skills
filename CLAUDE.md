@@ -112,7 +112,7 @@ Slash command `/review-offline` that turns a changeset (PR, branch, range, `HEAD
 
 ## vibe
 
-Slash command `/vibe` that drives an issue marked `epic` to closure. It triages every open child read-only (closing the ones already done, with evidence), then launches one agent per unblocked child that needs work, up to `--max-parallel`, each running `/pm-fix` in its own worktree. It merges the PRs one at a time as they finish: rebasing with `/rebase-pr` only on conflict, merging only on green checks, and never onto a red default branch. It posts a status report on a schedule (`--report-every`), and ends with a read-only close-out audit against the epic's gate criteria; an epic that is not fully met gets a gap list, not a closure. With `ultracode`, triage and the audit run as `Workflow` runs.
+Slash command `/vibe` that drives an epic or a snapshot of open issues selected by `--label NAME`. It triages read-only, runs `/pm-fix` in parallel isolated worktrees, then integrates reviewed heads one at a time. It requires GitHub's merge queue with integration checks or strict up-to-date branch checks, preserves blocked work, and reconciles ambiguous GitHub writes before retrying. Scheduled reports and the close-out audit distinguish verified merges, blockers and follow-up work. Only epic mode evaluates parent gates. With `ultracode`, triage and the audit run as `Workflow` runs.
 
 ## ask-rulings
 
