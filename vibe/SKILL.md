@@ -1,22 +1,22 @@
 ---
 name: vibe
 description: >-
-  This skill should be used when the user asks to "vibe an epic", "vibe #N", "drive epic #N to done", "solve the epic", "work through the epic's sub-issues", "finish the epic", "close out epic #N", "resume the epic", or wants every open child of an issue labelled `epic` triaged, fixed, reviewed and merged. Triages the children, runs `/pm-fix` on each one that needs work in parallel, merges each PR once its checks are green, reports on a schedule, and audits the epic before closing it. Not for a single non-epic issue (use pm-fix). Also triggered by the /vibe command.
-argument-hint: "[epic-number|#N|url] [ultracode] [--max-parallel N] [--report-every 1h]"
+  Drive an epic or a batch of open issues with a given label to completion: triage, run /pm-fix in isolated worktrees, verify integration and merge serially. Use for "vibe an epic", "vibe #N", "fix every issue labelled X", or /vibe. For a single non-epic issue use pm-fix.
+argument-hint: "[epic-number|#N|url|--label NAME] [ultracode] [--max-parallel N] [--report-every 1h]"
 user-invocable: true
 ---
 
-# vibe — Drive an Epic to Done
+# vibe — Drive an Epic or Label Batch to Done
 
-Triage the open children of an epic, fix the ones that need work in parallel
-(one agent per child, each running `/pm-fix`), and merge the resulting PRs one at
-a time. Invoking `/vibe` authorises merging green PRs into the default branch,
-so say that when you start. Re-running `/vibe` resumes: closed children are
-skipped, and pm-fix picks up a child's open PR.
+Fix independent issues in parallel. Only the orchestrator integrates PRs with
+the default branch. Invoking `/vibe` authorises merging verified PRs; state
+the repository, target branch and selected scope before dispatch.
 
 ## Arguments
 
 - `<epic>`: an issue number, `#N`, `owner/repo#N` or a URL.
+- `--label NAME`: select issues by one exact label instead of by epic. Reject
+  both selectors together. Example: `/vibe --label "ready for fix" --max-parallel 3`.
 - `ultracode`: run triage and the close-out audit as `Workflow` runs (below).
 - `--max-parallel N`: the most fix agents at once. The default is the smaller of
   8 and half the cores (`nproc`).
@@ -43,7 +43,21 @@ they wait on CI and react to it, which a Workflow script cannot do.
    ```
 
    The working tree must be clean. Start the status schedule (below).
-2. **Find the epic and its children.** With no argument, use the open issue
+2. **Select the issues.** For `--label`, paginate open issues (not PRs):
+
+   ```bash
+   gh api --method GET --paginate repos/{owner}/{repo}/issues -f state=open \
+     -f labels="$label" -F per_page=100 | jq -s --arg label "$label" \
+     '[.[][] | select(has("pull_request") | not) | select(any(.labels[]; .name == $label)) | .number] | unique'
+   ```
+
+   Use `pipefail`; never dispatch a partial result. Save the complete list
+   before dispatch under `$(git rev-parse --git-common-dir)/vibe/`, keyed by a
+   hash of repository and label. Write atomically and reuse the unfinished
+   batch on resume; don't admit newly labelled issues mid-run. An empty list is
+   a successful no-op. Label mode has no parent to audit, comment on or close.
+
+   For an epic, find its children as follows. With neither selector, use the open issue
    labelled `epic`. If there are several, ask which one. The children are the
    epic's sub-issues, including sub-issues of sub-issues, plus the issues in its
    task list:
@@ -53,10 +67,10 @@ they wait on CI and react to it, which a Workflow script cannot do.
      --jq '.[] | {number,title,state,sub_issues_summary}'
    ```
 
-   Read the epic body for its gate criteria: they define when the epic is done.
-   A child is unblocked when every issue that blocks it is closed
+   In epic mode read the epic body for its gate criteria. In both modes an
+   issue is unblocked when every issue that blocks it is closed
    (`gh api repos/{owner}/{repo}/issues/<N>/dependencies/blocked_by`).
-3. **Triage every open child, read-only.** Use one agent per group of up to
+3. **Triage every selected open issue, read-only.** Use one agent per group of up to
    about eight related children. For each child, the agent reads the issue and
    its comments, tests the claim against the current default branch, and
    returns `done`, `partial`, `open` or `needs-ruling`, with evidence and the
@@ -64,45 +78,77 @@ they wait on CI and react to it, which a Workflow script cannot do.
    - Under ultracode, pipe each `done` verdict to a second read-only agent that
      tries to refute it. Without ultracode, check the evidence yourself.
    - Close each `done` child that holds up, with the evidence in a comment.
-   - Ask the user about each `needs-ruling` child.
+   - Record the exact question for each `needs-ruling` issue and park it;
+     continue independent work without waiting for an answer.
    - `open` and `partial` children go to the fix queue, with the remaining work.
-4. **Launch fix agents** for unblocked children in the fix queue, up to
-   `--max-parallel` at once, all in one message. After an API rate-limit error,
-   launch nothing new for 5 minutes. First create each child's worktree from
-   the up-to-date default branch:
-
-   ```bash
-   git fetch origin
-   git worktree add .claude/worktrees/vibe-<N> -B issue-<N> origin/<default>
-   ```
-
-   Give each agent this brief: work only in that worktree; the remaining work
-   from triage; run `/pm-fix N` with the Skill tool; wait for the checks in the
-   foreground and do not end the turn while waiting; reply with the PR number
-   (or why there is none) and the state of its checks.
-5. **Merge each PR as its agent reports, one merge at a time:**
-   1. If there is no PR, or a check failed, leave it and note why.
-   2. If the PR conflicts with the default branch, run `/rebase-pr <PR>` in the
-      child's worktree and wait for its checks again.
-   3. Merge only when every check on the PR's head commit has passed.
-   4. Wait for the latest CI runs on the default branch to finish. If one
-      failed, stop merging and report: nothing merges onto a red default
-      branch.
-   5. Remove the worktree, then merge with
-      `gh pr merge <PR> --<method> --delete-branch`. Check with `gh pr view`
-      that the PR merged and with `gh issue view` that N is closed. If N is
-      still open, it goes to the close-out audit.
-   6. Launch the next fix agent: a queued child, or one this merge unblocked.
-6. **Close out** once the fix queue is empty. Run a read-only audit agent
-   that, for each child, finds the merged PRs and states which of the issue's
-   criteria and the epic's gate criteria are met, with evidence. It recommends
+4. **Dispatch independent workers**, up to `--max-parallel` at once. Recheck
+   blockers before launch. If two fixes change the same contract, start the
+   second after the first lands. Skip closed issues; never launch two workers
+   for one issue. On resume, reconcile merged and already queued PRs first.
+   - Look for the issue's existing closing PR and inspect `git worktree list
+     --porcelain`. Reuse its clean, idle worktree or attach its existing
+     branch to a fresh one. Resume a clean, identifiable prior vibe branch
+     even if no PR was opened. Park ambiguous ownership, another author's PR,
+     dirty worktrees or divergent local work; never reset or force checkout.
+   - For new work only, fetch `origin` and use `git worktree add -b issue-<N>
+     .claude/worktrees/vibe-<N> origin/<default>`. Record created paths for cleanup.
+   - Give the worker the issue, triage evidence and worktree. Run `/pm-fix N`
+     there, including its normal risk-based review. Verify the repo's full
+     probe and conformance suites where defined, including on resumed PRs;
+     reuse passing results only for the same final head. Wait for its checks.
+     Return issue, PR, reviewed head SHA, commands/results and check links
+     (or the blocker). Do not merge, rebase to chase main, or push after handoff.
+5. **Integrate one PR at a time.** Confirm the PR still targets the default
+   branch, its current head equals the handoff SHA, and every head check
+   passed. Return an unexpected head to review; park failed or missing gates.
+   Wait for CI on the current default tip; pause integration on red.
+   - Prefer the repository's enforced GitHub merge queue. Verify that required
+     integration checks (including the defined suites) actually run on
+     `merge_group`. Enqueue with `gh pr merge <PR> --match-head-commit <SHA>`
+     and wait for the result, not just queue admission. If conflict prevents
+     admission, update only this PR as described below and retry admission.
+   - Without a native queue, require **server-enforced strict up-to-date
+     required checks** on the target branch, applicable to this merge. If
+     protection or check coverage cannot be verified, leave the PR open;
+     never change repository settings or use `--admin`. Fetch the current
+     default tip. If it isn't an ancestor of the candidate, use `/rebase-pr`
+     in its worktree even if GitHub reports no conflict.
+   - After a rebase verify the new head and rerun the integration gates on it.
+     If resolution changed the patch beyond replaying the reviewed change
+     (or equivalence is unclear), return it for `/pm-cr --fix --comment` and
+     fresh worker checks. For direct merges use `gh pr merge <PR> --<method>
+     --match-head-commit <verified-SHA>`. If main moves again, refresh only
+     this candidate; park it after two stale-base retries.
+   - Confirm `MERGED` via `gh pr view` and issue closure via `gh issue view`.
+     A still-open issue goes to audit. Release newly unblocked work. A failed
+     candidate stays open; independent candidates can proceed on a green base.
+6. **Close out** when no runnable work remains. Run a read-only audit agent
+   that, for each selected issue, finds the merged PRs and states which issue
+   criteria (and in epic mode, which epic gates) are met, with evidence. It recommends
    close, more work, or keep open, and drafts a closing comment for each close.
    Close the children that it shows are done. A child that misses a criterion
    closes only under a decision rule the user stated, such as "close it if it
-   cannot be done without a regression". Close the epic only when every child
-   is closed. Otherwise leave it open and post the gap list: each remaining
-   child, and why. Then delete the report schedule and remove any worktrees
-   that are left.
+   cannot be done without a regression". In epic mode, close the epic only
+   when all children are closed and its gates are met; otherwise post its gaps.
+   Report **merged and verified**, **still open** (failing check, dependency or
+   ruling, with the next action), and **follow-up work**, linking issues, PRs
+   and evidence. List uncovered work rather than claiming it shipped.
+   Stop the schedule. Remove only clean worktrees created for completed work;
+   preserve blocked work and its branch. Retire the label snapshot after the
+   final report; an interrupted run keeps its snapshot.
+
+## GitHub failures
+
+For transient 5xx responses or transport timeouts, allow at most three retries
+per operation with exponential backoff (2, 4, 8 seconds) plus jitter. Honor a longer
+`Retry-After` or rate-limit reset and pause new dispatch during throttling.
+After an ambiguous write, **read before retrying**: check the PR's queue or
+merge state, issue closure, existing PR or matching comment as appropriate.
+Retry only if the write demonstrably did not take effect and its original
+preconditions still hold. If uncertain or out of retries, preserve the work
+and report the operation and next check. Do not retry failed tests, denied
+permissions or branch protection as network errors. Apply this policy to
+workers as well as the orchestrator.
 
 ## Status reports
 

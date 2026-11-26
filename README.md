@@ -423,25 +423,26 @@ Trigger phrases: `deepen a module`, `find shallow modules`, `run an architecture
 
 **Credit**: forked from Matt Pocock's [`improve-codebase-architecture`](https://github.com/mattpocock/skills) (`mattpocock/skills`), which is interactive by design — it opens an HTML report and grills you through whichever candidate you pick. The exploration heuristics, candidate-card fields and vocabulary discipline are his; this fork replaces the three interactive joints (the pick, the grilling loop, the GUI deliverable) and adds a terminal step. Upstream is MIT-licensed, Copyright (c) Matt Pocock — compatible with this repo's MIT licence.
 
-### `/vibe` — Drive an Epic to Done
+### `/vibe` — Drive an Epic or Label Batch to Done
 
 ```bash
 npx skills@latest add pmatos/skills/vibe
 ```
 
-Triages the open children of an issue marked `epic`, fixes the ones that need work in parallel, and merges each fix.
+Use `/vibe #123` for an epic or `/vibe --label "ready for fix"` for a snapshot of all open issues with that label. Both authorise merging verified fixes into the default branch.
 
 What it does:
-- Finds the epic's children from its sub-issues, recursively, and its task list, and reads the epic's gate criteria as the definition of done.
-- Runs a **read-only triage** of every open child against the current default branch: `done`, `partial`, `open` or `needs-ruling`, with evidence. It closes the children that are already done once their evidence is checked, and asks you about the ones that need a ruling.
-- Launches one agent per unblocked child that needs work, each in its own worktree, up to `--max-parallel` (default: the smaller of 8 and half the cores). Each agent runs `/pm-fix`: `/investigate` opens a PR, `/pm-cr --fix --comment` reviews it, and the run waits for CI.
-- Merges the PRs one at a time as they finish, each when every check on its head is green, rebasing with `/rebase-pr` only if it conflicts. It waits for the default branch's CI first, and **nothing merges onto a red default branch**. Children unblocked by a merge get their agents then.
+- Epic mode discovers sub-issues recursively plus task-list issues. Label mode freezes the issue list for the run and reuses it after interruption.
+- Read-only triage separates completed work, independent fixes, blockers and questions. Rulings do not stall unrelated fixes.
+- Each unblocked issue gets an isolated worktree and a `/pm-fix` worker, bounded by `--max-parallel`. Workers run the repo's probe and conformance suites where defined and hand off the reviewed SHA; they do not chase the default branch.
+- One integration queue verifies the candidate against the latest default branch. It prefers GitHub's merge queue with required `merge_group` checks; otherwise it updates only the front PR and requires strict up-to-date branch checks. Without either guard it leaves the PR open.
+- Transient GitHub failures get bounded backoff; an ambiguous write is reconciled before retry.
 - Posts a short status report on a schedule (`--report-every`, default 1h). Reports come from `gh` and CI and start no work.
-- Ends with a **read-only close-out audit** against each child's criteria and the epic's gate criteria. A child that misses a criterion closes only under a decision rule you stated; an epic that is not fully met gets a gap list, not a closure. Re-running `/vibe` resumes where it stopped.
+- Ends with a read-only audit and a linked report of verified merges, open blockers with next actions, and follow-up work. Only epic runs evaluate and close a parent.
 
 With `ultracode` in your message, triage and the audit run as multi-agent `Workflow` runs, and each `done` verdict gets a second agent that tries to refute it.
 
-Flags: `ultracode`, `--max-parallel N`, `--report-every 1h`.
+Flags: `--label NAME` (instead of an epic), `ultracode`, `--max-parallel N`, `--report-every 1h`.
 
 Trigger phrases: `vibe an epic`, `vibe #N`, `drive epic #N to done`, `solve the epic`, `work through the epic's sub-issues`.
 
