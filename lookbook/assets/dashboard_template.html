@@ -1,0 +1,391 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lookbook</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,400;6..72,500;6..72,600&family=Figtree:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --accent-base:#1F5F66; --accent2-base:#A9586B;
+  --bg:#E7EBEC; --paper:#F5F6F5; --ink:#1E2A33; --muted:#5B6870; --line:#C9D0D2;
+  --accent:var(--accent-base); --accent2:var(--accent2-base); --star:#B8862F;
+  --serif:"Newsreader",Georgia,serif; --sans:"Figtree",system-ui,sans-serif;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#141C21; --paper:#1C262C; --ink:#E4E9EA; --muted:#9AA7AD; --line:#33424A;
+  --accent:color-mix(in oklab,var(--accent-base) 50%,white); --accent2:color-mix(in oklab,var(--accent2-base) 50%,white); --star:#E0B35A;
+}}
+:root[data-theme="dark"]{
+  --bg:#141C21; --paper:#1C262C; --ink:#E4E9EA; --muted:#9AA7AD; --line:#33424A;
+  --accent:color-mix(in oklab,var(--accent-base) 50%,white); --accent2:color-mix(in oklab,var(--accent2-base) 50%,white); --star:#E0B35A;
+}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.55 var(--sans)}
+a{color:var(--accent)}
+button{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.wrap{max-width:1240px;margin:0 auto;padding:0 24px}
+
+/* Hero: the person's palette as a strip of fabric swatches */
+header.hero{padding-block:56px 28px}
+.hero h1{font:500 clamp(2.4rem,5.5vw,4.4rem)/1.02 var(--serif);letter-spacing:-.015em;margin:0 0 18px;max-width:14ch}
+.hero .lede{max-width:62ch;color:var(--muted);margin:0 0 6px}
+.swatches{display:grid;grid-auto-flow:column;grid-auto-columns:1fr;margin:34px 0 10px;border-radius:14px;overflow:hidden;height:150px}
+.sw{position:relative;display:flex;align-items:flex-end;padding:10px 8px;color:#fff;font-size:.78rem;line-height:1.2;min-width:0}
+.sw span{overflow-wrap:anywhere}
+.sw.light{color:#2b2b2b}
+.palette-notes{display:grid;grid-template-columns:1fr 1fr;gap:28px;margin-top:22px}
+.palette-notes p{margin:0;max-width:60ch;font-size:.95rem}
+.palette-notes strong{font-weight:600}
+
+/* Shared basics that go with every outfit */
+.basics{margin-top:40px;padding-top:26px;border-top:1px solid var(--line)}
+.basics h2{font:500 1.7rem/1.1 var(--serif);margin:0 0 6px}
+.basics .intro{color:var(--muted);max-width:64ch;margin:0 0 18px}
+.basics-grid{display:grid;grid-template-columns:minmax(0,220px) repeat(auto-fit,minmax(260px,1fr));gap:22px;align-items:start}
+.basics-grid.nophoto{grid-template-columns:repeat(auto-fit,minmax(260px,1fr))}
+.basics-photo{margin:0}
+.basics-photo button{display:block;width:100%;padding:0;border:0;border-radius:12px;overflow:hidden;cursor:zoom-in;background:var(--paper)}
+.basics-photo img{display:block;width:100%;height:auto}
+.basics-photo figcaption{color:var(--muted);font-size:.8rem;margin-top:6px}
+.basic{display:grid;grid-template-columns:120px 1fr;gap:16px;background:var(--paper);border-radius:12px;padding:14px}
+.basic img{width:120px;height:160px;object-fit:cover;border-radius:8px}
+.basic .role{font:500 1.25rem/1.15 var(--serif);margin:0 0 4px}
+.basic .t{font-size:.92rem;line-height:1.35}
+.basic .meta{color:var(--muted);font-size:.82rem;margin:4px 0 8px}
+.basic .why{font-size:.88rem;margin:0 0 8px}
+.capsule{margin:16px 0 0;font-size:.92rem}
+.with{display:flex;align-items:center;gap:10px;margin:12px 0 0;color:var(--muted);font-size:.86rem}
+.with img{width:38px;height:50px;object-fit:cover;border-radius:5px;background:var(--paper)}
+
+/* Controls */
+nav.controls{position:sticky;top:0;z-index:5;background:var(--bg);border-bottom:1px solid var(--line);margin-top:34px}
+.controls .wrap{display:flex;flex-wrap:wrap;gap:8px 26px;align-items:center;padding-top:12px;padding-bottom:12px}
+.tabs{display:flex;flex-wrap:wrap;gap:4px 20px}
+.tab{background:none;border:0;padding:4px 0;cursor:pointer;font:500 1.15rem/1.2 var(--serif);color:var(--muted);border-bottom:2px solid transparent}
+.tab[aria-pressed="true"]{color:var(--ink);border-color:var(--ink)}
+.tab small{font:500 .75rem var(--sans);color:var(--muted);margin-left:3px}
+.filters{display:flex;gap:8px;margin-left:auto;flex-wrap:wrap}
+.chip{border:1px solid var(--line);background:var(--paper);border-radius:999px;padding:5px 13px;cursor:pointer;font-size:.88rem}
+.chip[aria-pressed="true"]{background:var(--ink);color:var(--paper);border-color:var(--ink)}
+select.chip{appearance:auto}
+
+/* Outfits */
+main{padding-block:28px 80px}
+.look{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(0,1fr);gap:28px;padding:30px 0;border-bottom:1px solid var(--line)}
+.look-img{margin:0;position:sticky;top:72px;align-self:start}
+.look-img .pair{display:grid;grid-auto-flow:column;grid-auto-columns:1fr;gap:10px}
+.look-img button{display:block;width:100%;padding:0;border:0;background:var(--paper);border-radius:12px;overflow:hidden;cursor:zoom-in}
+.look-img img{display:block;width:100%;height:auto}
+.look-img figcaption{color:var(--muted);font-size:.8rem;margin-top:6px}
+.pending{aspect-ratio:3/4;display:grid;place-items:center;background:var(--paper);border-radius:12px;color:var(--muted);text-align:center;padding:20px}
+.look-body h2{font:500 1.9rem/1.1 var(--serif);margin:2px 0 6px}
+.cat{font-size:.85rem;color:var(--muted)}
+.why{margin:10px 0 6px;max-width:58ch}
+.styling{margin:0 0 14px;color:var(--muted);font-size:.92rem}
+.rate{display:flex;align-items:center;gap:14px;margin:6px 0 16px;flex-wrap:wrap}
+.stars{display:flex;gap:2px}
+.star{background:none;border:0;cursor:pointer;font-size:1.45rem;line-height:1;padding:2px;color:var(--line)}
+.star.on{color:var(--star)}
+.fav{border:1px solid var(--line);background:var(--paper);border-radius:999px;padding:5px 13px;cursor:pointer;font-size:.88rem}
+.fav[aria-pressed="true"]{border-color:var(--accent2);color:var(--accent2);font-weight:600}
+ul.items{list-style:none;margin:0;padding:0;display:grid;gap:10px}
+.item{display:grid;grid-template-columns:54px 1fr auto;gap:12px;align-items:center}
+.item img{width:54px;height:72px;object-fit:cover;border-radius:6px;background:var(--paper)}
+.item .t{font-size:.92rem;line-height:1.3}
+.item .b{font-weight:600}
+.item .meta{color:var(--muted);font-size:.8rem}
+.item .note{color:var(--accent2);font-size:.8rem}
+.item .p{text-align:right;font-size:.9rem;white-space:nowrap}
+.item .p a{display:block;font-size:.82rem}
+.total{display:flex;justify-content:space-between;border-top:1px solid var(--line);margin-top:12px;padding-top:10px;font-size:.92rem}
+textarea.notes{width:100%;margin-top:14px;min-height:54px;resize:vertical;border:1px solid var(--line);border-radius:8px;background:var(--paper);color:var(--ink);padding:8px 10px;font:inherit;font-size:.9rem}
+.empty{padding:60px 0;color:var(--muted);max-width:50ch}
+
+/* Shortlist summary */
+.shortlist{background:var(--paper);border-radius:12px;padding:18px 20px;margin:0 0 10px;display:none}
+.shortlist.show{display:block}
+.shortlist h3{font:500 1.25rem var(--serif);margin:0 0 6px}
+.shortlist p{margin:0 0 10px;color:var(--muted);font-size:.9rem}
+.btn{border:1px solid var(--ink);background:var(--ink);color:var(--paper);border-radius:8px;padding:7px 14px;cursor:pointer;font-size:.9rem}
+
+/* Saving ratings for the next round */
+.export{background:var(--paper);border-radius:12px;padding:18px 20px;margin:0 0 30px;display:flex;flex-wrap:wrap;gap:10px 20px;align-items:center}
+.export p{margin:0;max-width:62ch;font-size:.92rem;color:var(--ink)}
+.export .status{color:var(--muted);font-size:.85rem}
+
+/* Lightbox */
+dialog{border:0;padding:0;background:transparent;max-width:96vw;max-height:94vh}
+dialog::backdrop{background:rgba(10,16,20,.86)}
+dialog img{display:block;max-width:96vw;max-height:88vh;border-radius:8px}
+dialog .cap{color:#e9eef0;text-align:center;padding:8px;font-size:.9rem}
+dialog form{position:absolute;top:8px;right:8px}
+dialog .close{background:rgba(0,0,0,.55);color:#fff;border:0;border-radius:999px;width:38px;height:38px;cursor:pointer;font-size:1.2rem}
+
+footer{color:var(--muted);font-size:.82rem;padding:0 0 50px}
+footer p{max-width:70ch}
+
+@media (max-width:860px){
+  .look{grid-template-columns:1fr;gap:18px}
+  .look-img{position:relative;top:0}
+  .palette-notes{grid-template-columns:1fr}
+  .basics-grid,.basics-grid.nophoto{grid-template-columns:1fr}
+  .basics-photo{max-width:240px}
+  .swatches{grid-auto-flow:row;grid-template-columns:repeat(7,1fr);height:auto}
+  .sw{height:80px}
+  .filters{margin-left:0}
+  nav.controls{position:static}
+}
+@media (max-width:520px){
+  .wrap{padding:0 16px}
+  .item{grid-template-columns:46px 1fr}
+  .item img{width:46px;height:62px}
+  .item .p{grid-column:2;text-align:left}
+  .item .p a{display:inline;margin-left:8px}
+}
+@media (prefers-reduced-motion:no-preference){
+  .look-img button img{transition:transform .5s ease}
+  .look-img button:hover img{transform:scale(1.015)}
+}
+</style>
+</head>
+<body>
+<header class="hero wrap">
+  <h1 id="title"></h1>
+  <p class="lede" id="intro"></p>
+  <div class="swatches" id="swatches" aria-label="Colour palette"></div>
+  <div class="palette-notes" id="pnotes"></div>
+  <section class="basics" id="basics" aria-labelledby="basicsTitle" hidden></section>
+</header>
+
+<nav class="controls" aria-label="Filter outfits">
+  <div class="wrap">
+    <div class="tabs" id="tabs"></div>
+    <div class="filters">
+      <button class="chip" id="fFav" aria-pressed="false">Favourites only</button>
+      <button class="chip" id="fUnrated" aria-pressed="false">Not rated yet</button>
+      <select class="chip" id="sort" aria-label="Sort outfits">
+        <option value="default">In category order</option>
+        <option value="rating">Best rated first</option>
+        <option value="price">Lowest total first</option>
+      </select>
+    </div>
+  </div>
+</nav>
+
+<main class="wrap">
+  <section class="shortlist" id="shortlist" aria-live="polite"></section>
+  <div id="list"></div>
+</main>
+
+<footer class="wrap">
+  <section class="export" aria-labelledby="exportTitle">
+    <p id="exportTitle">When you have rated the outfits, save the ratings to a file and give it to Claude. The next round of outfits will build on what you liked.</p>
+    <button class="btn" id="exportBtn">Save ratings to a file</button>
+    <span class="status" id="exportStatus" aria-live="polite"></span>
+  </section>
+  <p id="footnote"></p>
+</footer>
+
+<dialog id="lb" aria-label="Enlarged outfit image">
+  <form method="dialog"><button class="close" aria-label="Close">✕</button></form>
+  <img id="lbImg" alt="">
+  <div class="cap" id="lbCap"></div>
+</dialog>
+
+<script>
+const DATA = /*__DATA__*/null;
+const C = DATA.config;
+const WHO = C.person || '';
+const CATS = ['All', ...C.categories];
+const PREFIX = `lookbook:${C.slug}:r${C.round}:`;
+const store = {
+  get(k, d){ try{ const v = localStorage.getItem(PREFIX+k); return v===null? d : JSON.parse(v); }catch(e){ return d; } },
+  set(k, v){ try{ localStorage.setItem(PREFIX+k, JSON.stringify(v)); }catch(e){} }
+};
+let state = { cat: store.get('cat','All'), fav:false, unrated:false, sort: store.get('sort','default') };
+if(!CATS.includes(state.cat)) state.cat = 'All';
+const ratings = store.get('ratings', {});
+const favs = store.get('favs', {});
+const notes = store.get('notes', {});
+const money = new Intl.NumberFormat('en', {style:'currency', currency:C.currency || 'EUR'});
+const eur = n => money.format(n);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const SHOP = 'View on Zalando';
+const whose = WHO ? esc(WHO) + "'s" : 'Your';
+const wearer = WHO ? esc(WHO) : 'The person';
+
+function isLight(hex){ const n=parseInt(hex.slice(1),16); const r=n>>16,g=n>>8&255,b=n&255; return (r*299+g*587+b*114)/1000 > 150; }
+
+function renderHeader(){
+  document.title = C.title || 'Lookbook';
+  document.getElementById('title').textContent = C.title || 'Lookbook';
+  document.getElementById('intro').textContent = C.intro || '';
+  const best = DATA.palette.best || [];
+  const a = (best[0]||{}).hex || '#1F5F66', b = (best[1]||{}).hex || '#A9586B';
+  document.documentElement.style.setProperty('--accent-base', a);
+  document.documentElement.style.setProperty('--accent2-base', b);
+  const icon = document.createElement('link'); icon.rel = 'icon';
+  icon.href = 'data:image/svg+xml,' + encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="7" fill="${a}"/><rect x="16" width="16" height="32" fill="${b}"/></svg>`);
+  document.head.appendChild(icon);
+  const own = WHO ? `${esc(WHO)}'s own photos` : 'your own photos';
+  const foot = [esc(C.footer), `The outfit photos are ${own} with the clothes edited in by AI. Fit and colour are approximate, so check the product page before ordering. Ratings, favourites and notes stay in this browser until you save them to a file.`].filter(Boolean).join(' ');
+  document.getElementById('footnote').innerHTML = foot + (C.previous_round ? ` <a href="${esc(C.previous_round)}">The previous round is still here.</a>` : '');
+}
+
+function renderPalette(){
+  const p = DATA.palette, el = document.getElementById('swatches');
+  const sw = [...(p.best||[]), ...(p.neutrals||[])];
+  el.innerHTML = sw.map(s =>
+    `<div class="sw${isLight(s.hex)?' light':''}" style="background:${esc(s.hex)}" title="${esc(s.name)}${s.note?': '+esc(s.note):''}"><span>${esc(s.name)}</span></div>`).join('');
+  el.hidden = !sw.length;
+  const parts = [];
+  if(p.summary || p.avoid) parts.push(`<p><strong>Colouring.</strong> ${esc(p.summary)} ${esc(p.avoid)}</p>`);
+  if(p.shape || p.rules) parts.push(`<p><strong>Shape and style.</strong> ${esc(p.shape)} ${esc(p.rules)}</p>`);
+  document.getElementById('pnotes').innerHTML = parts.join('');
+}
+
+function renderBasics(){
+  const B = DATA.basics, el = document.getElementById('basics');
+  if(!B) return;
+  el.hidden = false;
+  const photo = B.photo ? `<figure class="basics-photo"><button data-basics="1" aria-label="Enlarge the photo with the shared basics"><img src="${B.photo.src}" width="${B.photo.w}" height="${B.photo.h}" alt="${wearer} wearing the shared basics"></button><figcaption>The shared basics over one of the outfits.</figcaption></figure>` : '';
+  el.innerHTML = `<h2 id="basicsTitle">${esc(B.title)}</h2>
+    ${B.intro ? `<p class="intro">${esc(B.intro)}</p>` : ''}
+    <div class="basics-grid${B.photo?'':' nophoto'}">${photo}${B.items.map(i => `
+      <div class="basic"><img src="${i.img}" alt="">
+        <div><p class="role">${esc(i.role)}</p>
+          <div class="t"><strong>${esc(i.brand)}</strong> ${esc(i.name)}</div>
+          <div class="meta">${esc(i.colour)}${i.size?' · order '+esc(i.size):''} · ${eur(i.price)}</div>
+          ${i.why ? `<p class="why">${esc(i.why)}</p>` : ''}
+          <a href="${esc(i.url)}" target="_blank" rel="noopener">${SHOP}</a></div></div>`).join('')}</div>
+    <p class="capsule">${B.capsule.outfits===1 ? 'The one outfit that shares them uses' : `The ${B.capsule.outfits} outfits that share them use`} ${B.capsule.count} different pieces, basics included. Buying every piece once would cost ${eur(B.capsule.sum)}.</p>`;
+}
+
+function renderTabs(){
+  const counts = c => c==='All' ? DATA.outfits.length : DATA.outfits.filter(o=>o.cat===c).length;
+  document.getElementById('tabs').innerHTML = CATS.filter(c => counts(c)).map(c =>
+    `<button class="tab" data-cat="${esc(c)}" aria-pressed="${state.cat===c}">${esc(c)}<small>${counts(c)}</small></button>`).join('');
+}
+
+function starRow(id){
+  const r = ratings[id] || 0;
+  return `<div class="stars" role="group" aria-label="Rating">` + [1,2,3,4,5].map(n =>
+    `<button class="star${n<=r?' on':''}" data-id="${esc(id)}" data-n="${n}" aria-label="${n} star${n>1?'s':''}" aria-pressed="${n<=r}">★</button>`).join('') + `</div>`;
+}
+
+function card(o){
+  const img = o.looks.length
+    ? `<div class="pair">${o.looks.map((l,k) => `<button data-zoom="${esc(o.id)}" data-k="${k}" aria-label="Enlarge ${esc(o.name)}, ${l.pose} view"><img src="${l.src}" width="${l.w}" height="${l.h}" alt="${wearer} wearing ${esc(o.name)}, ${l.pose} view" loading="lazy"></button>`).join('')}</div><figcaption>${whose} own photos, edited to show this outfit.</figcaption>`
+    : `<div class="pending">The photos for this outfit are still being made.</div>`;
+  const items = o.items.map(i => `
+    <li class="item">
+      <img src="${i.img}" alt="" loading="lazy">
+      <div class="t"><span class="b">${esc(i.brand)}</span> ${esc(i.name)}<div class="meta">${esc(i.colour)}${i.size?' · order '+esc(i.size):''}</div>${i.note?`<div class="note">${esc(i.note)}</div>`:''}</div>
+      <div class="p">${eur(i.price)}<a href="${esc(i.url)}" target="_blank" rel="noopener">${SHOP}</a></div>
+    </li>`).join('');
+  const shared = o.basics && DATA.basics;
+  const thinks = WHO ? `what ${esc(WHO)} thinks of it` : 'what you think of it';
+  return `<article class="look" id="${esc(o.id)}">
+    <figure class="look-img">${img}</figure>
+    <div class="look-body">
+      <div class="cat">${esc(o.cat)}</div>
+      <h2>${esc(o.name)}</h2>
+      <div class="rate">${starRow(o.id)}<button class="fav" data-fav="${esc(o.id)}" aria-pressed="${!!favs[o.id]}">${favs[o.id]?'♥ Favourite':'♡ Add to favourites'}</button></div>
+      <p class="why">${esc(o.why)}</p>
+      <p class="styling">How to wear it: ${esc(o.styling)}</p>
+      <ul class="items">${items}</ul>
+      ${shared ? `<p class="with">${DATA.basics.items.map(b=>`<img src="${b.img}" alt="">`).join('')}<span>${esc(DATA.basics.with)}</span></p>` : ''}
+      <div class="total"><span>${shared ? 'Total, without the shared basics' : 'Total for the outfit'}</span><strong>${eur(o.total)}</strong></div>
+      <textarea class="notes" data-notes="${esc(o.id)}" placeholder="Notes, e.g. ${thinks}" aria-label="Notes for ${esc(o.name)}">${esc(notes[o.id]||'')}</textarea>
+    </div>
+  </article>`;
+}
+
+function visible(){
+  let L = DATA.outfits.filter(o => state.cat==='All' || o.cat===state.cat);
+  if(state.fav) L = L.filter(o => favs[o.id]);
+  if(state.unrated) L = L.filter(o => !ratings[o.id]);
+  if(state.sort==='rating') L = [...L].sort((a,b)=>(ratings[b.id]||0)-(ratings[a.id]||0));
+  if(state.sort==='price') L = [...L].sort((a,b)=>a.total-b.total);
+  return L;
+}
+
+function renderList(){
+  const L = visible(), el = document.getElementById('list');
+  el.innerHTML = L.length ? L.map(card).join('')
+    : `<p class="empty">${state.fav ? 'No favourites in this view yet. Mark an outfit with “Add to favourites” to see it here.' : 'Every outfit in this view has a rating. Turn off “Not rated yet” to see them all.'}</p>`;
+  renderShortlist();
+}
+
+function renderShortlist(){
+  const F = DATA.outfits.filter(o => favs[o.id]), el = document.getElementById('shortlist');
+  if(!state.fav || !F.length){ el.classList.remove('show'); el.innerHTML=''; return; }
+  el.classList.add('show');
+  const shared = DATA.basics && F.some(o => o.basics);
+  const uniq = new Map(); F.forEach(o => o.items.forEach(i => uniq.set(i.id, i)));
+  if(shared) DATA.basics.items.forEach(i => uniq.set(i.id, i));
+  const sum = [...uniq.values()].reduce((s,i)=>s+i.price,0);
+  el.innerHTML = `<h3>${F.length} favourite outfit${F.length>1?'s':''}</h3>
+    <p>${uniq.size} different pieces, ${eur(sum)} if you bought each piece once${shared?', including the shared basics':''}.</p>
+    <button class="btn" id="copyLinks">Copy all product links</button> <span id="copied" class="cat"></span>`;
+  document.getElementById('copyLinks').onclick = async () => {
+    const line = i => `  ${i.brand} ${i.name} (${i.size||'size?'}): ${i.url}`;
+    const head = shared ? 'Shared basics\n' + DATA.basics.items.map(line).join('\n') + '\n\n' : '';
+    const txt = head + F.map(o => o.name + '\n' + o.items.map(line).join('\n')).join('\n\n');
+    try{ await navigator.clipboard.writeText(txt); document.getElementById('copied').textContent='Links copied.'; }
+    catch(e){ document.getElementById('copied').textContent='Copying is blocked here. Select the links on each card instead.'; }
+  };
+}
+
+function ratingsExport(){
+  const outfits = {};
+  DATA.outfits.forEach(o => { outfits[o.id] = {cat:o.cat, name:o.name, rating:ratings[o.id]||0, fav:!!favs[o.id], note:notes[o.id]||''}; });
+  return {schema:'lookbook-ratings/1', slug:C.slug, round:C.round, exported:new Date().toISOString(), outfits};
+}
+
+function exportRatings(){
+  const out = ratingsExport();
+  const rated = Object.values(out.outfits).filter(r => r.rating || r.fav || r.note).length;
+  const file = `ratings-${C.slug}-round${C.round}.json`;
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([JSON.stringify(out, null, 1)], {type:'application/json'}));
+  a.download = file; document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  document.getElementById('exportStatus').textContent = `Saved ${file} to your downloads folder. ${rated} of ${DATA.outfits.length} outfits have a rating, favourite or note.`;
+}
+
+function openBox(src, alt, cap){
+  document.getElementById('lbImg').src = src; document.getElementById('lbImg').alt = alt;
+  document.getElementById('lbCap').textContent = cap; document.getElementById('lb').showModal();
+}
+
+document.addEventListener('click', e => {
+  const t = e.target.closest('button'); if(!t) return;
+  if(t.dataset.cat){ state.cat=t.dataset.cat; store.set('cat',state.cat); renderTabs(); renderList(); }
+  else if(t.dataset.n){ const id=t.dataset.id, n=+t.dataset.n; ratings[id] = ratings[id]===n ? 0 : n; store.set('ratings',ratings);
+    t.parentElement.outerHTML = starRow(id); }
+  else if(t.dataset.fav){ const id=t.dataset.fav; favs[id]=!favs[id]; store.set('favs',favs);
+    t.setAttribute('aria-pressed', favs[id]); t.textContent = favs[id]?'♥ Favourite':'♡ Add to favourites'; renderShortlist(); }
+  else if(t.dataset.zoom){ const o=DATA.outfits.find(x=>x.id===t.dataset.zoom), l=o.looks[+t.dataset.k];
+    openBox(l.src, t.querySelector('img').alt, `${o.cat}: ${o.name} (${l.pose} view)`); }
+  else if(t.dataset.basics){ openBox(DATA.basics.photo.src, t.querySelector('img').alt, 'The shared basics'); }
+  else if(t.id==='fFav'){ state.fav=!state.fav; t.setAttribute('aria-pressed',state.fav); renderList(); }
+  else if(t.id==='fUnrated'){ state.unrated=!state.unrated; t.setAttribute('aria-pressed',state.unrated); renderList(); }
+  else if(t.id==='exportBtn'){ exportRatings(); }
+});
+document.addEventListener('input', e => {
+  if(e.target.dataset.notes){ notes[e.target.dataset.notes]=e.target.value; store.set('notes',notes); }
+});
+document.getElementById('sort').value = state.sort;
+document.getElementById('sort').addEventListener('change', e => { state.sort=e.target.value; store.set('sort',state.sort); renderList(); });
+document.getElementById('lb').addEventListener('click', e => { if(e.target.id==='lb') e.target.close(); });
+
+renderHeader(); renderPalette(); renderBasics(); renderTabs(); renderList();
+</script>
+</body>
+</html>

@@ -466,6 +466,28 @@ Trigger phrases: `ask about the pending rulings`, `ask the pending questions`, `
 
 **Requires**: Claude Code (it uses `AskUserQuestion`) and [`gh`](https://cli.github.com/) with write access.
 
+### `/lookbook` — Outfits Chosen for a Real Person
+
+```bash
+npx skills@latest add pmatos/skills/lookbook
+```
+
+Picks outfits from Zalando for a real person, based on their photos, colouring, sizes and taste. It shows each outfit on that person, and collects everything in a local dashboard where they rate the looks.
+
+What it does:
+- Asks for sizes, the Zalando shop, categories, hard limits (such as flats only, or no tight necklines) and favourite colours.
+- Analyses the person's colouring and shape from daylight photos and writes a palette that the user confirms before any shopping.
+- Searches Zalando in the user's own browser, filtered to the person's size, and checks stock on each product page. It only browses: no cart, wishlist or purchases.
+- Builds outfits, then makes try-on photos by editing the person's own photos with the Codex CLI. Each edit gets exactly three images: the base photo, a face crop and a numbered product sheet. It never generates a person from scratch.
+- Builds a self-contained `dashboard.html` with the palette, every outfit with its photos and product links, star ratings, favourites, a shopping summary and a "Save ratings to a file" button.
+- Runs a next round from the saved ratings, and can give every outfit the same coat and shoes, so that those are bought once.
+
+The photos never leave the machine except to Codex. The skill asks for consent in every session before sending them, and it never publishes the dashboard.
+
+Trigger phrases: `pick outfits for me`, `build a lookbook`, `do a colour analysis from my photos`, `choose outfits on Zalando`.
+
+**Requires**: Python 3.10+, ImageMagick 7 (`magick`), the [Codex CLI](https://github.com/openai/codex) logged in, and browser access to Zalando, for example through Claude in Chrome.
+
 ## License
 
 MIT
