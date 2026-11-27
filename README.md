@@ -466,6 +466,25 @@ Trigger phrases: `ask about the pending rulings`, `ask the pending questions`, `
 
 **Requires**: Claude Code (it uses `AskUserQuestion`) and [`gh`](https://cli.github.com/) with write access.
 
+### `/podcast` — Conversational Podcast Episodes
+
+```bash
+npx skills@latest add pmatos/skills/podcast
+```
+
+Turns a topic, a set of URLs or a file into a mastered podcast episode with two or three voices, in the spirit of NotebookLM's audio overviews.
+
+What it does:
+- Researches the topic, or reads your sources, into numbered notes. Every claim in the script must trace back to them.
+- Writes an outline, then a conversational `script.json` with distinct personas, interruptions, disagreement and sparse Eleven v4 audio tags. A fresh-context critic reviews the script against a checklist before any audio is made.
+- Validates the script and estimates its size. It asks before rendering only when the script is longer than the configured limit, which is about 15 minutes by default.
+- Renders the speech with ElevenLabs Text to Dialogue (Eleven v4) in stitched requests, adds a generated intro and outro theme, and masters the episode to -16 LUFS. It also writes a transcript and show notes.
+- Caches each request by content hash, so re-runs and edits only pay for what changed.
+
+Trigger phrases: `make a podcast about ...`, `turn this article into a podcast`, `audio overview`.
+
+**Requires**: Python 3.11+, `ffmpeg`, and an ElevenLabs API key in `ELEVENLABS_API_KEY` or `~/.config/podcast/config.json`. The key needs Text to Speech access, and Music access for the theme music, which needs a paid plan. Voices read and User read are optional.
+
 ## License
 
 MIT
