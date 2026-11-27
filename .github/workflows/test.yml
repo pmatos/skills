@@ -6,6 +6,7 @@ on:
       - "review-offline/**"
       - "pm-cr/**"
       - "pm-risk/**"
+      - "lookbook/**"
       - ".github/workflows/test.yml"
   push:
     branches: [main]
@@ -13,6 +14,7 @@ on:
       - "review-offline/**"
       - "pm-cr/**"
       - "pm-risk/**"
+      - "lookbook/**"
       - ".github/workflows/test.yml"
 
 # Least privilege: the tests only read the checked-out tree.
@@ -40,4 +42,4 @@ jobs:
         uses: astral-sh/setup-uv@v10.3.3
 
       - name: Test
-        run: uv run --with pytest pytest review-offline/tests pm-cr/tests pm-risk/tests
+        run: uv run --with pytest pytest review-offline/tests pm-cr/tests pm-risk/tests lookbook/tests
