@@ -41,10 +41,12 @@ window.zproduct = (slug) => new Promise((res) => {
         const o = Array.isArray(v.offers) ? v.offers[0] : v.offers;
         return { size: v.size || v.name || '', inStock: /InStock/.test((o && o.availability) || ''), price: o && o.price };
       }) : [];
+      // Detail panels are collapsed, so innerText is empty; textContent still has the text.
+      const clean = (el) => el.textContent.replace(/\s+/g, ' ').trim();
       const details = [];
       d.querySelectorAll('dt').forEach((dt) => {
         const dd = dt.nextElementSibling;
-        if (dd) details.push(dt.innerText.trim().replace(/:$/, '') + ': ' + dd.innerText.trim());
+        if (dd) details.push(clean(dt).replace(/:$/, '') + ': ' + clean(dd));
       });
       const imgs = pg ? (Array.isArray(pg.image) ? pg.image : [pg.image]).filter(Boolean).slice(0, 4) : [];
       done({

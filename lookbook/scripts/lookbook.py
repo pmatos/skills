@@ -159,12 +159,18 @@ class Project:
             raise LookbookError(f"item {iid} is used but missing from data/items.tsv") from None
 
     def sheet_items(self, outfit: dict) -> list:
-        extra = []
-        if outfit.get("basics"):
-            extra = [b["id"] for b in self.basics.get("items", []) if b.get("in_photo")]
-        return list(outfit["items"]) + extra
+        basics = self.basics.get("items", [])
+        if outfit.get("show_basics"):
+            extra = [b["id"] for b in basics]
+        elif outfit.get("basics"):
+            extra = [b["id"] for b in basics if b.get("in_photo")]
+        else:
+            extra = []
+        return list(outfit["items"]) + [i for i in extra if i not in outfit["items"]]
 
     def hides_basics(self, outfit: dict) -> bool:
+        if outfit.get("show_basics"):
+            return False
         return bool(outfit.get("basics")) and any(
             not b.get("in_photo") for b in self.basics.get("items", [])
         )
@@ -179,14 +185,19 @@ def problems(p: Project) -> list[str]:
     cats = set(p.config["categories"])
     seen = set()
     for o in p.outfits:
-        for key in ("id", "cat", "name", "items", "why", "styling"):
+        required = (
+            ("id", "items", "styling")
+            if o.get("hidden")
+            else ("id", "cat", "name", "items", "why", "styling")
+        )
+        for key in required:
             if key not in o:
                 out.append(f"outfit {o.get('id', '?')}: missing '{key}'")
         oid = o.get("id")
         if oid in seen:
             out.append(f"outfit {oid}: duplicate id")
         seen.add(oid)
-        if o.get("cat") not in cats:
+        if not o.get("hidden") and o.get("cat") not in cats:
             out.append(f"outfit {oid}: category '{o.get('cat')}' is not in lookbook.json")
         if "_" in str(oid):
             out.append(f"outfit {oid}: ids must not contain '_'")
@@ -373,7 +384,12 @@ def cmd_tryon(args) -> None:
     p = Project(Path(args.dir))
     if not shutil.which("codex"):
         raise LookbookError("the Codex CLI (`codex`) is not on PATH")
-    jobs = args.jobs or p.path("prompts", "pending.txt").read_text().split()
+    pending = p.path("prompts", "pending.txt")
+    if not args.jobs and not pending.exists():
+        raise LookbookError(
+            "no jobs given and prompts/pending.txt is missing. Run `prompts` first."
+        )
+    jobs = args.jobs or pending.read_text().split()
     p.path("tryon").mkdir(exist_ok=True)
     with ThreadPoolExecutor(max_workers=args.parallel) as pool:
         for line in pool.map(lambda j: codex_job(p, j), jobs):
@@ -435,6 +451,8 @@ def build_payload(p: Project, with_images: bool = True) -> dict:
         bases[pose] = image_size(bp) if with_images and bp.exists() else None
     outfits = []
     for o in p.outfits:
+        if o.get("hidden"):
+            continue
         looks = []
         for pose in poses:
             lk = look_payload(p, f"{o['id']}_{pose}", bases[pose]) if with_images else None

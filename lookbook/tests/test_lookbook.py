@@ -8,10 +8,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 import lookbook as lb  # noqa: E402
 
 ITEMS = [
-    ("1", "Acme", "V-neck jumper", "teal", "49.99"),
+    ("1", "Acme", "Linen shirt", "olive", "49.99"),
     ("2", "Acme", "Wide-leg jeans", "dark blue", "59.95"),
     ("3", "Beta", "Leather trainers", "white", "89.00"),
-    ("4", "Beta", "Wool coat", "navy", "149.00"),
+    ("4", "Beta", "Suede jacket", "brown", "149.00"),
     ("5", "Gamma", "Sheer tights", "black", "9.99"),
 ]
 
@@ -25,7 +25,7 @@ def project(tmp_path):
         {
             "id": "CA1",
             "cat": "Casual",
-            "name": "Teal",
+            "name": "Olive",
             "items": [1, 2],
             "why": "w",
             "styling": "Loose.",
@@ -66,8 +66,8 @@ def test_init_keeps_existing_config(project):
 
 
 def test_garment_words():
-    assert lb.garment("ONLJULLES high-waist wide-leg jeans") == "jeans"
-    assert lb.garment("Stan Smith trainers") == "trainers"
+    assert lb.garment("High-waist straight jeans") == "jeans"
+    assert lb.garment("Retro court trainers") == "trainers"
     assert lb.garment("Long cardigan with pockets") == "cardigan"
     assert lb.garment("Something odd") == "item"
 
@@ -82,14 +82,14 @@ def test_sheet_items_add_only_basics_in_photo(project):
 
 def test_edit_prompt_lists_panels_and_rules(project):
     cfg = json.loads((project / "lookbook.json").read_text())
-    cfg["rules"] = ["Every top keeps an open neckline."]
-    cfg["base_note"] = "The socks are replaced by the shoes."
+    cfg["rules"] = ["Every top has sleeves."]
+    cfg["base_note"] = "The slippers are replaced by the shoes."
     (project / "lookbook.json").write_text(json.dumps(cfg))
     p = lb.Project(project)
     ca1, fe1 = p.outfits
     text = lb.edit_prompt(p, ca1, "front", project / "tryon/CA1_front.png")
     assert "- Panel 3: the trainers — Beta Leather trainers, colour white." in text
-    assert "open neckline" in text and "socks are replaced" in text
+    assert "has sleeves" in text and "slippers are replaced" in text
     assert lb.NO_OUTER in text
     assert str(project / "tryon/CA1_front.png") in text
     fe = lb.edit_prompt(p, fe1, "threequarter", project / "x.png")
@@ -146,7 +146,7 @@ def test_ratings_import(project, tmp_path_factory, capsys):
         "slug": "sam-s-lookbook-winter",
         "round": 1,
         "outfits": {
-            "CA1": {"cat": "Casual", "name": "Teal", "rating": 2, "fav": False, "note": ""},
+            "CA1": {"cat": "Casual", "name": "Olive", "rating": 2, "fav": False, "note": ""},
             "FE1": {"cat": "Festive", "name": "Night", "rating": 5, "fav": True, "note": "Love it"},
         },
     }
@@ -163,3 +163,32 @@ def test_ratings_rejects_other_files(project, tmp_path_factory):
     f.write_text("{}")
     with pytest.raises(SystemExit, match="not a lookbook ratings export"):
         lb.main(["ratings", str(project), str(f)])
+
+
+def test_hidden_basics_outfit_shows_everything_but_stays_off_the_dashboard(project):
+    outfits = json.loads((project / "data/outfits.json").read_text())
+    outfits.append(
+        {
+            "id": "BASICS",
+            "items": [1, 2],
+            "styling": "Jacket worn open.",
+            "hidden": True,
+            "show_basics": True,
+        }
+    )
+    (project / "data/outfits.json").write_text(json.dumps(outfits))
+    p = lb.Project(project)
+    hidden = p.outfits[-1]
+    assert p.sheet_items(hidden) == [1, 2, 4, 3]
+    assert not p.hides_basics(hidden)
+    assert lb.NO_OUTER not in lb.edit_prompt(p, hidden, "front", project / "x.png")
+    assert not [x for x in lb.problems(p) if "BASICS" in x]
+    payload = lb.build_payload(p, with_images=False)
+    assert [o["id"] for o in payload["outfits"]] == ["CA1", "FE1"]
+    assert payload["basics"]["capsule"]["outfits"] == 1
+
+
+def test_tryon_without_pending_list_explains(project, monkeypatch):
+    monkeypatch.setattr(lb.shutil, "which", lambda _: "/usr/bin/codex")
+    with pytest.raises(SystemExit, match="Run `prompts` first"):
+        lb.main(["tryon", str(project)])

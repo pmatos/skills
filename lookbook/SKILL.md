@@ -4,7 +4,7 @@ description: This skill should be used when the user asks to "pick outfits for m
 argument-hint: "[project dir] [new | next-round]"
 user-invocable: true
 allowed-tools:
-  - Bash(python3 ${CLAUDE_SKILL_DIR}/scripts/lookbook.py *)
+  - Bash(python3 "${CLAUDE_SKILL_DIR}/scripts/lookbook.py" *)
   - Bash(magick *)
 ---
 
@@ -56,7 +56,7 @@ Otherwise ask, with `AskUserQuestion`, for anything that the user has not alread
 - The Zalando shop to use, for example `en.zalando.de` or `www.zalando.co.uk`, and the department.
 - Categories and how many outfits in each. The default is six each for Casual, Smart casual, Sporty and Festive.
 - Season, occasion and budget.
-- Hard limits, for example no heels, trousers rather than dresses, or no tight necklines.
+- Hard limits, for example no shorts, no synthetic fabrics, or sleeves on every top.
 - Colours that they love or never wear.
 
 Then create the project:
@@ -65,7 +65,7 @@ Then create the project:
 python3 "${CLAUDE_SKILL_DIR}/scripts/lookbook.py" init <dir> --person "<name>" --season <season> --domain <shop domain>
 ```
 
-Edit `lookbook.json`: title, intro, categories, currency, and `rules`. The `rules` are lines that every try-on prompt must obey, such as "Every top keeps an open neckline (V-neck, scoop or open collar)." Set the `poses` text to match the base photos.
+Edit `lookbook.json`: title, intro, categories, currency, and `rules`. The `rules` are lines that every try-on prompt must obey, such as "Every top has sleeves." Set the `poses` text to match the base photos.
 
 ### 2. Photos
 
@@ -77,7 +77,7 @@ Ask for photos in daylight, without filters:
 
 Crop a tight, sharp close-up of the face from one photo and save it as `photos/face.jpg`. Codex uses it to keep the face accurate.
 
-Look at every photo yourself. If something in a base photo will not change with the outfit, such as a watch, socks or a door, name it in `keep` or `base_note` in `lookbook.json`.
+Look at every photo yourself. If something in a base photo will not change with the outfit, such as a watch, glasses or a door, name it in `keep` or `base_note` in `lookbook.json`.
 
 ### 3. Colour and shape analysis
 
@@ -118,7 +118,7 @@ python3 "${CLAUDE_SKILL_DIR}/scripts/lookbook.py" tryon <dir> --parallel 4
 
 Each job takes a few minutes, so run it in the background. Each job sends exactly three images to Codex: the base photo, the face crop and the product sheet. Codex's image tool accepts only a few reference images, and extra images get dropped or merged unpredictably.
 
-Then review every image, following `references/tryon.md`. Check the face at crop scale, the colours, the necklines and any other rule, and look for extra clothes that should not be there. For a bad image, make the `styling` text in `outfits.json` more precise, then run `reject`, `prompts` and `tryon` for that job again. Never accept a result where the face differs from the person.
+Then review every image, following `references/tryon.md`. Check the face at crop scale, the colours, the fit and every rule, and look for extra clothes that should not be there. For a bad image, make the `styling` text in `outfits.json` more precise, then run `reject`, `prompts` and `tryon` for that job again. Never accept a result where the face differs from the person.
 
 ### 7. Dashboard
 
@@ -149,11 +149,12 @@ Study what scored high and low, and read the notes. Say what you learned, and as
 
 Then start the round:
 
-1. Move `dashboard.html` and `web/` into `archive/round<N>/`. In the archived `dashboard.html`, replace `"web/` with `"../../web/` in the image paths, or copy `web/` along with it.
+1. Copy `dashboard.html`, `web/` and `data/outfits.json` into `archive/round<N>/`. The archived page uses relative image paths, so it keeps working with its own copy of `web/`. Do not edit its paths.
 2. In `lookbook.json`, raise `round` by one and set `previous_round` to `archive/round<N>/dashboard.html`.
-3. Give the new outfits new ids, so ratings never mix between rounds.
+3. Start a new `data/outfits.json`. Keep `items.tsv`, `notes.json` and `products/`, because new outfits can reuse products.
+4. Give the new outfits new ids, so ratings and try-on photos never mix between rounds.
 
-**Shared basics.** If the person wants to buy fewer pieces, choose one coat or jacket and one pair of shoes that go with most outfits. Put them in `data/basics.json` and set `"basics": true` on each outfit that uses them. Shoes have `in_photo: true` and appear in every try-on photo. Outerwear has `in_photo: false`: the photos then show the outfit without it, and the dashboard lists it once at the top. To show the basics together, add an outfit, try it on, and set `photo` in `basics.json` to that job id, for example `BASICS_front`.
+**Shared basics.** If the person wants to buy fewer pieces, choose one coat or jacket and one pair of shoes that go with most outfits. Put them in `data/basics.json` and set `"basics": true` on each outfit that uses them. Shoes have `in_photo: true` and appear in every try-on photo. Outerwear has `in_photo: false`: the photos then show the outfit without it, and the dashboard lists it once at the top. To show the basics together, add a hidden outfit with `show_basics: true`, as `references/tryon.md` describes.
 
 Then repeat steps 4 to 7 for the new outfits.
 

@@ -24,7 +24,7 @@ The prompt tells Codex to copy the final PNG to `tryon/<OUTFIT>_<pose>.png`. The
 - Full body, head to feet, plain background, even daylight.
 - Fitted, plain clothes, so that new clothes can replace them cleanly.
 - The same framing for every pose. The dashboard skips any result whose shape differs from its base photo by more than 12 percent, because that usually means Codex cropped or recomposed the image.
-- Name anything that must stay, such as a watch or glasses, in `keep` in `lookbook.json`. Name anything that must change, such as socks that the shoes replace, in `base_note`.
+- Name anything that must stay, such as a watch or glasses, in `keep` in `lookbook.json`. Name anything that must change, such as slippers that the shoes replace, in `base_note`.
 
 ## Writing good styling text
 
@@ -35,7 +35,7 @@ The `styling` field of an outfit goes into the prompt as "How it is worn". Make 
 - Say rolled or full length for trousers.
 - Say which layer is on top.
 
-Rules that apply to every outfit, such as necklines, go in `rules` in `lookbook.json`, not in each outfit.
+Rules that apply to every outfit, such as "no sleeveless tops", go in `rules` in `lookbook.json`, not in each outfit.
 
 ## Reviewing results
 
@@ -50,22 +50,22 @@ Adjust the crop to where the face is in the base photo. Check:
 - **Face.** Is it the same person, with the same expression, skin and hair? Reject any change.
 - **Body.** Is the body the same shape and size? Reject slimming or reshaping.
 - **Garments.** Do colour, fabric, length and neckline match the product sheet? Is anything from a panel's model, such as a bag or scarf, wrongly added?
-- **Rules.** Does every rule hold? Necklines are the most common failure: collars come out buttoned up and V-necks come out shallow.
+- **Rules.** Does every rule hold? Small details from `styling` fail most often, such as how many buttons are open or whether a top is tucked in.
 - **Shoes and background.** Are they right, and is the room unchanged?
 
 To redo a job, make `styling` more precise, then:
 
 ```bash
-python3 "${CLAUDE_SKILL_DIR}/scripts/lookbook.py" reject <dir> SC6_front SC6_threequarter
-python3 "${CLAUDE_SKILL_DIR}/scripts/lookbook.py" prompts <dir> SC6
-python3 "${CLAUDE_SKILL_DIR}/scripts/lookbook.py" tryon <dir> SC6_front SC6_threequarter
+python3 "${CLAUDE_SKILL_DIR}/scripts/lookbook.py" reject <dir> SC2_front SC2_threequarter
+python3 "${CLAUDE_SKILL_DIR}/scripts/lookbook.py" prompts <dir> SC2
+python3 "${CLAUDE_SKILL_DIR}/scripts/lookbook.py" tryon <dir> SC2_front SC2_threequarter
 ```
 
 `reject` keeps the old images in `archive/rejected/` for comparison.
 
 ## Shared basics in photos
 
-When outfits share basics (see `data-format.md`), basics with `in_photo: true` are added to every sheet, so the shoes appear in every photo. When any basic has `in_photo: false`, the prompt says that the person wears no coat or jacket. To show the basics together, add an extra outfit such as `BASICS` with a simple outfit plus the outer layer, try it on, and set `"photo": "BASICS_front"` in `basics.json`. Use it as a rough check of proportions, such as where a long cardigan ends under a coat. It is not a fitting.
+When outfits share basics (see `data-format.md`), basics with `in_photo: true` are added to every sheet, so the shoes appear in every photo. When any basic has `in_photo: false`, the prompt says that the person wears no coat or jacket. To show the basics together, add an outfit such as `{"id": "BASICS", "items": [12, 31], "styling": "Jacket worn open.", "hidden": true, "show_basics": true}`. `show_basics` puts every basic on the sheet, outer layer included. `hidden` keeps the outfit off the dashboard. Run `prompts BASICS` and `tryon BASICS_front`, then set `"photo": "BASICS_front"` in `basics.json`. Use it as a rough check of proportions, such as whether a long top shows below the jacket. It is not a fitting.
 
 ## Cost and time
 

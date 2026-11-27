@@ -38,7 +38,7 @@ The whole folder is private. Keep it out of any repository that gets pushed.
 | `poses` | Map from pose name to a sentence that describes the pose. There must be a `photos/<pose>.jpg` for each pose. |
 | `keep` | What must stay as in the base photo. |
 | `rules` | List of sentences that every try-on prompt adds. |
-| `base_note` | One sentence about the base photos, such as "The black socks are replaced by the shoes." |
+| `base_note` | One sentence about the base photos, such as "The house slippers are replaced by the shoes." |
 | `footer` | Where and when prices were read. |
 | `previous_round` | Relative link to the archived dashboard of the last round. |
 
@@ -57,7 +57,7 @@ The name decides the garment word in the prompt, such as "jumper", "jeans" or "t
 ## notes.json
 
 ```json
-{"12": {"size": "40 or 42", "note": "Runs small, reviews say."}}
+{"12": {"size": "M or L", "note": "Runs small, reviews say."}}
 ```
 
 Both fields are optional. The dashboard shows `size` as "order …" and `note` below the product.
@@ -69,10 +69,10 @@ Both fields are optional. The dashboard shows `size` as "order …" and `note` b
   {
     "id": "CA1",
     "cat": "Casual",
-    "name": "Teal jumper and dark denim",
+    "name": "Olive overshirt and chinos",
     "items": [12, 31],
-    "why": "Teal is their strongest colour, and dark wide-leg jeans give a long line.",
-    "styling": "Jumper worn loose over the jeans.",
+    "why": "Olive is their strongest colour, and the straight chinos balance the boxy overshirt.",
+    "styling": "Overshirt worn open over a plain T-shirt.",
     "basics": true
   }
 ]
@@ -81,6 +81,8 @@ Both fields are optional. The dashboard shows `size` as "order …" and `note` b
 - `id` must be unique and must not contain `_`. Use new ids in every round.
 - `items` lists products top to toe. Leave out the shared basics. `lookbook.py` adds the basics that appear in photos.
 - `basics` is optional. Set it to `true` when the outfit uses the shared basics.
+- `hidden: true` keeps an outfit off the dashboard but still builds its prompts and try-on photos. A hidden outfit needs only `id`, `items` and `styling`.
+- `show_basics: true` puts every shared basic on the sheet, including the ones with `in_photo: false`. Use it with `hidden` for the photo that shows the basics together.
 
 ## basics.json
 
@@ -88,10 +90,10 @@ Both fields are optional. The dashboard shows `size` as "order …" and `note` b
 {
   "title": "Worn with every outfit",
   "intro": "Every outfit below goes with these two pieces, so they are bought once.",
-  "with": "Worn with the shared trainers. The coat goes on top outside.",
+  "with": "Worn with the shared boots. The jacket goes on top outside.",
   "items": [
-    {"id": 40, "role": "The coat", "why": "Navy goes with every colour in the palette.", "in_photo": false},
-    {"id": 41, "role": "The trainers", "why": "Flat, and they work with jeans and satin.", "in_photo": true}
+    {"id": 40, "role": "The jacket", "why": "Chocolate brown goes with every colour in the palette.", "in_photo": false},
+    {"id": 41, "role": "The boots", "why": "Low suede boots that work with chinos and dark jeans.", "in_photo": true}
   ],
   "photo": "BASICS_front"
 }
@@ -103,12 +105,12 @@ Both fields are optional. The dashboard shows `size` as "order …" and `note` b
 
 ```json
 {
-  "summary": "Soft, cool-neutral colouring with low contrast.",
-  "shape": "Balanced shoulders and hips. Open necklines and long lines suit them.",
-  "best": [{"name": "Teal", "hex": "#1F5F66", "note": "Hero colour"}],
-  "neutrals": [{"name": "Soft navy", "hex": "#25324A"}],
-  "avoid": "Optic white and pure black next to the face.",
-  "rules": "Flats only. Mostly trousers."
+  "summary": "Warm, deep colouring with medium contrast.",
+  "shape": "Broad shoulders and a long torso. Structured layers and straight trousers suit them.",
+  "best": [{"name": "Olive", "hex": "#5E6B2F", "note": "Hero colour"}],
+  "neutrals": [{"name": "Chocolate", "hex": "#4A3328"}],
+  "avoid": "Icy pastels and cool greys next to the face.",
+  "rules": "No shorts. Natural fibres only."
 }
 ```
 

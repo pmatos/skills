@@ -34,7 +34,7 @@ Use neutral words and say what works, not what is wrong. Note:
 - which features are good to show, such as ankles or collarbones
 - height and leg proportion, in broad terms only
 
-Turn this into a few rules in `shape`, for example "Open necklines, long vertical lines and straight or wide trousers suit them best." Put the user's hard limits from the intake, such as "flats only", into `rules`. The dashboard shows both.
+Turn this into a few rules in `shape`, for example "Structured layers and straight trousers suit them best." Put the user's hard limits from the intake, such as "no shorts", into `rules`. The dashboard shows both.
 
 ## Checking with the user
 

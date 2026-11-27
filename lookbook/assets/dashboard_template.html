@@ -9,7 +9,7 @@
 <link href="https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,400;6..72,500;6..72,600&family=Figtree:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
 :root{
-  --accent-base:#1F5F66; --accent2-base:#A9586B;
+  --accent-base:#3D5A80; --accent2-base:#8D5B4C;
   --bg:#E7EBEC; --paper:#F5F6F5; --ink:#1E2A33; --muted:#5B6870; --line:#C9D0D2;
   --accent:var(--accent-base); --accent2:var(--accent2-base); --star:#B8862F;
   --serif:"Newsreader",Georgia,serif; --sans:"Figtree",system-ui,sans-serif;
@@ -226,7 +226,7 @@ function renderHeader(){
   document.getElementById('title').textContent = C.title || 'Lookbook';
   document.getElementById('intro').textContent = C.intro || '';
   const best = DATA.palette.best || [];
-  const a = (best[0]||{}).hex || '#1F5F66', b = (best[1]||{}).hex || '#A9586B';
+  const a = (best[0]||{}).hex || '#3D5A80', b = (best[1]||{}).hex || '#8D5B4C';
   document.documentElement.style.setProperty('--accent-base', a);
   document.documentElement.style.setProperty('--accent2-base', b);
   const icon = document.createElement('link'); icon.rel = 'icon';

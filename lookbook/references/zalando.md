@@ -26,9 +26,9 @@ The JavaScript tool times out after about 45 seconds. Start `zverifyAll` and ret
 Filter by size in the path, then add a query:
 
 ```text
-/women/__size-L/?q=v-neck+wool+jumper
-/womens-shoes/__size-40/?q=white+leather+trainers
-/men/__size-M/?q=merino+crew+neck
+/women/__size-S/?q=linen+shirt
+/womens-shoes/__size-38/?q=suede+ankle+boots
+/men/__size-XL/?q=merino+crew+neck
 ```
 
 - Confirm that the size filter works the first time on a new domain or department: the result count should drop. If it does not, find the size filter in the page's own filter links and copy its URL shape.
@@ -39,9 +39,9 @@ Filter by size in the path, then add a query:
 
 1. Collect candidate slugs from several searches.
 2. Run `zverifyAll` over them. Keep a product only if the person's size is in `inStock`. A size that is close but not listed is not in stock.
-3. Read `details` for material, fit and neckline. These matter for rules like "no tight necklines".
+3. Read `details` for material, fit and neckline. These matter for rules like "natural fibres only".
 4. Look at the images. Render the candidate images as a grid overlay in the page and take a screenshot, or download them and look at a montage. Colour names such as "dark blue" or "berry" are unreliable, and some products are photographed on a model with other clothes.
-5. If a brand runs small or large, or reviews mention a fit problem, write the size advice in `notes.json`, for example "40 or 42; runs small".
+5. If a brand runs small or large, or reviews mention a fit problem, write the size advice in `notes.json`, for example "M or L; runs small".
 
 ## Recording a product
 
